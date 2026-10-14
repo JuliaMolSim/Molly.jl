@@ -83,13 +83,17 @@ function partitioned_workspace_energy_view(workspace::PartitionedReducedPotentia
 end
 
 """
-    ActiveThermoState(space::ExtendedStateSpace, first_state=1)
+    ActiveThermoState(space, first_state=1; loggers=())
 
-Mutable active state for simulations over an `ExtendedStateSpace`.
+Mutable active state for simulations over the thermodynamic states of a state space,
+such as the `state_space` field of a [`TSSState`](@ref) or an [`AWHState`](@ref).
 
 The active state owns a simulation system and integrator corresponding to the
-current thermodynamic state index. It can be retargeted with `set_active_state!`
-without reallocating the active wrapper.
+current thermodynamic state index, starting at `first_state`, and is moved between
+states without reallocating the active wrapper.
+`loggers` are attached to the active system.
+For example, explicit active states can be given as `replica_active_states` to
+[`TSSSimulation`](@ref).
 """
 mutable struct ActiveThermoState{S, I}
     active_idx::Int

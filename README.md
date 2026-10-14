@@ -61,7 +61,7 @@ Features not yet implemented include:
 It is recommended to run on the current stable Julia release for the best performance.
 Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
-If you want to run on a GPU you will also need to install the appropriate package, e.g. `add CUDA`.
+If you want to run on a GPU you will also need to install the appropriate package for your system, e.g. `add CUDA`.
 
 ## Usage
 

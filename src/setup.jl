@@ -20,7 +20,7 @@ Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
-Can not be used if one or more dimensions has infinite boundaries.
+Cannot be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer,
                      boundary;
@@ -76,7 +76,7 @@ The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
 The keyword argument `aligned` determines whether the bonds all point the same direction
 (`true`) or random directions (`false`).
-Can not be used if one or more dimensions has infinite boundaries.
+Cannot be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer,
                          boundary,
@@ -450,10 +450,10 @@ end
     System(coordinate_file, force_field; <keyword arguments>)
 
 Read a coordinate file in a file format readable by Chemfiles and apply a
-force field to it.
+force field, such as a [`MolecularForceField`](@ref), to it.
 
-Atom names should exactly match residue templates - no searching of residue
-templates is carried out.
+Each residue is matched to a residue template of the force field, and a
+[`Molly.MissingResidueTemplateError`](@ref) is thrown if no template matches.
 
 # Arguments
 - `boundary=nothing`: the bounding box used for simulation, read from the
@@ -470,7 +470,7 @@ templates is carried out.
     higher precision is useful, such as the potential energy and the virial.
     `Float64` by default, or `float_type` on backends that do not support
     `Float64` such as Metal.
-- `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
+- `dist_cutoff=1.0u"nm"`: cutoff distance for the non-bonded interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     classical neighbor lists every few steps.
 - `constraints=:none`: which constraints to apply during the simulation, options
@@ -491,10 +491,10 @@ templates is carried out.
 - `lj_cutoff=nothing`: the cutoff method to use for the Lennard-Jones interaction,
     by default uses `DistanceCutoff(dist_cutoff)`. The cutoff distance must not exceed
     `dist_cutoff`. If the long-range Lennard-Jones dispersion correction is being used,
-    this must be a `DistanceCutoff`.
+    this must be a [`DistanceCutoff`](@ref).
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
-    dispersion correction. Defaults to the force field setting, which defaults
-    to `true`.
+    dispersion correction, [`LJDispersionCorrection`](@ref). Defaults to the force
+    field setting, which defaults to `true`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.
@@ -1685,7 +1685,7 @@ is_any_atom(at, at_data) = true
 """
     is_heavy_atom(at, at_data)
 
-Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
+Determine whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
 """
 function is_heavy_atom(at, at_data)
     if isnothing(at_data) || at_data.element in ("?", "")

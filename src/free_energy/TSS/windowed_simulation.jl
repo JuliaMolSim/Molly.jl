@@ -226,6 +226,7 @@ end
 
 A windowed TSS simulation driver.
 
+See [Predescu et al. 2024](https://doi.org/10.1080/10618600.2023.2291108).
 Each cycle runs `self_adjustment_steps` blocks of `n_md_steps` molecular
 dynamics steps, collects TSS samples, updates window estimators unless
 `frozen=true`, and optionally records sampled PMF deconvolution diagnostics.

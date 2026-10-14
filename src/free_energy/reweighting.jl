@@ -245,11 +245,15 @@ function max_weight_fraction(acc::OnlinePMFAccumulator{N, T}) where {N, T}
 end
 
 """
+    pmf(deconv::PMFDeconvolution; zero=:min, kBT=nothing)
     pmf(acc::OnlinePMFAccumulator; zero=:min, kBT=nothing)
 
-Convert an online PMF accumulator to a `PMF` result. PMF values are reported in
-reduced units, shifted according to `zero`; when `kBT` is provided, `F_energy`
-is also populated.
+Extract the current PMF estimate from a [`PMFDeconvolution`](@ref) or an online PMF
+accumulator as a `PMF` result, with the same fields as returned by
+[`Molly.pmf_with_uncertainty`](@ref) though the uncertainties may be `nothing`.
+
+PMF values are reported in reduced units, shifted according to `zero`, which can be `:min`,
+`:last` or `:none`; when `kBT` is provided, `F_energy` is also populated.
 """
 function pmf(acc::OnlinePMFAccumulator{N, T}; zero::Symbol = :min, kBT = nothing) where {N, T}
     if !(zero in (:min, :last, :none))

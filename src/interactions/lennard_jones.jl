@@ -140,6 +140,7 @@ end
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
 
+See [Shirts et al. 2007](https://doi.org/10.1021/jp0735987).
 Approximately represents contributions from beyond the cutoff distance.
 Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
 correction to the potential energy is required.
@@ -147,6 +148,8 @@ The potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
+where the averages run over all pairs of the ``N`` atoms, ``V`` is the volume and ``r_c``
+is `dist_cutoff`.
 The forces are zero, with an isotropic virial contribution from the explicit
 volume dependence.
 
@@ -316,24 +319,26 @@ end
     LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction, scaled by λ for
-alchemical transformations.
+alchemical transformations, the λ version of [`LJDispersionCorrection`](@ref).
 
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LJDispersionCorrection`](@ref) to this type.
 Approximately represents contributions from beyond the cutoff distance.
-Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
-correction to the potential energy is required.
 The potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-where the averages run over all pairs and `N` is the *effective* particle count — dual topology
-duplicates a site as a real atom plus a virtual one, whose couplings sum to 1.
+where the averages run over all pairs, ``\lambda_{ij}`` is the steric coupling of the pair
+that `scheduler` gives from the `λ` of the atoms mixed with `λ_mix` and their alchemical
+roles, and ``N`` is the effective number of atoms, since dual topology duplicates an atom as
+a real atom and a virtual one whose couplings sum to 1.
 
-`λ_ij` is applied exactly once per pair, so the tail is as linear in the coupling as the explicit
-pairwise term. Beyond the
-cutoff a soft core has converged to plain LJ, so no soft-core factor enters here.
+``\lambda_{ij}`` is applied exactly once per pair, so the correction is as linear in the
+coupling as the explicit pairwise term. Beyond the cutoff a soft core has converged to the
+plain Lennard-Jones potential, so no soft-core factor enters here.
 
-The factors are computed once from the λ carried by `atoms` and **frozen**: changing `atom.λ`
-afterwards has no effect, so rebuild the interaction instead.
+The factors are computed once from the `λ` of `atoms`, so changing the `λ` of the atoms
+directly has no effect; [`Molly.set_lambda!`](@ref) recomputes them.
 The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
 volume can change).
 Only compatible with 3D systems.
@@ -532,9 +537,11 @@ end
     LennardJonesScaled(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, λ_mixing,
                        scheduler, weight_special)
 
-The Lennard-Jones 6-12 interaction between two atoms scaled by an alchemical steric scheduler,
-without a soft core.
+The Lennard-Jones 6-12 interaction between two atoms scaled by λ without a soft core, the λ
+version of [`LennardJones`](@ref).
 
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `LJsoftcore=:scaled`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = 4\lambda\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
@@ -543,12 +550,12 @@ and the force on each atom by
 ```math
 \vec{F}_i = \frac{24\lambda\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
 ```
-where ``\lambda`` is the steric coupling of the pair, which the scheduler takes from the
-``\lambda`` of the atoms and their alchemical roles.
+where ``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
 
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means the
-atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 As there is no soft core the energy diverges when an atom that is being inserted or deleted
 overlaps another one, so this is for a transformation where that does not happen, for example
 one where only parameters change.
@@ -677,34 +684,35 @@ function pairwise_pe(::LennardJonesScaled, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCoreBeutler(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
-                                ϵ_mixing, weight_special)
+    LennardJonesSoftCoreBeutler(; cutoff, α, use_neighbors, shortcut, σ_mixing,
+                                ϵ_mixing, λ_mixing, scheduler, weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
 
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `LJsoftcore=:beutler`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda \left(\frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}\right)
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \lambda \left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda \left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r}_{ij}}{r_{ij}}
 ```
 where
 ```math
-r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6\right)^{1/6}
+r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r_{ij}^6\right)^{1/6}, \quad
+C^{(12)} = 4\varepsilon_{ij}\sigma_{ij}^{12}, \quad
+C^{(6)} = 4\varepsilon_{ij}\sigma_{ij}^{6}
 ```
-and
-```math
-C^{(12)} = 4\epsilon\sigma^{12}
-C^{(6)} = 4\epsilon\sigma^{6}
-```
-
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means
-the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
@@ -909,40 +917,41 @@ function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_shift, λ):
 end
 
 @doc raw"""
-    LennardJonesSoftCoreGapsys(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
-                               ϵ_mixing, weight_special)
+    LennardJonesSoftCoreGapsys(; cutoff, α, use_neighbors, shortcut, σ_mixing,
+                               ϵ_mixing, λ_mixing, scheduler, weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core potential, used for
 the appearing and disappearing of atoms.
 
 See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `LJsoftcore=:gapsys`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
-\lambda \left( \frac{C^{(12)}}{r_{ij}^{12}} - \frac{C^{(6)}}{r_{ij}^{6}} \right), & \text{if} & r \ge r_{LJ} \\
-\lambda \left( (\frac{78C^{(12)}}{r_{LJ}^{14}}-\frac{21C^{(6)}}{r_{LJ}^{8}})r_{ij}^2 - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}})r_{ij} + \frac{91C^{(12)}}{r_{LJ}^{12}}-\frac{28C^{(6)}}{r_{LJ}^{6}} \right), & \text{if} & r \lt r_{LJ} \\
+\lambda \left( \frac{C^{(12)}}{r_{ij}^{12}} - \frac{C^{(6)}}{r_{ij}^{6}} \right), & \text{if} & r_{ij} \ge r_{LJ} \\
+\lambda \left( (\frac{78C^{(12)}}{r_{LJ}^{14}}-\frac{21C^{(6)}}{r_{LJ}^{8}})r_{ij}^2 - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}})r_{ij} + \frac{91C^{(12)}}{r_{LJ}^{12}}-\frac{28C^{(6)}}{r_{LJ}^{6}} \right), & \text{if} & r_{ij} \lt r_{LJ} \\
 \end{array} \right.
 ```
 and the force on each atom by
 ```math
 \vec{F}_i = \left\{ \begin{array}{cl}
-\lambda \left( \frac{12C^{(12)}}{r_{ij}^{13}} - \frac{6C^{(6)}}{r_{ij}^{7}} \right)\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
-\lambda \left( (\frac{-156C^{(12)}}{r_{LJ}^{14}}+\frac{42C^{(6)}}{r_{LJ}^{8}})r_{ij} - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}}) \right)\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \lt r_{LJ} \\
+\lambda \left( \frac{12C^{(12)}}{r_{ij}^{13}} - \frac{6C^{(6)}}{r_{ij}^{7}} \right)\frac{\vec{r}_{ij}}{r_{ij}}, & \text{if} & r_{ij} \ge r_{LJ} \\
+\lambda \left( (\frac{-156C^{(12)}}{r_{LJ}^{14}}+\frac{42C^{(6)}}{r_{LJ}^{8}})r_{ij} + (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}}) \right)\frac{\vec{r}_{ij}}{r_{ij}}, & \text{if} & r_{ij} \lt r_{LJ} \\
 \end{array} \right.
 ```
 where
 ```math
-r_{LJ} = \alpha \left( \frac{26C^{(12)}(1-\lambda)}{7C^{(6)}} \right)^{\frac{1}{6}}
+r_{LJ} = \alpha \left( \frac{26C^{(12)}(1-\lambda)}{7C^{(6)}} \right)^{\frac{1}{6}}, \quad
+C^{(12)} = 4\varepsilon_{ij}\sigma_{ij}^{12}, \quad
+C^{(6)} = 4\varepsilon_{ij}\sigma_{ij}^{6}
 ```
-and
-```math
-C^{(12)} = 4\epsilon\sigma^{12}
-C^{(6)} = 4\epsilon\sigma^{6}
-```
-
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means
-the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
@@ -1152,40 +1161,40 @@ end
 end
 
 @doc raw"""
-    AshbaughHatch(; cutoff, use_neighbors, shortcut, ϵ_mixing, σ_mixing,
+    AshbaughHatch(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
                   λ_mixing, weight_special)
 
-The Ashbaugh-Hatch potential ($V_{\text{AH}}$) is a modified Lennard-Jones ($V_{\text{LJ}}$)
-6-12 interaction between two atoms.
+The Ashbaugh-Hatch potential (``V_{\text{AH}}``) is a modified Lennard-Jones
+(``V_{\text{LJ}}``) 6-12 interaction between two atoms.
 
+See [Ashbaugh and Hatch 2008](https://doi.org/10.1021/ja802124e).
 The potential energy is defined as
 ```math
-V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \\
+V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
 ```
 ```math
 V_{\text{AH}}(r_{ij}) =
     \begin{cases}
-      V_{\text{LJ}}(r_{ij}) +\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
-       λ_{ij}V_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+      V_{\text{LJ}}(r_{ij}) + \varepsilon_{ij}(1-\lambda_{ij}), & r_{ij} \leq 2^{1/6}\sigma_{ij} \\
+      \lambda_{ij} V_{\text{LJ}}(r_{ij}), & r_{ij} > 2^{1/6}\sigma_{ij}
     \end{cases}
 ```
 and the force on each atom by
 ```math
 \vec{F}_{\text{AH}} =
     \begin{cases}
-      F_{\text{LJ}}(r_{ij})  &,  r_{ij} \leq  2^{1/6}σ  \\
-       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+      \vec{F}_{\text{LJ}}(r_{ij}), & r_{ij} \leq 2^{1/6}\sigma_{ij} \\
+      \lambda_{ij} \vec{F}_{\text{LJ}}(r_{ij}), & r_{ij} > 2^{1/6}\sigma_{ij}
     \end{cases}
 ```
 where
 ```math
-\begin{aligned}
-\vec{F}_{\text{LJ}}\
-&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]  \vec{r_{ij}}
-\end{aligned}
+\vec{F}_{\text{LJ}}(r_{ij}) = \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
 ```
 
-If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
+``\lambda_{ij}`` is the `λ` of the atoms mixed with `λ_mixing`, which here is a
+per-atom hydropathy parameter rather than an alchemical coupling.
+If ``\lambda_{ij}`` is 1 this gives the standard [`LennardJones`](@ref) potential.
 """
 @kwdef struct AshbaughHatch{C, H, S, E, L, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
@@ -1329,7 +1338,7 @@ V(r_{ij}) = 4 w_{14} \varepsilon^{14}_{ij} \left[\left(\frac{\sigma^{14}_{ij}}{r
 ```
 with ``w_{14}`` the 1-4 weight.
 
-The λ versions for alchemical systems are [`LennardJones14Scaled`](@ref),
+The λ versions for alchemical systems are [`Molly.LennardJones14Scaled`](@ref),
 [`LennardJones14SoftCoreBeutler`](@ref) and [`LennardJones14SoftCoreGapsys`](@ref).
 """
 struct LennardJones14{S, E, W}
@@ -1378,11 +1387,12 @@ end
     LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing, scheduler)
 
 The 1-4 Lennard-Jones interaction of a pair of atoms scaled by λ without a soft core, the λ
-version of [`LennardJones14`](@ref) built by `to_lambda_function(inter, ScaledSoftCore())`.
+version of [`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and
+[`RelativeFESystem`](@ref) convert to this type with `LJsoftcore=:scaled`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
-are those of [`LennardJonesScaled`](@ref) with the σ and ϵ of the pair, weighted by `weight_14`,
+are those of [`Molly.LennardJonesScaled`](@ref) with the σ and ϵ of the pair, weighted by `weight_14`,
 and the pair is coupled like any other Lennard-Jones pair of the alchemical system.
 """
 @kwdef struct LennardJones14Scaled{S, E, W, LM, SCH}
@@ -1468,7 +1478,8 @@ end
     LennardJones14SoftCoreBeutler(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Beutler soft core, the λ version of
-[`LennardJones14`](@ref) built by `to_lambda_function(inter, BeutlerSoftCore())`.
+[`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
+convert to this type with `LJsoftcore=:beutler`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
@@ -1587,7 +1598,8 @@ end
     LennardJones14SoftCoreGapsys(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Gapsys soft core, the λ version of
-[`LennardJones14`](@ref) built by `to_lambda_function(inter, GapsysSoftCore())`.
+[`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
+convert to this type with `LJsoftcore=:gapsys`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force

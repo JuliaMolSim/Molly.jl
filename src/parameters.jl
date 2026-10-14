@@ -18,7 +18,7 @@ example `"inter_HB_CT/CT_"`.
 Return `nothing`, the default, for an interaction with no differentiable parameters.
 Specific interactions are given the interaction type as a second argument, so their keys
 can depend on it. Define this along with [`Molly.parameter_fields`](@ref) to make a custom
-interaction work with [`extract_parameters`](@ref) and `inject_gradients`.
+interaction work with [`extract_parameters`](@ref) and [`inject_gradients`](@ref).
 """
 parameter_prefix(inter) = nothing
 parameter_prefix(inter, inter_type) = parameter_prefix(inter)
@@ -31,8 +31,8 @@ interaction type, for example `((:k, "k"), (:r0, "r0"))`.
 
 The key of a parameter is [`Molly.parameter_prefix`](@ref) followed by its suffix. Interactions
 whose parameters do not correspond one-to-one with fields, such as
-[`PeriodicTorsion`](@ref), instead define `parameter_keys`, `parameter_values` and
-`inject_parameters` directly.
+[`PeriodicTorsion`](@ref), instead define `Molly.n_parameters`, `Molly.parameter_keys`,
+`Molly.parameter_values` and `Molly.inject_parameters` directly.
 """
 parameter_fields(::Type) = ()
 parameter_fields(x) = parameter_fields(typeof(x))
@@ -95,7 +95,7 @@ end
     ParameterPlan(sys, params_dic)
 
 The mapping from the entries of `params_dic` to the parameters of `sys`, built
-once and reused on every call to `inject_gradients`.
+once and reused on every call to [`inject_gradients`](@ref).
 
 Building the plan is where the dictionary keys are formed and looked up. A plan is valid
 for any dictionary with the same keys, so it can be reused across a gradient calculation
@@ -401,7 +401,7 @@ end
     extract_parameters(sys, ff=nothing)
 
 A dictionary of the force field parameters of a system, keyed by strings, for use with
-`inject_gradients`.
+[`inject_gradients`](@ref).
 
 An interaction contributes its parameters if it defines [`Molly.parameter_prefix`](@ref)
 and [`Molly.parameter_fields`](@ref).
@@ -409,7 +409,7 @@ and [`Molly.parameter_fields`](@ref).
 The values are plain numbers of the float type of the system. On a system with units they
 are in the units that each parameter is stored with in the system, for example kJ mol⁻¹ nm⁻²
 for a bond force constant in a system set up with the default units, and the units are
-re-attached by [`ParameterPlan`](@ref) and `inject_gradients`.
+re-attached by [`ParameterPlan`](@ref) and [`inject_gradients`](@ref).
 """
 function extract_parameters(sys::System{<:Any, <:Any, T}, ff=nothing) where T
     params_dic = Dict{String, T}()

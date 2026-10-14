@@ -7,6 +7,7 @@ export RBTorsion
 
 A Ryckaert-Bellemans torsion angle between four atoms.
 
+See [Ryckaert and Bellemans 1975](https://doi.org/10.1016/0009-2614(75)85513-8).
 The potential energy is defined as
 ```math
 V(\phi) = \sum_{n=0}^{5} C_n \cos^n(\psi)

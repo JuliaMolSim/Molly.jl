@@ -123,7 +123,7 @@ logger_virial_interval(logger) = Inf
 Return the interval in simulation steps at which `logger` needs a valid pressure.
 
 Custom pressure loggers should extend this function in addition to
-[`logger_virial_interval`](@ref). The default `Inf` means that the logger does
+[`Molly.logger_virial_interval`](@ref). The default `Inf` means that the logger does
 not require pressure-specific pre-coupling state.
 """
 logger_pressure_interval(logger) = Inf
@@ -433,7 +433,7 @@ end
     ScalarVirialLogger(n_steps)
     ScalarVirialLogger(T, n_steps)
 
-Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+Log the [`scalar_virial`](@ref) of a system throughout a simulation.
 
 For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling scalar virial for that step.

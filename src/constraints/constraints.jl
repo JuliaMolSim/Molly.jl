@@ -22,6 +22,8 @@ end
     DistanceConstraint(i, j, dist)
 
 Constraint between two atoms that maintains a fixed distance between the atoms.
+
+Given to a constraint algorithm such as [`SHAKE_RATTLE`](@ref) or [`LINCS`](@ref).
 """
 struct DistanceConstraint{D, I}
     i::I
@@ -34,6 +36,7 @@ end
 
 Constraint between three atoms that maintains a fixed angle and two bond lengths.
 
+Given to a constraint algorithm such as [`SHAKE_RATTLE`](@ref) or [`LINCS`](@ref).
 Atoms `i` and `k` should be connected to central atom `j` with fixed bond distances
 given by `dist_ij` and `dist_jk`, forming the angle `angle_ijk` in radians.
 Internally, an `AngleConstraint` is converted into 3 distance constraints.
@@ -44,7 +47,7 @@ For example, a water molecule can be defined as
 `AngleConstraint(1, 2, 3, deg2rad(104.5), 0.9572u"Å", 0.9572u"Å")`
 where atom 2 is oxygen and atoms 1/3 are hydrogen.
 
-Linear molecules like CO2 can not be constrained.
+Linear molecules like CO2 cannot be constrained.
 """
 struct AngleConstraint{D, I}
     i::I

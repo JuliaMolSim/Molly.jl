@@ -614,11 +614,13 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
-    transformations.
-- `alch_role::Int32=EnvRole`: role of the atom in an alchemical transformation. `EnvRole`, the
-    default, is an atom that is not alchemical. The other roles are set by
-    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
+- `λ::L=1.0`: the λ of the atom. In an alchemical system the alchemical atoms carry the
+    global λ, which the λ interactions combine with the alchemical roles to scale the
+    interactions, and other atoms keep 1.
+- `alch_role::Int32=Molly.EnvRole`: role of the atom in an alchemical transformation.
+    `EnvRole`, the default, is an atom that is not alchemical. The other roles are set by
+    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref), see
+    [Alchemical roles](@ref).
 """
 struct Atom{T, M, C, S, E, L} # With Float32 numeric fields this fits into 32 bytes
     index::Int32
@@ -677,7 +679,7 @@ unless they have a `charge` field defined, which the function accesses by defaul
 """
     lambda(atom)
 
-The lambda of an [`Atom`](@ref).
+The `λ` of an [`Atom`](@ref).
 """
 lambda(atom) = atom.λ
 
@@ -849,7 +851,11 @@ Base.eachindex(neighbors::GPUCellListNeighborList) =
     NeighborList(n, list)
     NeighborList()
 
-Structure to contain neighbor lists.
+Structure to contain neighbor lists, as returned by [`find_neighbors`](@ref) for most
+neighbor finders.
+
+The first `n` entries of `list` are the `(i, j, special)` pairs, see
+[`neighbor_pairs`](@ref).
 """
 mutable struct NeighborList{T}
     n::Int # Number of neighbors in list (n <= length(list))
@@ -1191,7 +1197,7 @@ minimum box side, are reported according to `strictness`.
     atoms are in the same molecule.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
+    Should be a `Tuple` or `NamedTuple` of [`PairwiseInteraction`](@ref)s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles.
     Should be a `Tuple` or `NamedTuple`.
@@ -1516,7 +1522,7 @@ Properties unused in the simulation or in analysis can be left with their
 default values.
 `atoms`, `atoms_data`, `coords` and `boundary` are automatically calculated from
 the `Crystal` struct.
-Extra atom paramaters like `σ` have to be added manually after construction using
+Extra atom parameters like `σ` have to be added manually after construction using
 the convenience constructor `System(sys; <keyword arguments>)`.
 """
 function System(crystal::Crystal{D};
@@ -1715,7 +1721,8 @@ end
 @doc raw"""
     ReplicaSystem(thermo_states, replica_coords; <keyword arguments>)
 
-A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
+A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD),
+for example with [`ReplicaExchangeMD`](@ref).
 
 Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
 an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
@@ -1731,23 +1738,24 @@ routing standard atomic property queries back to the unperturbed master system.
 
 When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for
 both the simulation of replicas and the neighbor finder should be set to be the same.
-This can be done by passing `nbatches=(min(n, 8), n)` to [`CellListMapNeighborFinder`](@ref) during
-construction where `n` is the number of threads to be used per replica.
+This can be done by passing `number_of_batches=(min(n, 8), n)` to
+[`CellListMapNeighborFinder`](@ref) during construction where `n` is the number of threads to
+be used per replica.
 
 # Arguments
 - `thermo_states::AbstractArray{<:ThermoState}`: An array of thermodynamic states defining the 
-    replica ladder. Each state encapsulates its specific `System` interactions, integrator, 
+    replica ladder. Each state encapsulates its specific [`System`](@ref) interactions, integrator, 
     inverse temperature (`beta`), and pressure (`p`). The number of states dictates `n_replicas`.
 - `replica_coords`: The coordinates of the atoms in each replica. The number of elements 
     must equal the length of `thermo_states`.
 - `replica_velocities=nothing`: The velocities of the atoms in each replica. If not provided, 
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
-    to duplicating the boundary of the reference system (the first `ThermoState`).
+    to duplicating the boundary of the reference system (the first [`ThermoState`](@ref)).
 - `replica_neighbor_finders=nothing`: The neighbor finder of each thermodynamic state. If not
     provided, each state gets a copy of the neighbor finder of its system.
 - `replica_loggers=nothing`: Logger collections for each thermodynamic state, recording the replica
-    currently in that state. Stateful logger objects and `TrajectoryWriter` file paths cannot be
+    currently in that state. Stateful logger objects and [`TrajectoryWriter`](@ref) file paths cannot be
     shared between states.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
@@ -2317,7 +2325,7 @@ Not compatible with using atom properties such as `σ` and `ϵ`.
 # Arguments
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
+    Should be a `Tuple` or `NamedTuple` of [`PairwiseInteraction`](@ref)s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles.
     Should be a `Tuple` or `NamedTuple`.

@@ -207,21 +207,27 @@ function pmf_build_log_coupling_matrix(state_space,
 end
 
 """
-    PMFDeconvolution(state; grid, coupling=nothing, cv=nothing, ...)
+    PMFDeconvolution(state; grid, coupling=nothing, cv=nothing, target_temp=nothing,
+                     target_pressure=nothing)
 
-Prepare a sampled PMF deconvolution object for an enhanced-sampling state.
+Prepare a sampled PMF deconvolution object for an [`AWHState`](@ref) or a
+[`TSSState`](@ref), which is passed as `pmf` to [`AWHSimulation`](@ref) or
+[`TSSSimulation`](@ref).
 
-The same user-facing object is used by AWH, TSS, and future methods. The
-backend is selected from the type of `state`. `grid` follows the same format as
-`OnlinePMFAccumulator`. `coupling(xi, state_i)` should return the
-dimensionless bias energy at PMF coordinate `xi` in thermodynamic state
-`state_i`; when omitted, Molly attempts to infer matching [`BiasPotential`](@ref)
-interactions from the state Hamiltonians.
+The backend is selected from the type of `state`. `grid` is `(min, max, n_bins)` for a 1D
+PMF, `((mins...), (maxs...), (n_bins...))` for an N-dimensional PMF, or a tuple of explicit
+bin edge vectors. `coupling(xi, state_i)` should return the dimensionless bias energy at PMF
+coordinate `xi` in the thermodynamic state with index `state_i`; when omitted, Molly
+attempts to infer matching [`BiasPotential`](@ref) interactions from the state
+Hamiltonians. `cv` can give a custom function for the PMF coordinate of a sample, in which
+case `coupling` must also be given. `target_temp` and `target_pressure` set the target
+ensemble of the PMF, and are only supported for AWH.
 
-The estimator follows the sampled deconvolution form used by AWH: each sampled
+The estimator follows the sampled deconvolution form used by AWH, see
+[Lindahl et al. 2014](https://doi.org/10.1063/1.4890371): each sampled
 PMF coordinate is accumulated in a self-normalized weighted histogram using the
 inverse time-dependent effective bias at the observed PMF bin. Direct
-deconvolution of final state free energies is not supported. Call [`pmf`](@ref)
+deconvolution of final state free energies is not supported. Call [`Molly.pmf`](@ref)
 on the returned object to extract the current PMF estimate.
 """
 struct PMFDeconvolution{B}

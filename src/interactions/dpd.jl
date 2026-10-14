@@ -43,7 +43,8 @@ Pairwise random numbers are generated from a hash of the `key`,
 the particle indices, and the step number, ensuring momentum conservation.
 
 Should be used with a simulator like [`DPDVelocityVerlet`](@ref).
-When using a neighbor list, set `dist_cutoff` to at least `1.5 * r_c` to provide a
+When using a neighbor list, set the `dist_cutoff` of the neighbor finder to at least
+`1.5 * r_c` to provide a
 skin distance that accounts for particle movement between neighbor list rebuilds.
 
 # Arguments

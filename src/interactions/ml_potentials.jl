@@ -29,8 +29,10 @@ celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
 
 The ANI potential implemented as an AtomsCalculators.jl calculator.
 
+See [Smith et al. 2017](https://doi.org/10.1039/c6sc05720a).
 Load an ANI-2x neural network potential from an HDF5 file exported by
-`test/torchani_reference.py`. Requires `Lux` and `HDF5` to be loaded.
+`test/torchani_reference.py`, such as the one provided by [`Molly.ani2x_data_dir`](@ref).
+Requires `Lux` and `HDF5` to be loaded.
 
 The system's `atoms_data` is required, since the element of each atom is read from
 `atoms_data[i].element`. The supported elements are H, C, N, O, S, F and Cl.
@@ -76,8 +78,8 @@ function ani2x_data_dir end
     compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
 
 Compute the Atomic Environment Vectors (AEVs) for all atoms, returning an
-`(n_atoms, aev_length)` matrix. `neighbors` is a `NeighborList` (or `nothing` for an all-pairs
-build).
+`(n_atoms, aev_length)` matrix, as used by [`ANIPotential`](@ref). `neighbors` is a
+[`NeighborList`](@ref) (or `nothing` for an all-pairs build).
 Requires `Lux` and `HDF5`.
 """
 function compute_aevs end

@@ -1,11 +1,14 @@
-"""
+@doc raw"""
     TSSHistoryForgetting(; alpha=0.19, n_epochs=16, phi=nothing)
 
-Configure geometric history forgetting for TSS free-energy estimates.
+Configure geometric history forgetting for TSS free-energy estimates, given as
+`history_forgetting` to [`TSSState`](@ref).
 
-`alpha` controls the retained fraction of the current history time, `n_epochs`
-sets the target number of retained epochs, and `phi` optionally overrides the
-epoch growth factor inferred from `alpha` and `n_epochs`.
+At TSS iteration ``t`` the history before approximately ``\alpha t`` is dropped, so
+`alpha` is the forgotten fraction of the current history time. The retained history is
+grouped into logarithmically spaced epochs: `n_epochs` sets the target number of retained
+epochs, and `phi` optionally overrides the epoch growth factor inferred from `alpha` and
+`n_epochs`.
 """
 struct TSSHistoryForgetting{T}
     alpha::T

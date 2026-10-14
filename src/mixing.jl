@@ -123,6 +123,7 @@ C_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C, a
 
 Mix `σ` and `ϵ` parameters according to the Waldman-Hagler rules.
 
+See [Waldman and Hagler 1993](https://doi.org/10.1002/jcc.540140909).
 ```math
 \begin{aligned}
 \sigma_{ij} &= \left( \frac{\sigma_i^6 + \sigma_j^6}{2} \right)^{\frac{1}{6}} \\
@@ -147,6 +148,7 @@ end
 
 Mix `ϵ` parameters according to the Fender-Halsey rule.
 
+See [Fender and Halsey 1962](https://doi.org/10.1063/1.1701284).
 ```math
 \varepsilon_{ij} = \frac{2 \varepsilon_i \varepsilon_j}{\varepsilon_i + \varepsilon_j}
 ```
@@ -224,7 +226,7 @@ Define a set of atom pairs that have a specified mixing value.
 
 For example, giving `Dict((1, 2) => 0.3u"nm")` means that pairs of atom type
 1 and 2 have a σ value of 0.3 nm.
-Provide when setting up a `MixingException`.
+Provide when setting up a [`Molly.MixingException`](@ref).
 """
 struct ExceptionList{N, K, V} # GPU-compatible dictionary-like object for pair lookup
     keys::SVector{N, K}
@@ -256,7 +258,8 @@ end
 
 Provide mixing exceptions (NBFix) for specific pairs of atom types.
 
-`mixing` is a mixing rule and `exceptions` is an `ExceptionList`.
+`mixing` is a mixing rule such as [`Molly.LorentzMixing`](@ref), used for pairs that are not
+exceptions, and `exceptions` is a [`Molly.ExceptionList`](@ref) keyed by atom type.
 Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
 """
 struct MixingException{M, E}

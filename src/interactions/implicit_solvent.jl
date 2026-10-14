@@ -439,7 +439,8 @@ end
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a Coulomb interaction.
+See [Onufriev et al. 2004](https://doi.org/10.1002/prot.20033).
+Should be used along with a Coulomb interaction such as [`Coulomb`](@ref).
 [`SetupImplicitSolventOBC`](@ref) provides parameters when setting up a system from a file.
 
 `atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
@@ -724,7 +725,8 @@ end
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a Coulomb interaction.
+See [Nguyen et al. 2013](https://doi.org/10.1021/ct3010485).
+Should be used along with a Coulomb interaction such as [`Coulomb`](@ref).
 [`SetupImplicitSolventGBN2`](@ref) provides parameters when setting up a system from a file.
 
 `atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,

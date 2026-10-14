@@ -98,15 +98,17 @@ end
 The stochastic velocity rescaling thermostat.
 
 See [Bussi et al. 2007](https://doi.org/10.1063/1.2408420).
-In brief, acts like the [`BerendsenThermostat`](@ref) but adds an
+In brief, acts like the [`BerendsenThermostat`](@ref) but adds a
 stochastic term, allowing correct sampling of isothermal ensembles.
 
-Let `Δt` be the simulation timestep, `Nf` the kinetic DOFs used to calculate the instantaneous
-temperature of the system. Then, ``K = \frac{1}{2} \cdot \sum m \cdot v^2`` is the current
-kinetic energy, and ``K̄ = \frac{1}{2} Nf k_B T_0`` is the target kinetic energy for
-a reference temperature `T_0`.
+Let ``\Delta t`` be the simulation time step multiplied by `n_steps`, ``\tau`` the coupling
+constant and ``N_f`` the number of degrees of freedom used to calculate the instantaneous
+temperature of the system. Then ``K = \frac{1}{2} \sum_i m_i v_i^2`` is the current
+kinetic energy and ``\bar{K} = \frac{1}{2} N_f k_B T_0`` is the target kinetic energy for
+the reference temperature ``T_0``.
 
-Define ``c = e^{-Δt/τ}``. Draw ``R \sim 𝒩(0,1)`` and ``S \sim \chi^{2}_{Nf-1}``. Then
+Define ``c = e^{-\Delta t/\tau}``. Draw ``R \sim \mathcal{N}(0, 1)`` and
+``S \sim \chi^{2}_{N_f-1}``. Then
 ```math
 \lambda^2 = c + (1-c) \cdot \frac{\bar K}{N_f K} \cdot (R^2 + S)\;+\;
             2 \cdot \sqrt{c(1-c) \frac{\bar K}{N_f K}} \cdot R,
@@ -270,9 +272,9 @@ with the fractional change limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix and ``\delta`` is a Kronecker delta,
 allowing non-isotropic pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 
-This barostat should be used with caution as it known not to properly sample
+This barostat should be used with caution as it is known not to properly sample
 isobaric ensembles and therefore can lead to simulation artifacts.
 """
 struct BerendsenBarostat{P, C, S, IC, T} <: AbstractBarostat
@@ -502,21 +504,22 @@ end
 
 The stochastic cell rescale barostat.
 
-See [Bernetti and Bussi 2020] (https://doi.org/10.1063/5.0020514)
-and [Del Tatto et al. 2022] (https://doi.org/10.3390/app12031139).
-In brief, this is an extension of the Berendsen barostat that includes a
+See [Bernetti and Bussi 2020](https://doi.org/10.1063/5.0020514)
+and [Del Tatto et al. 2022](https://doi.org/10.3390/app12031139).
+In brief, this is an extension of the [`BerendsenBarostat`](@ref) that includes a
 stochastic term to the scaling matrix.
 This allows proper sampling of isobaric ensembles.
 
 ```math
-\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot dt}{V(t) \cdot \tau_P}} \cdot dW \right]
+\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot \Delta t}{V(t) \cdot \tau_P}} \cdot dW \right]
 ```
 where ``\kappa_T`` is the isothermal compressibility, ``\tau_P`` is the barostat coupling constant
 and ``\rm{dW}`` represents a Wiener process.
+The fractional change is limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 """
 struct CRescaleBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P

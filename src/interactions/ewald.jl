@@ -76,6 +76,9 @@ interaction, which provides the exclusions for bonded atoms.
 [`SetupEwald`](@ref) provides Ewald parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
+The charge of each atom is scaled by its electrostatic coupling, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` and alchemical role of the atom; this
+has no effect for atoms that are not alchemical.
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Not compatible with infinite boundaries.
@@ -339,10 +342,17 @@ interaction, which provides the exclusions for bonded atoms.
 [`SetupPME`](@ref) provides PME parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
+`order` is the order of the B-spline interpolation onto the grid and `ϵr` is the relative
+permittivity.
 `fixed_charges` should be set to `false` if the partial charges can change,
 for example when using a polarizable force field.
 `mesh_dims` gives the number of grid points in each dimension, overriding the
 value chosen from `error_tol`.
+The charge of each atom is scaled by its electrostatic coupling, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` and alchemical role of the atom; this
+has no effect for atoms that are not alchemical.
+`float_type_high` is the float type used to sum the charges for the constant self energy
+and neutralizing terms.
 `grad_safe` should be set to `true` if gradients are going to be calculated
 with Enzyme.jl.
 `n_threads` is used to pre-allocate memory on CPU and plan the FFTs.

@@ -20,7 +20,7 @@ See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHA
 [Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1) for RATTLE,
 [Elber et al. 2011](https://doi.org/10.1140/epjst/e2011-01525-9) for a derivation
 of the linear system solved to satisfy the RATTLE algorithm, and
-[Krautler et al. 2000](https://doi.org/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V)
+[Kräutler et al. 2001](https://doi.org/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V)
 for the M-SHAKE algorithm.
 
 # Arguments
@@ -36,7 +36,7 @@ for the M-SHAKE algorithm.
     angle constraints to be applied. If `nothing`, no angle constraints are applied.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 - `max_iters=25`: the maximum number of iterations to perform when doing SHAKE. If this
-    number if iterations is reached, some constraints may not be satisfied.
+    number of iterations is reached, some constraints may not be satisfied.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error. Note that this only applies to constraint setup.

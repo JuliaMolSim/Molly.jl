@@ -172,7 +172,8 @@ function dist_between_groups(sd::CalcSingleDist, coords_1, coords_2, boundary, a
 end
 
 """
-    CalcDist(atom_inds_1, atom_inds_2, dist_type=CalcMinDist(), correction=:pbc)
+    CalcDist(atom_inds_1, atom_inds_2, dist_type=CalcMinDist(), correction=:pbc,
+             has_virial=true)
 
 Bias the distance between two atoms or groups of atoms.
 
@@ -181,10 +182,13 @@ Given as an argument to [`BiasPotential`](@ref).
 # Arguments
 - `atom_inds_1`: indices of the atom(s) in the first group.
 - `atom_inds_2`: indices of the atom(s) in the second group.
-- `dist_type=CalcMinDist()`: type of distance to calculate.
+- `dist_type=CalcMinDist()`: type of distance to calculate, one of [`CalcMinDist`](@ref),
+    [`CalcMaxDist`](@ref), [`CalcCMDist`](@ref) or [`CalcSingleDist`](@ref).
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
     whole, `:wrap` wraps all atoms inside the simulation box. If using multiple atoms in
     a group, they should generally be in the same molecule and `:pbc` should be used.
+- `has_virial=true`: whether the virial contribution should be calculated for this
+    collective variable.
 """
 struct CalcDist{DT}
     atom_inds_1::Vector{Int}
@@ -206,8 +210,9 @@ end
 Calculate the value of a collective variable (CV) with the current system state.
 
 New CV types should implement this function.
-This function does not apply the molecule correction over the boundaries; if
-required, `coords` can be obtained from `unwrap_molecules` first.
+This function does not apply the molecule correction over the boundaries;
+[`BiasPotential`](@ref) makes the molecules whole beforehand when the `correction`
+field of the CV is `:pbc`.
 The gradient of this function with respect to coordinates, used to calculate forces,
 is by default calculated with automatic differentiation when Enzyme is imported.
 Alternatively, the [`Molly.cv_gradient`](@ref) function can be defined for a new CV type.
@@ -226,6 +231,7 @@ end
 
 A collective variable that calculates the angle defined by three atoms.
 
+Given as an argument to [`BiasPotential`](@ref).
 The angle is defined by the angle between the vectors (j -> i) and (j -> k), where the indices are given by `atom_inds`.
 
 # Fields
@@ -298,20 +304,23 @@ end
 @doc raw"""
     cv_gradient(cv, coords, atoms, boundary, velocities; kwargs...)
 
-Calculates the analytical gradient of a collective variable (CV) with respect to the 
+Calculate the analytical gradient of a collective variable (CV) with respect to the
 system coordinates.
 
-Returns a tuple containing the gradient (as an array of vectors) and the current 
+Returns a tuple containing the gradient (as an array of vectors) and the current
 value of the CV.
 When Enzyme is imported this defaults to using AD, but an explicit method
 can be provided for a given CV type and is defined for built-in CVs.
 The AD approach should work with and without units.
 
-Supported CV Types:
-- `CalcDist`: Distance between two atoms or groups (Min, Max, Center of Mass, or Single).
-- `CalcRg`: Radius of gyration of a group of atoms.
-- `CalcRMSD`: Root-mean-square deviation from a reference structure using Kabsch alignment.
-- `CalcTorsion`: Torsion (dihedral) angle defined by four atoms.
+Explicit methods are defined for:
+- [`CalcDist`](@ref): distance between two atoms or groups (minimum, maximum, center of
+    mass or single).
+- [`CalcAngle`](@ref): angle defined by three atoms.
+- [`CalcRg`](@ref): radius of gyration of a group of atoms.
+- [`CalcRMSD`](@ref): root-mean-square deviation from a reference structure using Kabsch
+    alignment.
+- [`CalcTorsion`](@ref): torsion (dihedral) angle defined by four atoms.
 """
 function cv_gradient(cv::CalcDist{CalcSingleDist}, coords, atoms, boundary, args...; kwargs...)
     i, j = cv.atom_inds_1[1], cv.atom_inds_2[1]
@@ -585,17 +594,20 @@ function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces,
 end
 
 """
-    CalcRg(atom_inds=[], correction=:pbc)
+    CalcRg(atom_inds=[], correction=:pbc, has_virial=true)
 
 Bias the radius of gyration of a group of atoms.
 
 Given as an argument to [`BiasPotential`](@ref).
+The radius of gyration is calculated as for [`radius_gyration`](@ref).
 
 # Arguments
 - `atom_inds=[]`: indices of the atoms in the group, `[]` uses all atoms.
 - `correction=:pbc`: the correction to be applied to the molecules. `:pbc` keeps molecules
     whole, `:wrap` wraps all atoms inside the simulation box. Generally atoms in a group
     should be in the same molecule and `:pbc` should be used.
+- `has_virial=true`: whether the virial contribution should be calculated for this
+    collective variable.
 """
 struct CalcRg
     atom_inds::Vector{Int}
@@ -697,13 +709,14 @@ function calculate_virial!(virial_buff, cv::CalcRg, coords, forces, atoms, bound
 end
 
 """
-    CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc)
+    CalcRMSD(ref_coords, atom_inds=[], ref_atom_inds=[], correction=:pbc, has_virial=true)
 
 Bias the root-mean-square deviation (RMSD) between the coordinates of a group of atoms
 and a set of reference coordinates.
 
 Given as an argument to [`BiasPotential`](@ref).
-The two sets of coordinates are superimposed using the Kabsch algorithm.
+The two sets of coordinates are superimposed using the Kabsch algorithm, as for
+[`rmsd`](@ref).
 
 # Arguments
 - `ref_coords`: reference coordinates.
@@ -807,7 +820,8 @@ end
 
 A collective variable that calculates the torsion angle (dihedral) defined by four atoms.
 
-The angle is defined by the intersection of the planes formed by atoms (i, j, k) and (j, k, l), where the indices are given by `atom_inds`.
+Given as an argument to [`BiasPotential`](@ref).
+The angle is the angle between the planes formed by atoms (i, j, k) and (j, k, l), where the indices are given by `atom_inds`, as for [`torsion_angle`](@ref).
 The torsion gradient is regularized near collinear geometries using
 `gradient_singularity_tol`, a dimensionless relative tolerance applied to the
 bond-vector norms.

@@ -8,6 +8,7 @@ export
 
 The double exponential interaction between two atoms.
 
+See [Wu and Brooks 2019](https://doi.org/10.1063/1.5107505).
 The potential energy is defined as
 ```math
 V(r_{ij}) = \varepsilon_{ij} \left[
@@ -26,6 +27,7 @@ where
 ```math
 r_m = 2^{1/6}\sigma_{ij}
 ```
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
 """
 struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
     cutoff::C
@@ -155,6 +157,7 @@ end
 The double exponential interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
 
+See [Horton et al. 2023](https://doi.org/10.1039/d3dd00070b).
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda\varepsilon_{ij} \left[
@@ -180,9 +183,11 @@ r_m = 2^{1/6}\sigma_{ij}
 \beta_s = 1 + \lambda(\beta - 1)
 ```
 
-If ``\lambda`` is 1.0, this gives the standard [`DoubleExponential`](@ref) potential and
-means the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`DoubleExponential`](@ref) potential, and if
+it is 0 the interaction is turned off.
 ``\alpha`` and ``\beta`` determine the shape of the double exponential potential.
 """
 struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction

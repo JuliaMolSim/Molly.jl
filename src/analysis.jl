@@ -67,11 +67,18 @@ end
 
 sum_abs2(x) = sum(abs2, x)
 
-"""
+@doc raw"""
     rmsd(coords_1, coords_2)
 
 Calculate the root-mean-square deviation (RMSD) of two sets of
 coordinates after superimposition by the Kabsch algorithm.
+
+```math
+\mathrm{RMSD} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} |\mathbf{r}_i - \mathbf{R} \mathbf{r}'_i|^2}
+```
+where both sets are centered on their centroids and ``\mathbf{R}`` is the rotation that
+minimizes the RMSD.
+See [Kabsch 1976](https://doi.org/10.1107/S0567739476001873).
 
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
@@ -84,10 +91,16 @@ function rmsd(coords_1::AbstractArray{SVector{3, T}},
     return sqrt(mean(sum_abs2.(kabsch_deviations(coords_1, coords_2))))
 end
 
-"""
+@doc raw"""
     radius_gyration(coords, atoms)
 
 Calculate the radius of gyration of a set of coordinates.
+
+The radius of gyration is mass-weighted:
+```math
+R_g = \sqrt{\frac{\sum_i m_i |\mathbf{r}_i - \mathbf{r}_{\mathrm{CM}}|^2}{\sum_i m_i}}
+```
+where ``\mathbf{r}_{\mathrm{CM}}`` is the center of mass.
 
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates correspond to the same periodic image.
@@ -152,7 +165,7 @@ It can take a while to run, depending on the length of the simulation and the
 number of atoms.
 
 # Arguments
-- `connections=Tuple{Int, Int}[]`: pairs of atoms indices to link with bonds.
+- `connections=Tuple{Int, Int}[]`: pairs of atom indices to link with bonds.
 - `connection_frames`: the frames in which bonds are shown. Should be a list of
     the same length as the number of frames, where each item is a list of
     `Bool`s of the same length as `connections`. Defaults to always `true`.

@@ -39,19 +39,23 @@ end
 """
     force(inter, vec_ij, atom_i, atom_j, force_units, special, coord_i, coord_j,
           boundary, velocity_i, velocity_j, step_n)
-    force(inter, coord_i, boundary, atom_i, force_units, velocity_i, step_n)
+    force(inter, coord_i, boundary, atom_i, force_units, velocity_i, step_n, data)
     force(inter, coord_i, coord_j, boundary, atom_i, atom_j, force_units, velocity_i,
-          velocity_j, step_n)
+          velocity_j, step_n, data)
     force(inter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k,
-          force_units, velocity_i, velocity_j, velocity_k, step_n)
+          force_units, velocity_i, velocity_j, velocity_k, step_n, data)
     force(inter, coord_i, coord_j, coord_k, coord_l, boundary, atom_i, atom_j, atom_k,
-          atom_l, force_units, velocity_i, velocity_j, velocity_k, velocity_l, step_n)
+          atom_l, force_units, velocity_i, velocity_j, velocity_k, velocity_l, step_n, data)
+    force(inter, coord_i, coord_j, coord_k, coord_l, coord_m, boundary, atom_i, atom_j,
+          atom_k, atom_l, atom_m, force_units, velocity_i, velocity_j, velocity_k,
+          velocity_l, velocity_m, step_n, data)
 
 Calculate the force between atoms due to a given interaction type.
 
 For pairwise interactions returns a single force vector and for specific interactions
 returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
+Pairwise interactions can use [`Molly.pairwise_force`](@ref) to apply a cutoff.
 """
 function force end
 
@@ -98,6 +102,7 @@ end
 Calculate the force magnitude between two atoms separated by distance `r` due to a
 pairwise interaction.
 
+A positive force causes the atoms to move apart.
 This function is used in [`force`](@ref) to apply cutoff strategies by calculating
 the force at different values of `r`.
 Consequently, the parameters `params` should not include terms that depend on distance.
