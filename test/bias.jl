@@ -1356,6 +1356,10 @@ end
             host_biases = (BiasPotential(cv, PlainBias(300.0u"kJ * mol^-1 * nm^-2")),
                            BiasPotential(cv, SquareBias(big(300.0)u"kJ * mol^-1 * nm^-2", big(1.0)u"nm")))
             @test all(b -> isempty(first(Molly.split_biases((b,)))), host_biases)
+            big_bias = host_biases[2]
+            @test_throws ArgumentError System(sys_gpu_base; general_inters=(big_bias,))
+            @test all(f -> all(isfinite, ustrip.(f)),
+                      forces(System(sys_cpu_base; general_inters=(big_bias,))))
             fs_cpu = forces(System(sys_cpu_base; general_inters=(bias,)))
             fs_gpu = forces(System(sys_gpu_base; general_inters=(bias,)))
             @test any(f -> !iszero(f), fs_cpu)

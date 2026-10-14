@@ -265,6 +265,22 @@ function check_bias_atom_inds(general_inters, n_atoms)
     return nothing
 end
 
+const BuiltinBias = Union{LinearBias, SquareBias, FlatBottomSquareBias, PeriodicFlatBottomBias}
+
+# Built-in bias types with parameters that aren't plain data (e.g. BigFloat) can't be used with
+# GPU arrays, so their forces would fail on a GPU system
+function check_bias_gpu_types(general_inters, coords)
+    is_on_gpu(coords) || return nothing
+    for inter in values(general_inters)
+        if inter isa BiasPotential && inter.bias_type isa BuiltinBias && !isbits(inter.bias_type)
+            throw(ArgumentError("$(typeof(inter.bias_type)) has parameters that can't be " *
+                  "used in GPU arrays, so its forces can't be computed on a GPU system; " *
+                  "use Float32 or Float64 parameters, or run on the CPU"))
+        end
+    end
+    return nothing
+end
+
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch,
 # d_bias_buf and bad_step GPU-only). One per bias in buffers.bias_scratch (force.jl), keyed by
 # the bias.
@@ -334,8 +350,7 @@ A wrong opt-in can cause an illegal memory access, which leaves the GPU unusable
 of the Julia session.
 """
 uses_device_bias_gradient(bias_type) = false
-uses_device_bias_gradient(b::Union{LinearBias, SquareBias, FlatBottomSquareBias,
-                                   PeriodicFlatBottomBias}) = isbits(b)
+uses_device_bias_gradient(b::BuiltinBias) = isbits(b)
 
 # Partition a heterogeneous tuple of interactions into the BiasPotentials that take the sync-free
 # path and everything else, preserving each group's relative order. Recurses rather than
