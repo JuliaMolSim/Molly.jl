@@ -1,5 +1,4 @@
-export
-    ActiveThermoState
+export ActiveThermoState
 
 # ExtendedStateSpace(thermo_states; reuse_neighbors=true)
 #

@@ -800,14 +800,14 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         graph = single_window_tss_graph(K)
     elseif !(graph isa TSSGraph)
         throw(ArgumentError("graph must be a TSSGraph; construct one with " *
-                            "tss_grid_graph or build_tss_graph."))
+                            "tss_grid_graph or build_tss_graph"))
     end
     if graph.n_states != K
         throw(ArgumentError("TSS graph contains $(graph.n_states) states but " *
-                            "TSSState was given $(K) thermodynamic states."))
+                            "TSSState was given $(K) thermodynamic states"))
     end
     if !(1 <= first_state <= K)
-        throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)."))
+        throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)"))
     end
 
     active_state = ActiveThermoState(state_space, first_state)

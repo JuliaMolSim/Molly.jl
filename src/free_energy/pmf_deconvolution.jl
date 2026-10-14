@@ -1,6 +1,4 @@
-export
-    PMFDeconvolution,
-    pmf
+export PMFDeconvolution
 
 struct PMFGrid{N, T, E, C, W, V}
     edges::E

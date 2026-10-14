@@ -162,7 +162,7 @@ end
 function hremd_free_energies(thermo_states, coords_k, boundaries_k)
     K = length(thermo_states)
     coords_dev = [[Molly.to_device(c, AT) for c in v] for v in coords_k]
-    mbar_gen = assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
+    mbar_gen = Molly.assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
 
     # Index of every sample within its own state, to discard the start of each state
     sample_idx = zeros(Int, length(mbar_gen.win_of))
@@ -177,7 +177,7 @@ function hremd_free_energies(thermo_states, coords_k, boundaries_k)
 
     win_of = mbar_gen.win_of[kept]
     N_counts = [count(==(k), win_of) for k in 1:K]
-    F_k, logN = iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
+    F_k, logN = Molly.iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
 
     return F_k
 end

@@ -565,12 +565,12 @@ states = ThermoState[ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)
 target_state = ThermoState("target", βi, pres, sys_nobias)
 ```
 
-We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`assemble_mbar_inputs`](@ref) method:
+We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`Molly.assemble_mbar_inputs`](@ref) method:
 
 ```julia
 # MBAR.jl
 
-mbar_gen = assemble_mbar_inputs(
+mbar_gen = Molly.assemble_mbar_inputs(
     C, B, states; # Coordinates, boundaries and thermodynamic states
     target_state=target_state, # The target state, in our case the unbiased system
     energy_units=energy_units,
@@ -583,30 +583,31 @@ win_of   = mbar_gen.win_of   # Indexing helper that tells which k state was used
 shifts   = mbar_gen.shifts   # Numerical shifts, if used, for stability reasons when building the reduced energy matrix
 ```
 
-This generates the necessary inputs to use the self-consistent iteration method to solve the MBAR equations. Of course, Molly provides the [`iterate_mbar`](@ref) method to do so:
+This generates the necessary inputs to use the self-consistent iteration method to solve the MBAR equations. Of course, Molly provides the [`Molly.iterate_mbar`](@ref) method to do so:
 
 ```julia
 # MBAR.jl
 
 # Returns the relative free energy of each k state and log.(N_counts), needed for downstream computations
-F_k, logN = iterate_mbar(u, win_of, N_counts)
+F_k, logN = Molly.iterate_mbar(u, win_of, N_counts)
 ```
 
-With this, we can also produce a weight matrix and a vector of target weights, using the  [`mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
+With this, we can also produce a weight matrix and a vector of target weights, using the  [`Molly.mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
 
 ```julia
 # MBAR.jl
 
 # Returns the weights matrix and the target weights
-W_s, w_target = mbar_weights(u, u_target, F_k, N_counts, logN; check=true, shifts=shifts)
+W_s, w_target = Molly.mbar_weights(u, u_target, F_k, N_counts, logN; check=true, shifts=shifts)
 ```
 
-And finally, we can estimate the PMF using the output of the previous step by calling the [`pmf_with_uncertainty`](@ref) method:
+And finally, we can estimate the PMF using the output of the previous step by calling the [`Molly.pmf_with_uncertainty`](@ref) method:
 
 ```julia
 # MBAR.jl
 
-pmf_result = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
+pmf_result = Molly.pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV;
+                                        shifts=shifts, kBT=kBT)
 
 centers   = pmf_result.centers        # The collective variable
 PMF       = pmf_result.F              # PMF in kBT
@@ -615,11 +616,11 @@ sigma     = pmf_result.sigma_F        # Standard deviation in kBT
 sigma_enr = pmf_result.sigma_F_energy # Standard deviation in energy units
 ```
 
-But what about the short path? Well, we also provide an overload of the [`pmf_with_uncertainty`](@ref) method that allows to get the PMF in a single call by doing:
+But what about the short path? Well, we also provide an overload of the [`Molly.pmf_with_uncertainty`](@ref) method that allows to get the PMF in a single call by doing:
 
 ```julia
 # MBAR.jl
-pmf_result = pmf_with_uncertainty(
+pmf_result = Molly.pmf_with_uncertainty(
     C,            # Coordinates
     B,            # Boundaries
     states,       # Themodynamic states
@@ -1130,10 +1131,10 @@ simulate!(awh_sim, TOTAL_STEPS)
 across AWH iterations and repeated `simulate!` calls. Pass `initial_step` when resuming from
 a checkpoint whose coordinates and velocities already correspond to a nonzero step.
 
-After the run, `pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
+After the run, `Molly.pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
 
 ```julia
-pmf_result = pmf(awh_sim.pmf)
+pmf_result = Molly.pmf(awh_sim.pmf)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 
@@ -1606,7 +1607,7 @@ tss_state = TSSState(
     graph = tss_graph,
     first_state = 1,
     first_window = 1,
-    history_forgetting = TSSHistoryForgetting(alpha = FT(0.19), n_epochs = 16),
+    history_forgetting = Molly.TSSHistoryForgetting(alpha = FT(0.19), n_epochs = 16),
     adaptive_gamma = :covdet,
 )
 ```
@@ -1675,7 +1676,7 @@ Use the `initial_step` constructor keyword when restoring an existing simulation
 For PMF deconvolution, the script uses the automatic coupling path. This is safe for the same reason as in the AWH example above: each thermodynamic state contains exactly the two umbrella [`BiasPotential`](@ref)s that define the PMF dimensions, and they appear in the same order as the grid axes. The [`PMFDeconvolution`](@ref) object must be created before the run and passed to [`TSSSimulation`](@ref).
 
 ```julia
-pmf_result = pmf(pmf_deconv)
+pmf_result = Molly.pmf(pmf_deconv)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 
@@ -1875,7 +1876,7 @@ The TSS graph is a one-dimensional non-periodic ladder. With 20 states and `TSS_
     tss_state = TSSState(
         thermo_states;
         graph = tss_graph,
-        history_forgetting = TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
+        history_forgetting = Molly.TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
         adaptive_gamma = :covdet,
     )
 
@@ -1932,11 +1933,11 @@ simulate!(
 )
 ```
 
-After the run, `tss_free_energy_uncertainties` returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of $k_B T$.
+After the run, [`Molly.tss_free_energy_uncertainties`](@ref) returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of $k_B T$.
 
 ```julia
-jk_solv = tss_free_energy_uncertainties(tss_state_solv)
-jk_vac  = tss_free_energy_uncertainties(tss_state_vac)
+jk_solv = Molly.tss_free_energy_uncertainties(tss_state_solv)
+jk_vac  = Molly.tss_free_energy_uncertainties(tss_state_vac)
 
 f_solv = jk_solv.free_energies
 f_vac  = jk_vac.free_energies
@@ -2118,8 +2119,8 @@ The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 
 ### Logging TSS samples
 
 System loggers see only the physical system. To record what TSS knows about each sample, pass sample loggers to [`TSSSimulation`](@ref): `sample_loggers` for one replica, or `replica_sample_loggers` with one collection per replica.
-[`log_tss_sample!`](@ref) is called with each logger for every collected sample, after each block of `n_md_steps` MD steps, in adaptive and frozen runs. Like the system loggers, the sample loggers also see the initial configuration of each replica, at the start step of the first [`simulate!`](@ref) call.
-The [`TSSSample`](@ref) it receives gives the absolute MD step, the replica, its active system, the active state and window, the window's state indices, the reduced potentials of the sampled coordinates in the window states, the log normalization `log_den` and the conditional state weights.
+[`Molly.log_tss_sample!`](@ref) is called with each logger for every collected sample, after each block of `n_md_steps` MD steps, in adaptive and frozen runs. Like the system loggers, the sample loggers also see the initial configuration of each replica, at the start step of the first [`simulate!`](@ref) call.
+The [`Molly.TSSSample`](@ref) it receives gives the absolute MD step, the replica, its active system, the active state and window, the window's state indices, the reduced potentials of the sampled coordinates in the window states, the log normalization `log_den` and the conditional state weights.
 For example, to store the window reduced potentials of every fifth sample:
 
 ```julia
@@ -2137,7 +2138,7 @@ simulate!(tss_sim)
 values(sample_logger)
 ```
 
-The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
+The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `Molly.log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
 
 ## Free energies with REMD
 
@@ -2321,13 +2322,13 @@ function read_state_samples(sys_base, traj_prefix, K)
 end
 ```
 
-Every sample is then evaluated in every state with [`assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
+Every sample is then evaluated in every state with [`Molly.assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`Molly.iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
 
 ```julia
 function hremd_free_energies(thermo_states, coords_k, boundaries_k)
     K = length(thermo_states)
     coords_dev = [[Molly.to_device(c, AT) for c in v] for v in coords_k]
-    mbar_gen = assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
+    mbar_gen = Molly.assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
 
     # Index of every sample within its own state, to discard the start of each state
     sample_idx = zeros(Int, length(mbar_gen.win_of))
@@ -2342,7 +2343,7 @@ function hremd_free_energies(thermo_states, coords_k, boundaries_k)
 
     win_of = mbar_gen.win_of[kept]
     N_counts = [count(==(k), win_of) for k in 1:K]
-    F_k, logN = iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
+    F_k, logN = Molly.iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
 
     return F_k
 end

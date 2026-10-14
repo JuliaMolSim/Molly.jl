@@ -332,7 +332,7 @@ end
         )
 
         # Gradient of bias function with respect to CV
-        d_bias = bias_gradient(bias.bias_type, cv_sim)
+        d_bias = Molly.bias_gradient(bias.bias_type, cv_sim)
 
         fs_svec = d_bias .* d_coords
 
@@ -383,7 +383,7 @@ end
         fs_zero_anl = zero(fs)
 
         forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
-        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=Molly.cv_gradient)
         @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end
 end

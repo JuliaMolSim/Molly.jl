@@ -550,7 +550,7 @@ The available CV types are:
 
 Currently, CV calculation is always done on the CPU.
 Other CV functions can be added by the user.
-Every CV type needs to have its own struct, an associated method of the [`calculate_cv`](@ref) function and potentially a method for the `cv_gradient` function.
+Every CV type needs to have its own struct, an associated method of the [`calculate_cv`](@ref) function and potentially a method for the [`Molly.cv_gradient`](@ref) function.
 
 To define your own CV function, first define the `struct`:
 ```julia
@@ -569,7 +569,7 @@ end
 ```
 
 The gradient of [`calculate_cv`](@ref) is by default calculated with automatic differentiation if Enzyme is imported.
-However, it is also possible to manually add a method to the `cv_gradient` function to calculate the gradient without using automatic differentiation:
+However, it is also possible to manually add a method to the [`Molly.cv_gradient`](@ref) function to calculate the gradient without using automatic differentiation:
 ```julia
 function Molly.cv_gradient(cv_type::MyCV, coords, atoms, boundary, velocities; kwargs...)
     # Function to calculate the gradient of the CV function with respect to the coordinates of the system
@@ -600,7 +600,7 @@ function potential_energy(bias_fn::bias_type, cv_sim; kwargs...)
 end
 ```
 
-Finally, you need to add a method for `MyBias` to the `bias_gradient` function.
+Finally, you need to add a method for `MyBias` to the [`Molly.bias_gradient`](@ref) function.
 The method must return the derivative of the [`potential_energy`](@ref) method for `MyBias` with respect to `cv_sim`:
 ```julia
 function Molly.bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)

@@ -1,5 +1,4 @@
-export
-    assemble_mbar_inputs,
+@public assemble_mbar_inputs,
     iterate_mbar,
     mbar_weights,
     mbar_pmf,
@@ -667,7 +666,7 @@ High-level MBAR wrapper that computes free energies and reweighting weights from
 pre-assembled `MBARInput` struct.
 
 # Arguments
-`mbar_generator::MBARInput` - result from [`assemble_mbar_inputs`](@ref) containing:
+`mbar_generator::MBARInput` - result from [`Molly.assemble_mbar_inputs`](@ref) containing:
   - `u::AbstractMatrix` - reduced potentials (`N×K`).
   - `u_target::Union{AbstractVector, Nothing}` - reduced potentials at the target state.
   - `N::AbstractVector` - sample counts per state.
@@ -680,7 +679,7 @@ pre-assembled `MBARInput` struct.
 - `w_target::Vector{Float64}` - target-state weights.
 - `logD::Vector{Float64}` - per-frame log normalizers.
 
-This routine runs [`iterate_mbar`](@ref) to obtain relative free energies `F_k` and
+This routine runs [`Molly.iterate_mbar`](@ref) to obtain relative free energies `F_k` and
 then calls the lower-level `mbar_weights(u, u_target, f, N_counts, logN)`
 using the contents of `mbar_generator`.
 All internal consistency checks are disabled for speed.
@@ -704,9 +703,9 @@ end
              shifts=nothing, zero=:min, kBT=nothing)
 
 Compute a target-state PMF from solved MBAR quantities using the shared
-log-space PMF accumulator. Unlike `pmf_with_uncertainty`, this routine supports
-multi-dimensional observables and arbitrary grids, but it does not compute the
-large-sample covariance estimate.
+log-space PMF accumulator. Unlike [`Molly.pmf_with_uncertainty`](@ref), this routine
+supports multi-dimensional observables and arbitrary grids, but it does not compute
+the large-sample covariance estimate.
 """
 function mbar_pmf(u::AbstractMatrix,
                   u_target::AbstractVector,
@@ -997,7 +996,7 @@ computes the PMF along `CV`.
 - `shift::Bool=false` - subtract per-frame minima from `u` for stability.
 
 # Returns
-Same `PMF` struct as the lower-level `pmf_with_uncertainty`.
+Same `PMF` struct as the lower-level [`Molly.pmf_with_uncertainty`](@ref).
 """
 function pmf_with_uncertainty(coords_k::AbstractVector,
                               boundaries_k::AbstractVector,

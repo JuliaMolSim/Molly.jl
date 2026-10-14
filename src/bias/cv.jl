@@ -7,11 +7,12 @@ export
     CalcSingleDist,
     CalcDist,
     calculate_cv,
-    cv_gradient,
     CalcRg,
     CalcRMSD,
     CalcAngle,
     CalcTorsion
+
+@public cv_gradient
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
 function center_of_mass(coords, atoms)
@@ -209,7 +210,7 @@ This function does not apply the molecule correction over the boundaries; if
 required, `coords` can be obtained from `unwrap_molecules` first.
 The gradient of this function with respect to coordinates, used to calculate forces,
 is by default calculated with automatic differentiation when Enzyme is imported.
-Alternatively, the `cv_gradient` function can be defined for a new CV type.
+Alternatively, the [`Molly.cv_gradient`](@ref) function can be defined for a new CV type.
 """
 function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     coords_1 = @view coords[cv.atom_inds_1]
@@ -257,7 +258,7 @@ function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
     cross_ba_bc = ba × bc
     theta = bond_angle(ri, rj, rk, boundary)
 
-    grad = ustrip.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
     if iszero_value(cross_ba_bc)
         return -grad, theta
     end

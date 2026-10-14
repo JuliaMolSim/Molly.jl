@@ -1,3 +1,5 @@
+@public pmf
+
 @inline function online_pmf_logaddexp(a::T, b::T) where T
     if a == -T(Inf)
         return b

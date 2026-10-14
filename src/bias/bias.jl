@@ -2,12 +2,12 @@
 
 export
     LinearBias,
-    bias_gradient,
     SquareBias,
     FlatBottomSquareBias,
     PeriodicFlatBottomBias,
     BiasPotential
 
+@public bias_gradient
 
 @doc raw"""
     LinearBias(k, cv_target)

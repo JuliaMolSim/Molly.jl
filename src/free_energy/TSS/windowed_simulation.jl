@@ -46,7 +46,7 @@ end
     TSSSample
 
 One TSS sample, passed to the sample loggers of a [`TSSSimulation`](@ref) by
-[`log_tss_sample!`](@ref).
+[`Molly.log_tss_sample!`](@ref).
 
 A sample is collected after each block of `n_md_steps` molecular dynamics steps,
 from the coordinates at the end of the block, so a cycle collects
@@ -76,9 +76,9 @@ estimator before any update.
 
 `system`, `state_indices`, `reduced_potentials` and `weights` reference the
 simulation's own arrays, which are reused, so they are valid only during the
-call to [`log_tss_sample!`](@ref) and must not be modified. A logger that keeps
-data must copy it. Nothing is copied off the device for the logger: for a GPU
-system, `system.coords` is a device array.
+call to [`Molly.log_tss_sample!`](@ref) and must not be modified. A logger that
+keeps data must copy it. Nothing is copied off the device for the logger: for a
+GPU system, `system.coords` is a device array.
 """
 struct TSSSample{S, I, V, T}
     step::Int
@@ -109,7 +109,7 @@ function log_tss_sample! end
     TSSSampleLogger(observable::Function, T, n_steps)
 
 A TSS sample logger that stores `observable(sample)::T` for each
-[`TSSSample`](@ref) whose step is a multiple of `n_steps`.
+[`Molly.TSSSample`](@ref) whose step is a multiple of `n_steps`.
 
 Samples are collected every `n_md_steps` MD steps, so with `n_steps` a multiple
 of `n_md_steps` it records every `n_steps ÷ n_md_steps`-th sample of each
@@ -237,8 +237,8 @@ per newly constructed replica active system.
 `sample_loggers` supplies a collection of TSS sample loggers for a
 single-replica simulation, and `replica_sample_loggers` one collection per
 replica for multi-replica TSS, with distinct logger objects for each replica.
-[`log_tss_sample!`](@ref) is called with each logger for every collected
-[`TSSSample`](@ref), in adaptive and frozen runs, and for the initial
+[`Molly.log_tss_sample!`](@ref) is called with each logger for every collected
+[`Molly.TSSSample`](@ref), in adaptive and frozen runs, and for the initial
 configuration at the steps where the system loggers log it. A replica's sample loggers
 are called by the task that runs that replica, in sample order, so with
 `replica_parallel=:threads` the replicas call their own loggers concurrently.
