@@ -1381,6 +1381,7 @@ function System(;
     TO = typeof(topology)
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
+    general_inters = convert_bias_float_types(general_inters, coords, T)
     GI = typeof(general_inters)
     VS = typeof(virtual_sites)
     NF = typeof(neighbor_finder)

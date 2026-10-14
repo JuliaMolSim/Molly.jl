@@ -969,6 +969,20 @@ end
         @test build((BiasPotential(CalcRg([], :wrap), bias_type),)) isa System # empty means all atoms
     end
 
+    # Backends without Float64 (Metal) get the built-in bias parameters in the system float type
+    @testset "Float64 bias parameters converted for backends without Float64" begin
+        cv = CalcDist([1], [2], CalcSingleDist())
+        b64 = BiasPotential(cv, SquareBias(300.0u"kJ * mol^-1 * nm^-2", 1.0u"nm"))
+        b32 = Molly.bias_with_float_type(b64, Float32)
+        @test b32.bias_type === SquareBias(300.0f0u"kJ * mol^-1 * nm^-2", 1.0f0u"nm")
+        @test Molly.bias_with_float_type(BiasPotential(cv, FlatBottomSquareBias(3, 2, 0.5)),
+                                         Float32).bias_type === FlatBottomSquareBias(3, 2, 0.5f0)
+        b_table = BiasPotential(cv, TableBias(300.0u"kJ * mol^-1 * nm^-2", [1.0u"nm"]))
+        @test Molly.bias_with_float_type(b_table, Float32) === b_table
+        inters = (b64,)
+        @test Molly.convert_bias_float_types(inters, [SVector(0.0, 0.0, 0.0)u"nm"], Float32) === inters
+    end
+
     # A reused persistent `grad` buffer must not retain a stale force contribution from a
     # PREVIOUS step's CalcMinDist winning pair once the winner moves to a different pair.
     @testset "Stale-winner regression (CalcMinDist)" for AT in array_list

@@ -246,6 +246,8 @@ With the GPU CV types, `bias_gradient` runs on the GPU for bias types where
 custom ones that opt in. The others run it on the host.
 Built-in bias types need plain-data parameters such as Float32 or Float64 on GPU systems;
 building a GPU `System` throws otherwise.
+On GPU backends without Float64, such as Metal, Float64 parameters of the built-in bias types
+are converted to the system float type.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
 at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with
 the step at which they first appeared.
@@ -271,25 +273,33 @@ end
 const BuiltinBias = Union{LinearBias, SquareBias, FlatBottomSquareBias, PeriodicFlatBottomBias}
 
 # Built-in bias types with parameters that aren't plain data (e.g. BigFloat) can't be used with
-# GPU arrays, so their forces would fail on a GPU system. Float64 parameters lose precision on
-# backends without Float64.
+# GPU arrays, so their forces would fail on a GPU system
 function check_bias_gpu_types(general_inters, coords)
     is_on_gpu(coords) || return nothing
     for inter in values(general_inters)
-        (inter isa BiasPotential && inter.bias_type isa BuiltinBias) || continue
-        b = inter.bias_type
-        if !isbits(b)
-            throw(ArgumentError("$(typeof(b)) has parameters that can't be " *
+        if inter isa BiasPotential && inter.bias_type isa BuiltinBias && !isbits(inter.bias_type)
+            throw(ArgumentError("$(typeof(inter.bias_type)) has parameters that can't be " *
                   "used in GPU arrays, so its forces can't be computed on a GPU system; " *
                   "use Float32 or Float64 parameters, or run on the CPU"))
         end
-        if !KernelAbstractions.supports_float64(get_backend(coords)) &&
-                any(x -> ustrip(x) isa Float64, ntuple(i -> getfield(b, i), fieldcount(typeof(b))))
-            @warn "$(typeof(b)) has Float64 parameters, which this GPU backend doesn't support, " *
-                  "so they are computed in lower precision; use Float32 parameters to avoid this"
-        end
     end
     return nothing
+end
+
+# Backends without Float64 (Metal) compute in the system float type, as for float_type_high
+# (default_float_type_high), so Float64 parameters of built-in biases are converted to it
+bias_with_float_type(inter, T) = inter
+
+function bias_with_float_type(inter::BiasPotential{<:Any, <:BuiltinBias}, T)
+    b = inter.bias_type
+    fields = map(x -> ustrip(x) isa Float64 ? T(ustrip(x)) * unit(x) : x,
+                 ntuple(i -> getfield(b, i), fieldcount(typeof(b))))
+    return BiasPotential(inter.cv_type, Base.typename(typeof(b)).wrapper(fields...))
+end
+
+function convert_bias_float_types(general_inters, coords, T)
+    KernelAbstractions.supports_float64(get_backend(coords)) && return general_inters
+    return map(inter -> bias_with_float_type(inter, T), general_inters)
 end
 
 # Per-BiasPotential lazy scratch (grad/d_buf/fs_svec on both backends; dist_scratch,
