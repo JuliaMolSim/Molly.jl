@@ -136,7 +136,7 @@ end
 function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
-    d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
+    d_abs <= fb.r_fb && return zero(fb.k * d)
     return fb.k * (d_abs - fb.r_fb) * d / d_abs
 end
 
@@ -208,7 +208,7 @@ function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
     dist = abs(d_wrapped)
     
     if dist <= pb.r_fb
-        return zero(pb.k * pb.r_fb)
+        return zero(pb.k * d_wrapped)
     else
         disp = dist - pb.r_fb
         return pb.k * disp * sign(d_wrapped)
@@ -348,6 +348,8 @@ Defaults to `false`, so custom bias types run `bias_gradient` on the host.
 The built-in bias types return `true` when their parameters are plain data.
 Define `Molly.uses_device_bias_gradient(::MyBias) = true` only if `bias_gradient` for `MyBias`
 is GPU-compilable and reads no host memory, for example no global arrays.
+It must also return the same type for every CV value, since the GPU buffer type comes from one
+call.
 A wrong opt-in can cause an illegal memory access, which leaves the GPU unusable for the rest
 of the Julia session.
 """

@@ -1376,6 +1376,24 @@ end
             @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
         end
 
+        # Each sample bias_gradient call below lands on the zero branch, which sets the GPU buffer type
+        @testset "Built-in biases with integer parameters on GPU match CPU" begin
+            coords_t = [SVector(0.0, 0.0, 0.0)u"nm", SVector(1.0, 0.0, 0.0)u"nm",
+                        SVector(1.0, 1.0, 0.0)u"nm", SVector(1.0, 1.0, 1.0)u"nm"]
+            cv = CalcDist([1], [4], CalcSingleDist(), :wrap)
+            for (coords, bias) in (
+                    (coords_v, BiasPotential(cv, FlatBottomSquareBias(1u"kJ * mol^-1 * nm^-2",
+                                                                      2u"nm", 0.5u"nm"))),
+                    (coords_v, BiasPotential(cv, LinearBias(100u"kJ * mol^-1 * nm^-1", 1.0u"nm"))),
+                    (coords_t, BiasPotential(CalcTorsion([1, 2, 3, 4], :wrap),
+                                             PeriodicFlatBottomBias(300u"kJ * mol^-1", 1, 0.0))))
+                fs_cpu = forces(System(sys_cpu_base; coords=coords, general_inters=(bias,)))
+                fs_gpu = forces(System(sys_gpu_base; coords=CuArray(coords), general_inters=(bias,)))
+                @test any(!iszero, fs_cpu)
+                @test all(isapprox.(Molly.from_device(fs_gpu), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+            end
+        end
+
         # The fused GPU kernel for CalcMinDist/CalcMaxDist uses O(group) memory, not O(group^2) --
         # assert via CUDA.@allocated rather than reproducing the OOM the old approach hit.
         @testset "CalcMinDist GPU memory is O(group), not O(group^2)" begin
