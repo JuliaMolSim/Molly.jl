@@ -732,7 +732,7 @@ The atoms, coordinates, velocities, boundary, interactions, constraints, virtual
 Units are stripped without conversion, so the numbers are in the units each value is stored with.
 Converting to a higher precision does not recover the precision lost when the original values were stored.
 Interaction types are rebuilt from their converted fields by calling the constructor of the same name with the fields in order.
-Custom types where this does not work, for example because they contain buffers, should define a method of `Molly.convert_component`; see its docstring.
+Custom types where this does not work, for example because they contain buffers, should define a method of `Molly.convert_component(conversion, x)`; see `src/conversion.jl` for the existing methods.
 
 ## Atom types
 

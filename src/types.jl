@@ -1465,8 +1465,12 @@ For example `System(sys; float_type=Float64, units=false, array_type=Array)` giv
 unitless `Float64` copy of a system on the CPU.
 The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites,
 neighbor finder and Boltzmann constant are converted, including any given as keyword
-arguments, as described in the docstring of `Molly.convert_component`, which custom types
-can add methods to.
+arguments.
+Floats and values with units are converted, arrays are converted element-wise and moved to
+the new device, and other structs are rebuilt from their converted fields with the
+constructor of the same name.
+Custom types for which this does not work, for example because they hold buffers, should
+define a method of `Molly.convert_component(conversion, x)`.
 Units are stripped without conversion, so the numbers are in the units each value is stored
 with.
 Units can not be added to a system without units.

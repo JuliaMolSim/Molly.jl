@@ -1,18 +1,17 @@
 # Conversion of a System to another float type, to unitless values or to another device,
 #   done by `System(sys; float_type, units, array_type)`
 
-"""
+#=
     SystemConversion
 
-The target of a [`System`](@ref) conversion, passed to [`convert_component`](@ref).
+The target of a System conversion, passed to `convert_component`.
 
 The type parameters are the new float type, array type and `float_type_high`.
 `strip_units` and `grad_safe` are the settings of the new system, and `same_device` is
 whether it is on the same device as the original one.
 `atoms`, `coords` and `boundary` are the converted values, available when converting
-the parts of the system that depend on them such as the neighbor finder and
-[`PME`](@ref).
-"""
+the parts of the system that depend on them such as the neighbor finder and PME.
+=#
 struct SystemConversion{T, AT, TH, A, C, B}
     strip_units::Bool
     grad_safe::Bool
@@ -28,11 +27,11 @@ function SystemConversion{T, AT, TH}(strip_units, grad_safe, same_device=true, a
                 strip_units, grad_safe, same_device, atoms, coords, boundary)
 end
 
-"""
+#=
     convert_component(conversion, x)
 
-Convert `x`, part of a [`System`](@ref), to the float type, units and device given by a
-[`SystemConversion`](@ref).
+Convert `x`, part of a System, to the float type, units and device given by a
+`SystemConversion`.
 
 This is used by `System(sys; float_type, units, array_type)`.
 Floats are converted to the new float type.
@@ -47,7 +46,7 @@ name with the fields in order, and an error is thrown if that fails or gives a s
 different field values.
 Custom types for which this does not work, for example because they hold buffers or have
 an inner constructor taking different arguments, should define a method of this function.
-"""
+=#
 convert_component(c::SystemConversion, x) = convert_struct(c, x)
 
 convert_component(::SystemConversion{T}, x::AbstractFloat) where {T} = T(x)
