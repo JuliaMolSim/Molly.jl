@@ -270,14 +270,22 @@ end
 const BuiltinBias = Union{LinearBias, SquareBias, FlatBottomSquareBias, PeriodicFlatBottomBias}
 
 # Built-in bias types with parameters that aren't plain data (e.g. BigFloat) can't be used with
-# GPU arrays, so their forces would fail on a GPU system
+# GPU arrays, so their forces would fail on a GPU system. Float64 parameters lose precision on
+# backends without Float64.
 function check_bias_gpu_types(general_inters, coords)
     is_on_gpu(coords) || return nothing
     for inter in values(general_inters)
-        if inter isa BiasPotential && inter.bias_type isa BuiltinBias && !isbits(inter.bias_type)
-            throw(ArgumentError("$(typeof(inter.bias_type)) has parameters that can't be " *
+        (inter isa BiasPotential && inter.bias_type isa BuiltinBias) || continue
+        b = inter.bias_type
+        if !isbits(b)
+            throw(ArgumentError("$(typeof(b)) has parameters that can't be " *
                   "used in GPU arrays, so its forces can't be computed on a GPU system; " *
                   "use Float32 or Float64 parameters, or run on the CPU"))
+        end
+        if !KernelAbstractions.supports_float64(get_backend(coords)) &&
+                any(x -> ustrip(x) isa Float64, ntuple(i -> getfield(b, i), fieldcount(typeof(b))))
+            @warn "$(typeof(b)) has Float64 parameters, which this GPU backend doesn't support, " *
+                  "so they are computed in lower precision; use Float32 parameters to avoid this"
         end
     end
     return nothing
