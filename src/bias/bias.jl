@@ -244,8 +244,8 @@ gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
 With the GPU CV types, `bias_gradient` runs on the GPU for bias types where
 [`uses_device_bias_gradient`](@ref) is `true`: the built-in ones with plain-data parameters, and
 custom ones that opt in. The others run it on the host.
-Built-in bias types need plain-data parameters such as Float32 or Float64 on GPU systems;
-building a GPU `System` throws otherwise.
+Built-in bias types need plain-data parameters such as Float32 or Float64 with the GPU CV types
+on GPU systems; building a GPU `System` throws otherwise.
 On GPU backends without Float64, such as Metal, Float64 parameters of the built-in bias types
 are converted to the system float type.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
@@ -274,11 +274,12 @@ end
 const BuiltinBias = Union{LinearBias, SquareBias, FlatBottomSquareBias, PeriodicFlatBottomBias}
 
 # Built-in bias types with parameters that aren't plain data (e.g. BigFloat) can't be used with
-# GPU arrays, so their forces would fail on a GPU system
+# GPU arrays, so their forces would fail with a GPU CV type on a GPU system
 function check_bias_gpu_types(general_inters, coords)
     is_on_gpu(coords) || return nothing
     for inter in values(general_inters)
-        if inter isa BiasPotential && inter.bias_type isa BuiltinBias && !isbits(inter.bias_type)
+        if inter isa BiasPotential && inter.bias_type isa BuiltinBias &&
+                uses_builtin_cv_gradient(inter.cv_type) && !isbits(inter.bias_type)
             throw(ArgumentError("$(typeof(inter.bias_type)) has parameters that can't be " *
                   "used in GPU arrays, so its forces can't be computed on a GPU system; " *
                   "use Float32 or Float64 parameters, or run on the CPU"))

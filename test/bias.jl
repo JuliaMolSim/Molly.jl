@@ -1223,6 +1223,12 @@ end
             sys_gpu = System(atoms=CuArray(atoms_v[1:2]), coords=CuArray(coords), boundary=boundary)
             fs_cpu = pe_fs_gpu_vs_cpu(sys_cpu, sys_gpu, bias)
             @test ustrip(fs_cpu[1][1]) != 0
+
+            # A custom CV runs on the host, so any bias parameters work on a GPU system
+            bias_big = BiasPotential(cv, SquareBias(big(400.0)u"kJ * mol^-1 * nm^-2", big(1.0)u"nm"))
+            fs_big_cpu = forces(System(sys_cpu; general_inters=(bias_big,)))
+            fs_big_gpu = forces(System(sys_gpu; general_inters=(bias_big,)))
+            @test all(isapprox.(Molly.from_device(fs_big_gpu), fs_big_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
         end
 
         # A custom atom type with no :mass field, only a mass(atom) overload, must work through
