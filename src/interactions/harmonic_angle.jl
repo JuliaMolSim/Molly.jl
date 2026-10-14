@@ -53,7 +53,7 @@ end
 end
 
 @doc raw"""
-    HarmonicAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    HarmonicAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic bond angle between three atoms in an alchemical system, the λ version of
 [`HarmonicAngle`](@ref).
@@ -67,7 +67,7 @@ V(\theta) = \frac{w}{2} k (\theta - \theta_0)^2
 where `θ0` and the atom order are as for [`HarmonicAngle`](@ref), and the weight ``w`` and
 the parameters depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of the
 atoms mixed with `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology `k` and `θ0` are single values.
 ``w = 1`` if the angle involves an atom unique to one state or only environment atoms,

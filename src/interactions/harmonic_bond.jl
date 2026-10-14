@@ -40,7 +40,7 @@ end
 end
 
 @doc raw"""
-    HarmonicBondλ(; k, r0, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    HarmonicBondλ(; k, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic bond between two atoms in an alchemical system, the λ version of
 [`HarmonicBond`](@ref).
@@ -53,7 +53,7 @@ V(r) = \frac{w}{2} k (r - r_0)^2
 ```
 where the weight ``w`` and the parameters depend on the alchemical roles of the atoms and on
 ``\lambda``, the `λ` of the atoms mixed with `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology `k` and `r0` are single values.
 ``w = 1`` if the bond involves an atom unique to one state or only environment atoms,

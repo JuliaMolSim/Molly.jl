@@ -53,7 +53,7 @@ end
 end
 
 @doc raw"""
-    CosineAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    CosineAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
 
 A cosine bond angle between three atoms in an alchemical system, the λ version of
 [`CosineAngle`](@ref).
@@ -67,7 +67,7 @@ V(\theta) = w k(1 + \cos(\theta - \theta_0))
 where `θ0` is as for [`CosineAngle`](@ref), and the weight ``w`` and the parameters depend on
 the alchemical roles of the atoms and on ``\lambda``, the `λ` of the atoms mixed with
 `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology `k` and `θ0` are single values.
 ``w = 1`` if the angle involves an atom unique to one state or only environment atoms,

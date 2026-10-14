@@ -63,9 +63,16 @@ function tyk2_ligands(; kwargs...)
     return sysA, sysB, mapping, core_mapAB
 end
 
-const lambda_schedulers = (DefaultLambdaScheduler, LinearLambdaScheduler, GROMACSLambdaABFEScheduler,
-                           GROMACSLambdaRBFEScheduler, OpenFEScheduler, NAMDLambdaScheduler,
-                           QuartersLambdaScheduler, EleScaledLambdaScheduler)
+const lambda_schedulers = (
+    Molly.DefaultLambdaScheduler,
+    Molly.LinearLambdaScheduler,
+    Molly.GROMACSLambdaABFEScheduler,
+    Molly.GROMACSLambdaRBFEScheduler,
+    Molly.OpenFEScheduler,
+    Molly.NAMDLambdaScheduler,
+    Molly.QuartersLambdaScheduler,
+    Molly.EleScaledLambdaScheduler,
+)
 const softcores = (:beutler, :gapsys, :scaled)
 
 @testset "OpenFE TYK2 comparison" begin
@@ -159,7 +166,7 @@ const softcores = (:beutler, :gapsys, :scaled)
                                               g isa Molly.LJDispersionCorrectionλ))
         for (λ, ref) in ((0.0, sysA), (1.0, sysB))
             sys_dual = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB;
-                                        scheduler=DefaultLambdaScheduler(dual=true))
+                                        scheduler=Molly.DefaultLambdaScheduler(dual=true))
             @test isapprox(disp(sys_dual), disp(ref); rtol=1e-7)
         end
     end
@@ -169,7 +176,7 @@ const softcores = (:beutler, :gapsys, :scaled)
     for (λ, λtag) in ((0.0, "l0"), (0.25, "l25"), (0.5, "l5"), (0.75, "l75"), (1.0, "l1"))
         # --- Hybrid system at the OpenMM positions ---
         sys = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB;
-                               scheduler=OpenFEScheduler(dual=false),
+                               scheduler=Molly.OpenFEScheduler(dual=false),
                                LJsoftcore=:gapsys,
                                Csoftcore=:scaled)
 
@@ -280,10 +287,10 @@ end
 
     # A CHARMM protein carries backbone CMAP terms, whose grid single topology can not interpolate
     @test_throws ArgumentError RelativeFESystem(sysA, sysB, FT(0), mapping, core_mapAB;
-                        scheduler=OpenFEScheduler(dual=false), LJsoftcore=:gapsys,
+                        scheduler=Molly.OpenFEScheduler(dual=false), LJsoftcore=:gapsys,
                         Csoftcore=:gapsys)
 
-    for scheduler in (DefaultLambdaScheduler(dual=true),)
+    for scheduler in (Molly.DefaultLambdaScheduler(dual=true),)
         for (λ, ref, state) in ((0.0, sysA, :A), (1.0, sysB, :B))
             sys = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB; scheduler=scheduler,
                                    LJsoftcore=:gapsys, Csoftcore=:gapsys)
@@ -332,7 +339,7 @@ end
             sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true),
                                      LJsoftcore=LJsoftcore, Csoftcore=Csoftcore)
             @test maximum(norm.(forces(sys_1)[solvent] .- F_decoupled[solvent])) < ftol
-            S(dual=true) isa OpenFEScheduler || @test abs(disp(sys_0) - disp(sys)) < etol
+            S(dual=true) isa Molly.OpenFEScheduler || @test abs(disp(sys_0) - disp(sys)) < etol
         end
     end
 
@@ -340,7 +347,7 @@ end
                    dist_cutoff=1.0u"nm", center_coords=false, constraints=:hbonds,
                    constraint_algorithm=SetupLINCS(), rigid_water=true)
     n_cons(s) = sum(length(c.dist_constraints) for c in s.constraints)
-    for S in (DefaultLambdaScheduler, OpenFEScheduler)
+    for S in (Molly.DefaultLambdaScheduler, Molly.OpenFEScheduler)
         sys_0 = AbsoluteFESystem(sys_c, 0.0, solute; scheduler=S(dual=true))
         @test n_cons(sys_0) == n_cons(sys_c)
         @test abs(potential_energy(sys_0; general_inters=without_disp(sys_0)) -
@@ -359,8 +366,8 @@ end
                             core.charge, core.σ, core.ϵ, λ, core.alch_role), dummy(role, λ),
                             special, core.σ)[4]
     for (role, λ, pinned) in ((Molly.InsertRole, 0.25, 0.3u"nm"), (Molly.DeleteRole, 0.75, 0.275u"nm"))
-        @test mixed(OpenFEScheduler, role, λ, false) ≈ 0.2875u"nm"
-        @test mixed(OpenFEScheduler, role, λ, true) ≈ pinned
-        @test mixed(DefaultLambdaScheduler, role, λ, false) ≈ pinned
+        @test mixed(Molly.OpenFEScheduler, role, λ, false) ≈ 0.2875u"nm"
+        @test mixed(Molly.OpenFEScheduler, role, λ, true) ≈ pinned
+        @test mixed(Molly.DefaultLambdaScheduler, role, λ, false) ≈ pinned
     end
 end

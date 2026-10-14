@@ -72,7 +72,7 @@ end
 
 @doc raw"""
     RBTorsionλ(; c0, c1, c2, c3, c4, c5, λ_mixing=MinimumMixing(),
-               scheduler=DefaultLambdaScheduler())
+               scheduler=Molly.DefaultLambdaScheduler())
 
 A Ryckaert-Bellemans torsion angle between four atoms in an alchemical system, the λ version
 of [`RBTorsion`](@ref).
@@ -90,7 +90,7 @@ of the atoms mixed with `λ_mixing`.
 ``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
 involves only unique and environment atoms.
 
-`scheduler` is the [`LambdaScheduler`](@ref), which has to use dual topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
 Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
 an error if the scheduler has `dual=false`.
 

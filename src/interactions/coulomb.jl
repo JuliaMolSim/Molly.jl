@@ -1604,7 +1604,7 @@ end
 
 @doc raw"""
     CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
-                       scheduler=DefaultLambdaScheduler(), weight_special=1,
+                       scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                        coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction with charges scaled by an
@@ -1778,7 +1778,7 @@ end
     CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
                                 use_neighbors=false, σ_mixing=LorentzMixing(),
                                 ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
-                                scheduler=DefaultLambdaScheduler(), weight_special=1,
+                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                 coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction between two atoms with the
@@ -1975,7 +1975,7 @@ end
 @doc raw"""
     CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3, σQ=1.0u"nm",
                                use_neighbors=false, λ_mixing=MinimumMixing(),
-                               scheduler=DefaultLambdaScheduler(), weight_special=1,
+                               scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction between two atoms with the

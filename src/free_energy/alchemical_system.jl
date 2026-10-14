@@ -1,7 +1,8 @@
 export
     AbsoluteFESystem,
-    set_lambda!,
     RelativeFESystem
+
+@public set_lambda!
 
 ### Checks for hybrid system ###
 # same atoms in environment in both A and B
@@ -285,7 +286,7 @@ cheaper than building the system again. Environment atoms keep λ = 1.
 A ladder of states can share everything λ-independent:
 
 ```julia
-states = [set_lambda!(System(sys), λ) for λ in 0:0.1:1]
+states = [Molly.set_lambda!(System(sys), λ) for λ in 0:0.1:1]
 ```
 
 `System(sys)` shares its arrays, so the masks exist once, but the states then also share the scratch
@@ -342,7 +343,7 @@ end
 
 """
     AbsoluteFESystem(sys, global_λ, mapping; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up an alchemical system for an absolute free energy calculation, in which the atoms in
@@ -357,10 +358,10 @@ random velocities are generated at `temp`.
 - `global_λ`: the global λ of the system, from 0 (coupled) to 1 (decoupled).
 - `mapping`: a vector with the indices of the atoms to decouple.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
@@ -448,7 +449,7 @@ end
 
 """
     RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up a hybrid system for a relative free energy calculation that transforms system A
@@ -473,11 +474,11 @@ of A and as a massless copy with the parameters of B. Interactions are replaced 
     is how a covalently bound ligand is set up.
 - `core_mapAB`: a dictionary from each core atom index in `sysA` to its index in `sysB`.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and `dual=false`
-    single topology (parameter scaling), which does not support `intraLJ=true`.
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaRBFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and
+    `dual=false` single topology (parameter scaling), which does not support `intraLJ=true`.
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`

@@ -43,7 +43,7 @@ Random.seed!(RNG_SEED)
 # electrostatics are annihilated with its charges, and intraLJ=true keeps its internal LJ.
 # For the GROMACS convention with two PME grids, use GROMACSLambdaABFEScheduler instead.
 lambda_schedule = FT.(range(1.0, stop=0.0, length=N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
+scheduler = Molly.DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")

@@ -350,7 +350,8 @@ end
 end
 
 @doc raw"""
-    CMAPTorsionλ(; index, size, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    CMAPTorsionλ(; index, size, λ_mixing=MinimumMixing(),
+                 scheduler=Molly.DefaultLambdaScheduler())
 
 Torsional correction map (CMAP) for sets of five atoms in an alchemical system, the λ version
 of [`CMAPTorsion`](@ref).
@@ -369,7 +370,7 @@ the atoms mixed with `λ_mixing`.
 ``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
 involves only unique and environment atoms.
 
-`scheduler` is the [`LambdaScheduler`](@ref), which has to use dual topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
 Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
 an error if the scheduler has `dual=false`.
 

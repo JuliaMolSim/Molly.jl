@@ -64,7 +64,7 @@ end
 end
 
 """
-    Ewald(dist_cutoff; error_tol=0.0005, scheduler=DefaultLambdaScheduler())
+    Ewald(dist_cutoff; error_tol=0.0005, scheduler=Molly.DefaultLambdaScheduler())
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -326,7 +326,7 @@ end
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
-        scheduler=DefaultLambdaScheduler(), float_type_high=Float64,
+        scheduler=Molly.DefaultLambdaScheduler(), float_type_high=Float64,
         grad_safe=false, n_threads=Threads.nthreads())
 
 Particle mesh Ewald (PME) summation for long range electrostatics implemented as an
@@ -1466,15 +1466,15 @@ end
 @doc raw"""
     PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
           fixed_charges=true, mesh_dims=nothing,
-          scheduler=GROMACSLambdaABFEScheduler(), λ=0.0, grad_safe=false,
+          scheduler=Molly.GROMACSLambdaABFEScheduler(), λ=0.0, grad_safe=false,
           n_threads=Threads.nthreads())
 
 Particle mesh Ewald (PME) summation for long range electrostatics in an alchemical system,
 the λ version of [`PME`](@ref) that mixes the two end states as GROMACS does.
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert a [`PME`](@ref) to this
-type when the scheduler is [`GROMACSLambdaABFEScheduler`](@ref) or
-[`GROMACSLambdaRBFEScheduler`](@ref).
+type when the scheduler is [`Molly.GROMACSLambdaABFEScheduler`](@ref) or
+[`Molly.GROMACSLambdaRBFEScheduler`](@ref).
 These are the only schedulers it is compatible with, and they have to use dual topology.
 The charges of the two end states are spread onto separate grids and the potential energy is
 defined as
@@ -1485,13 +1485,13 @@ where ``E_{\mathrm{PME}}(q)`` is the [`PME`](@ref) potential energy for atomic c
 ``q^A`` and ``q^B`` are the charges of the atoms at a global λ of 0 and 1, where the atoms
 that are switched off in an end state have zero charge.
 ``\lambda_q`` is the electrostatic coupling that the scheduler gives at the global λ `λ`,
-which is ``\min(2\lambda, 1)`` for [`GROMACSLambdaABFEScheduler`](@ref) and ``\lambda`` for
-[`GROMACSLambdaRBFEScheduler`](@ref).
+which is ``\min(2\lambda, 1)`` for [`Molly.GROMACSLambdaABFEScheduler`](@ref) and ``\lambda``
+for [`Molly.GROMACSLambdaRBFEScheduler`](@ref).
 The forces and the virial are mixed in the same way.
 The potential energy is linear in ``\lambda_q``, whereas [`PME`](@ref) with a scheduler uses
 one grid on which the charge of each atom is scaled.
 
-[`set_lambda!`](@ref) changes the global λ of a system without rebuilding the grids.
+[`Molly.set_lambda!`](@ref) changes the global λ of a system without rebuilding the grids.
 `fixed_charges` is accepted for consistency with [`PME`](@ref) but has no effect, as the
 charges of the end states are always recalculated from the atoms.
 See [`PME`](@ref) for the other arguments, the interactions that this should be used
@@ -1536,7 +1536,7 @@ end
 
 # Weight w mixing the end-state grids, E = (1 - w)E[q(0)] + wE[q(1)]. w is the electrostatic
 # coupling rather than global_λ, which requires s_I(λ) == 1 - s_D(λ).
-function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler,GROMACSLambdaRBFEScheduler}, 
+function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler, GROMACSLambdaRBFEScheduler}, 
                                 global_λ, ::Val{T}) where T
     for l in 0.0:0.001:1.0
         l0, _, _ = scale_elec_dual(scheduler, l, InsertRole)

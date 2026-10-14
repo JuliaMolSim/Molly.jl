@@ -51,7 +51,7 @@ end
 end
 
 @doc raw"""
-    HarmonicTorsionλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    HarmonicTorsionλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic torsion angle between four atoms in an alchemical system, the λ version of
 [`HarmonicTorsion`](@ref).
@@ -65,7 +65,7 @@ V(\theta) = w k (\theta - \theta_0)^2
 where `θ` and `θ0` are as for [`HarmonicTorsion`](@ref), and the weight ``w`` and the
 parameters depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of the
 atoms mixed with `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology `k` and `θ0` are single values.
 ``w = 1 - \lambda`` if the torsion involves a core atom with the parameters of state A,

@@ -45,7 +45,7 @@ end
 end
 
 @doc raw"""
-    MorseBondλ(; D, a, r0, λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler())
+    MorseBondλ(; D, a, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
 
 A Morse potential bond between two atoms in an alchemical system, the λ version of
 [`MorseBond`](@ref).
@@ -62,7 +62,7 @@ where the weight ``w`` depends on the alchemical roles of the atoms and on ``\la
 otherwise ``w = 1 - \lambda`` if it involves a core atom with the parameters of state A and
 ``w = \lambda`` if it involves a core atom with the parameters of state B.
 
-`scheduler` is the [`LambdaScheduler`](@ref), which has to use dual topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
 Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
 an error if the scheduler has `dual=false`.
 """

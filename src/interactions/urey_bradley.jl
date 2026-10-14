@@ -71,7 +71,7 @@ end
 
 @doc raw"""
     UreyBradleyλ(; kangle, θ0, kbond, r0, λ_mixing=MinimumMixing(),
-                 scheduler=DefaultLambdaScheduler())
+                 scheduler=Molly.DefaultLambdaScheduler())
 
 An interaction between three atoms in an alchemical system consisting of a harmonic bond
 angle and a harmonic bond between the outer atoms, the λ version of [`UreyBradley`](@ref).
@@ -85,7 +85,7 @@ V(\theta, r) = w \left( \frac{1}{2} k_a (\theta - \theta_0)^2 + \frac{1}{2} k_b 
 where `θ0` and the atom order are as for [`UreyBradley`](@ref), and the weight ``w`` and the
 parameters depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of the
 atoms mixed with `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology `kangle`, `θ0`, `kbond` and `r0` are single values.
 ``w = 1`` if the interaction involves an atom unique to one state or only environment atoms,

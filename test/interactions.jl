@@ -210,7 +210,7 @@
         core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
         ref_inter = LennardJones()
         # intraLJ=true keeps the sterics between alchemical atoms of the same role on
-        scheduler = DefaultLambdaScheduler(intraLJ=true)
+        scheduler = Molly.DefaultLambdaScheduler(intraLJ=true)
 
         for inter in (LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler),
                       LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler))
@@ -400,7 +400,7 @@
 
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
-        scheduler = DefaultLambdaScheduler()
+        scheduler = Molly.DefaultLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
@@ -449,7 +449,7 @@
             @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
         end
 
-        scheduler = EleScaledLambdaScheduler()
+        scheduler = Molly.EleScaledLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         ref_i, ref_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
         scaled_inter = Molly.CoulombScaled(scheduler=scheduler)
@@ -814,7 +814,7 @@
 
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = DefaultLambdaScheduler()
+            scheduler = Molly.DefaultLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
@@ -863,7 +863,7 @@
 
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = EleScaledLambdaScheduler()
+            scheduler = Molly.EleScaledLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [

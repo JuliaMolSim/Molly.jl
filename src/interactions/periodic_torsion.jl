@@ -131,7 +131,7 @@ end
 
 @doc raw"""
     PeriodicTorsionλ(; periodicities, phases, ks, proper, λ_mixing=MinimumMixing(),
-                     scheduler=DefaultLambdaScheduler())
+                     scheduler=Molly.DefaultLambdaScheduler())
 
 A periodic torsion angle between four atoms in an alchemical system, the λ version of
 [`PeriodicTorsion`](@ref).
@@ -141,7 +141,7 @@ A periodic torsion angle between four atoms in an alchemical system, the λ vers
 `phases` and `ϕ` are as for [`PeriodicTorsion`](@ref).
 The weights below depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of
 the atoms mixed with `λ_mixing`.
-`scheduler` is the [`LambdaScheduler`](@ref), which selects dual or single topology.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
 
 In dual topology the potential energy is defined as
 ```math

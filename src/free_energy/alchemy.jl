@@ -1,5 +1,4 @@
-export
-    LambdaScheduler,
+@public LambdaScheduler,
     DefaultLambdaScheduler,
     LinearLambdaScheduler,
     GROMACSLambdaABFEScheduler,
@@ -50,27 +49,28 @@ Turns `global_λ` into the couplings of the steric, electrostatic and bonded int
 alchemical role.
 
 `schedule` selects how the couplings are staged along `global_λ`. Each schedule has an alias
-that is normally used instead: [`DefaultLambdaScheduler`](@ref), [`LinearLambdaScheduler`](@ref),
-[`GROMACSLambdaABFEScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref),
-[`OpenFEScheduler`](@ref), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and
-[`EleScaledLambdaScheduler`](@ref), e.g. `OpenFEScheduler(dual=false)`. Schedulers are passed to
-[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
+that is normally used instead: [`Molly.DefaultLambdaScheduler`](@ref),
+[`Molly.LinearLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref),
+[`Molly.GROMACSLambdaRBFEScheduler`](@ref), [`Molly.OpenFEScheduler`](@ref),
+[`Molly.NAMDLambdaScheduler`](@ref), [`Molly.QuartersLambdaScheduler`](@ref) and
+[`Molly.EleScaledLambdaScheduler`](@ref), e.g. `Molly.OpenFEScheduler(dual=false)`.
+Schedulers are passed to [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
 
 # Arguments
 - `dual=true`: whether to use dual topology (energy scaling) or single topology (parameter
-    scaling). `false` by default for [`OpenFEScheduler`](@ref).
+    scaling). `false` by default for [`Molly.OpenFEScheduler`](@ref).
 - `LJindividual=false`: in single topology, whether the Lennard-Jones parameters are scaled for
     each atom before mixing (`true`) or mixed for each state and then interpolated (`false`).
 - `LJspecial=false`: the same choice for the Lennard-Jones 1-4 interactions.
 - `Cindividual=false`: the same choice for the Coulomb interactions. `true` by default for
-    [`OpenFEScheduler`](@ref).
+    [`Molly.OpenFEScheduler`](@ref).
 - `Cspecial=false`: the same choice for the Coulomb 1-4 interactions.
 - `intraLJ=false`: whether the Lennard-Jones interactions between alchemical atoms are kept on
     (`true`) or scaled with the atoms (`false`).
 - `Tscaled=true`: whether a torsion that spans core and unique atoms follows the core atom and is
     scaled (`true`) or follows the unique atom and stays on at every `global_λ` (`false`). `false`
-    by default for [`OpenFEScheduler`](@ref), which does not scale these torsions, so that Molly
-    reproduces it exactly. Torsions of unique atoms only are never scaled either way.
+    by default for [`Molly.OpenFEScheduler`](@ref), which does not scale these torsions, so that
+    Molly reproduces it exactly. Torsions of unique atoms only are never scaled either way.
 
 Coulomb interactions between alchemical atoms are always scaled with the atoms, as the PME mesh
 scales the charge of each atom.
@@ -112,7 +112,7 @@ state gain their Lennard-Jones interactions between `0` and `0.5` and their char
 and `1`, so an atom is never charged without its Lennard-Jones core. Core atoms, present in both
 states, are interpolated linearly.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const DefaultLambdaScheduler = LambdaScheduler{DefaultSchedule}
 
@@ -124,7 +124,7 @@ const DefaultLambdaScheduler = LambdaScheduler{DefaultSchedule}
 Lambda scheduler that scales the electrostatics and sterics of all alchemical atoms linearly and
 at the same time, from `global_λ = 0` to `1`.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const LinearLambdaScheduler = LambdaScheduler{LinearSchedule}
 
@@ -140,9 +140,9 @@ Lennard-Jones interactions between `0.5` and `1`, so decoupled atoms lose their 
 With [`AbsoluteFESystem`](@ref), PME is replaced by the two grid scheme of GROMACS, where the
 grids of the two end states are mixed with the electrostatic coupling. Inserted atoms follow the
 same stages and would gain their charges before their Lennard-Jones interactions, so use
-[`DefaultLambdaScheduler`](@ref) for insertions.
+[`Molly.DefaultLambdaScheduler`](@ref) for insertions.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const GROMACSLambdaABFEScheduler = LambdaScheduler{GROMACSABFESchedule}
 
@@ -153,11 +153,11 @@ const GROMACSLambdaABFEScheduler = LambdaScheduler{GROMACSABFESchedule}
 
 Lambda scheduler for relative free energy calculations, following GROMACS.
 
-The electrostatics and sterics are scaled linearly, as in [`LinearLambdaScheduler`](@ref). With
-[`RelativeFESystem`](@ref), PME is replaced by the two grid scheme of GROMACS, where the grids of
-the two end states are mixed with the electrostatic coupling.
+The electrostatics and sterics are scaled linearly, as in [`Molly.LinearLambdaScheduler`](@ref).
+With [`RelativeFESystem`](@ref), PME is replaced by the two grid scheme of GROMACS, where the
+grids of the two end states are mixed with the electrostatic coupling.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const GROMACSLambdaRBFEScheduler = LambdaScheduler{GROMACSRBFESchedule}
 
@@ -169,13 +169,13 @@ const GROMACSLambdaRBFEScheduler = LambdaScheduler{GROMACSRBFESchedule}
 Lambda scheduler that reproduces the relative free energy setup of
 [OpenFE](https://github.com/OpenFreeEnergy/openfe).
 
-The electrostatics and sterics follow the same stages as [`DefaultLambdaScheduler`](@ref), but
-the defaults use single topology with individual scaling of the Coulomb parameters. As in OpenFE,
-the charges of the 1-4 interactions are scaled for each state, and the alchemical atoms do not
-contribute to the Lennard-Jones dispersion correction. Use `LJsoftcore=:gapsys` and
+The electrostatics and sterics follow the same stages as [`Molly.DefaultLambdaScheduler`](@ref),
+but the defaults use single topology with individual scaling of the Coulomb parameters. As in
+OpenFE, the charges of the 1-4 interactions are scaled for each state, and the alchemical atoms
+do not contribute to the Lennard-Jones dispersion correction. Use `LJsoftcore=:gapsys` and
 `Csoftcore=:scaled` to match OpenFE.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const OpenFEScheduler = LambdaScheduler{OpenFESchedule}
 
@@ -192,7 +192,7 @@ their Lennard-Jones interactions between `1/3` and `1`. Atoms that only exist in
 gain their Lennard-Jones interactions between `0` and `2/3` and their charges between `0.5` and
 `1`. Core atoms are interpolated linearly.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const NAMDLambdaScheduler = LambdaScheduler{NAMDSchedule}
 
@@ -209,7 +209,7 @@ their Lennard-Jones interactions between `0.25` and `0.5`. Atoms that only exist
 state gain their Lennard-Jones interactions between `0.5` and `0.75` and their charges between
 `0.75` and `1`. Core atoms are interpolated linearly over the full range.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const QuartersLambdaScheduler = LambdaScheduler{QuartersSchedule}
 
@@ -218,7 +218,7 @@ const QuartersLambdaScheduler = LambdaScheduler{QuartersSchedule}
                              Cindividual=false, Cspecial=false, intraLJ=false,
                              Tscaled=true)
 
-Lambda scheduler with the stages of [`DefaultLambdaScheduler`](@ref) and a non-linear
+Lambda scheduler with the stages of [`Molly.DefaultLambdaScheduler`](@ref) and a non-linear
 electrostatic coupling.
 
 The charges of atoms that only exist in the first state are coupled by `1 - (2 global_λ)^2`
@@ -226,7 +226,7 @@ between `global_λ = 0` and `0.5`, and those of atoms that only exist in the sec
 `sqrt(2 (global_λ - 0.5))` between `0.5` and `1`. The charges therefore change slowly close to
 full coupling and quickly close to decoupling.
 
-A [`LambdaScheduler`](@ref), see there for the keyword arguments.
+A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """
 const EleScaledLambdaScheduler = LambdaScheduler{EleScaledSchedule}
 

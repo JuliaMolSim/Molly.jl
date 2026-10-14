@@ -4,9 +4,9 @@
 # function stubs live here in core Molly. The implementations that need Lux/HDF5/
 # KernelAbstractions are in ext/MollyLuxExt.jl (loaded when Lux and HDF5 are available).
 
-export
-    ANIPotential,
-    ani2x_data_dir,
+export ANIPotential
+
+@public ani2x_data_dir,
     compute_aevs
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
@@ -27,6 +27,8 @@ celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
 """
     ANIPotential(path; T=Float32, ensemble_idx=nothing)
 
+The ANI potential implemented as an AtomsCalculators.jl calculator.
+
 Load an ANI-2x neural network potential from an HDF5 file exported by
 `test/torchani_reference.py`. Requires `Lux` and `HDF5` to be loaded.
 
@@ -38,7 +40,7 @@ By default all ensemble members are loaded and their energies averaged. Pass
 
 Coordinates without units are treated as nm following the Molly convention, and
 converted internally to the Å the ANI parameters use. Periodic systems must use a
-neighbor finder; the neighbor-list path applies the minimum-image convention.
+neighbor finder.
 
 Note: the ANI-2x weights are `Float32`, so the energy/force paths run in `Float32`
 internally regardless of the system's coordinate type.
@@ -66,7 +68,7 @@ end
 
 Path to the ANI-2x data directory: a lazily-downloaded artifact holding `ani2x.h5` (the model
 weights) and `6mrr_ani2x.json` (TorchANI reference energies). Requires `Lux` and `HDF5`. Load
-the potential with `ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))`.
+the potential with `ANIPotential(joinpath(Molly.ani2x_data_dir(), "ani2x.h5"))`.
 """
 function ani2x_data_dir end
 
@@ -75,8 +77,8 @@ function ani2x_data_dir end
 
 Compute the Atomic Environment Vectors (AEVs) for all atoms, returning an
 `(n_atoms, aev_length)` matrix. `neighbors` is a `NeighborList` (or `nothing` for an all-pairs
-build). This is the reference AEV path; the GPU-portable kernel version is `compute_aevs_ka`.
-Requires `Lux` and `HDF5`. Implementation is in ext/MollyLuxExt.jl.
+build).
+Requires `Lux` and `HDF5`.
 """
 function compute_aevs end
 
