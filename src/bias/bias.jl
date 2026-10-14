@@ -240,9 +240,11 @@ bonded molecules on the GPU. On steps without a virial they need no transfer to 
 [`CalcRMSD`](@ref) does the same apart from a host-side Kabsch alignment every step.
 Other CV types, including custom ones, copy the coordinates and atoms to the host and the
 gradient back, since arbitrary user code isn't guaranteed to be GPU-safe.
-With the GPU CV types, `bias_gradient` of the built-in bias types also runs on the GPU. Custom
-bias types run it on the host, unless `Molly.uses_device_bias_gradient(::MyBias) = true` is
-defined, which requires a GPU-compilable `bias_gradient` that reads no host memory.
+With the GPU CV types, `bias_gradient` runs on the GPU for bias types where
+[`uses_device_bias_gradient`](@ref) is `true`: the built-in ones with plain-data parameters, and
+custom ones that opt in. The others run it on the host.
+Built-in bias types need plain-data parameters such as Float32 or Float64 on GPU systems;
+building a GPU `System` throws otherwise.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
 at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with
 the step at which they first appeared.
