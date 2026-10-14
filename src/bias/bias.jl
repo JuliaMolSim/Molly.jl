@@ -545,8 +545,9 @@ const BIAS_FINITE_CHECK_EVERY = 20
 # BIAS_FINITE_CHECK_EVERY steps, when forces! gets check_flags=true, and at the end of
 # simulate!. A no-op for biases that haven't used the sync-free path.
 function check_bias_finite_flags!(general_inters, buffers)
-    live = Tuple((b, bias_scratch(buffers, b)) for b in general_inters
-                 if b isa BiasPotential && !isnothing(bias_scratch(buffers, b).bad_step))
+    scratches = Tuple((b, get(buffers.bias_scratch, b, nothing)) for b in general_inters
+                      if b isa BiasPotential)
+    live = filter(((_, s),) -> !isnothing(s) && !isnothing(s.bad_step), scratches)
     isempty(live) && return nothing
     bad_steps_h = from_device(reduce(vcat, map(bs -> bs[2].bad_step, live)))
     for ((bias, _), bad_step) in zip(live, bad_steps_h)
