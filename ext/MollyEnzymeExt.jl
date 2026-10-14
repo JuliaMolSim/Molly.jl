@@ -1075,11 +1075,13 @@ function EnzymeRules.reverse(config::RevConfig,
 end
 
 # Applying force units
-# A straight copy of the force matrix into the force vector, so the adjoint is a copy the
+# A copy or addition of the force matrix into the force vector, so the adjoint is a copy the
 # other way. Each thread owns one atom, so no atomics are needed. `fs` is overwritten by
-# the primal, so its cotangent is consumed here rather than accumulated.
+# the primal only when !accumulate, so its cotangent is consumed only in that case.
 
-@kernel inbounds=true function apply_force_units_rev_kernel!(dfs, dfs_mat, ::Val{D}) where D
+@kernel inbounds=true function apply_force_units_rev_kernel!(
+    dfs, dfs_mat, ::Val{D}, ::Val{accumulate}
+) where {D, accumulate}
     atom_i = @index(Global, Linear)
 
     if atom_i <= length(dfs)
@@ -1087,15 +1089,18 @@ end
         for dim in 1:D
             dfs_mat[dim, atom_i] = ustrip(df[dim])
         end
-        dfs[atom_i] = zero(eltype(dfs))
+        if !accumulate
+            dfs[atom_i] = zero(eltype(dfs))
+        end
     end
 end
 
 function EnzymeRules.augmented_primal(config::RevConfig,
                                       func::Const{typeof(Molly.apply_force_units_gpu!)},
                                       ::Type{RT}, fs::Annotation{<:AbstractGPUArray}, fs_mat::Annotation,
-                                      force_units::Annotation, D::Const, T::Const) where RT
-    func.val(fs.val, fs_mat.val, force_units.val, D.val, T.val)
+                                      force_units::Annotation, D::Const, T::Const,
+                                      accumulate::Const) where RT
+    func.val(fs.val, fs_mat.val, force_units.val, D.val, T.val, accumulate.val)
     primal = EnzymeRules.needs_primal(config) ? fs.val : nothing
     shadow = (EnzymeRules.needs_shadow(config) && !(fs isa Const)) ? fs.dval : nothing
     return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
@@ -1107,14 +1112,14 @@ function EnzymeRules.reverse(config::RevConfig,
                              func::Const{typeof(Molly.apply_force_units_gpu!)},
                              ::Type{RT}, tape, fs::Annotation{<:AbstractGPUArray}, fs_mat::Annotation,
                              force_units::Annotation, D::Const{Val{DD}},
-                             T::Const) where {RT, DD}
+                             T::Const, accumulate::Const) where {RT, DD}
     dfs, dfs_mat = whole_shadow(fs), whole_shadow(fs_mat)
     if !isnothing(dfs) && !isnothing(dfs_mat)
         backend = get_backend(dfs)
         kernel! = apply_force_units_rev_kernel!(backend, Molly.gpu_threads_copy(length(dfs)))
-        kernel!(dfs, dfs_mat, Val(DD); ndrange=length(dfs))
+        kernel!(dfs, dfs_mat, Val(DD), accumulate.val; ndrange=length(dfs))
     end
-    return (nothing, nothing, nothing, nothing, nothing)
+    return (nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 # Whole-function rules for gpu_potential_energy and gpu_forces!
@@ -1279,9 +1284,9 @@ function EnzymeRules.augmented_primal(config::RevConfig,
                                       buffers::Annotation, needs_vir::Const,
                                       pairwise_inters::Annotation,
                                       specific_inter_lists::Annotation,
-                                      n_threads::Annotation) where RT
+                                      n_threads::Annotation, accumulate::Const) where RT
     func.val(fs.val, sys.val, neighbors.val, step_n.val, buffers.val, needs_vir.val,
-             pairwise_inters.val, specific_inter_lists.val, n_threads.val)
+             pairwise_inters.val, specific_inter_lists.val, n_threads.val, accumulate.val)
     tape = adjoint_tape(sys.val, !(fs isa Const),
                         Molly.any_uses_velocity(values(pairwise_inters.val)))
     primal = EnzymeRules.needs_primal(config) ? (fs.val, buffers.val) : nothing
@@ -1299,7 +1304,7 @@ function EnzymeRules.reverse(config::RevConfig,
                              buffers::Annotation, needs_vir::Const{Val{NV}},
                              pairwise_inters::Annotation,
                              specific_inter_lists::Annotation,
-                             n_threads::Annotation) where {RT, NV}
+                             n_threads::Annotation, accumulate::Const) where {RT, NV}
     NV && error("gradients through the virial are not implemented on the GPU")
     dfs = whole_shadow(fs)
     dinters = nothing
@@ -1311,7 +1316,7 @@ function EnzymeRules.reverse(config::RevConfig,
         # The kernel writes rather than accumulates, so fs_mat needs no zeroing first.
         dfs_mat = buffers.val.fs_mat
         kernel_u! = apply_force_units_rev_kernel!(backend, Molly.gpu_threads_copy(length(dfs)))
-        kernel_u!(dfs, dfs_mat, Val(D); ndrange=length(dfs))
+        kernel_u!(dfs, dfs_mat, Val(D), accumulate.val; ndrange=length(dfs))
 
         prim = primal_arrays(s, tape)
         sc = grad_scratch!(buffers.val, values(pairwise_inters.val), eltype(dfs_mat),
@@ -1337,7 +1342,8 @@ function EnzymeRules.reverse(config::RevConfig,
         value_cotangent!(pairwise_inters,
                          isnothing(dinters) ? Enzyme.make_zero(pairwise_inters.val) : dinters)
     end
-    return (nothing, nothing, nothing, nothing, nothing, nothing, dpis, nothing, nothing)
+    return (nothing, nothing, nothing, nothing, nothing, nothing,
+            dpis, nothing, nothing, nothing)
 end
 
 end

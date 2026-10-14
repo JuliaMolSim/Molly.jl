@@ -46,6 +46,9 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
+# Whether a general interaction is evaluated before pairwise and specific interactions
+evaluate_before_pairwise(inter) = false
+
 # Whether a pairwise interaction uses velocities in its force/potential energy calculation
 pairwise_uses_velocity(inter) = false
 

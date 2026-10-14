@@ -5,6 +5,7 @@ using Reexport
 @reexport using Unitful
 
 using AcceleratedKernels
+import Adapt
 using Atomix
 import AtomsBase
 import AtomsCalculators
@@ -31,6 +32,7 @@ using SpecialFunctions
 using Unitful
 using UnitfulAtomic
 using StructArrays
+import TimerOutputs
 
 using LinearAlgebra
 using Random
@@ -51,6 +53,7 @@ include("kernels.jl")
 include("force.jl")
 include("energy.jl")
 include("free_energy/alchemy.jl")
+include("interactions/charge_equilibration.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
@@ -99,6 +102,5 @@ include("free_energy/scale_dual.jl")
 include("free_energy/TSS.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
-
-
+include("interactions/reaxff.jl")
 end
