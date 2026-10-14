@@ -1458,8 +1458,32 @@ Convenience constructor for changing properties in a `System`.
 
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
+
+The system can also be converted to another float type, to unitless values or to another
+device by changing `float_type`, `units` or `array_type`.
+For example `System(sys; float_type=Float64, units=false, array_type=Array)` gives a
+unitless `Float64` copy of a system on the CPU.
+The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites,
+neighbor finder and Boltzmann constant are converted, including any given as keyword
+arguments, as described in the docstring of `Molly.convert_component`, which custom types
+can add methods to.
+Units are stripped without conversion, so the numbers are in the units each value is stored
+with.
+Units can not be added to a system without units.
+Loggers are dropped unless given with the `loggers` keyword argument, since their histories
+and observables are tied to the original float type, units and device.
+`float_type_high` defaults to the higher precision of `float_type` and the original
+`float_type_high`.
+[`PME`](@ref) is set up again for the new system, taking `grad_safe` and `float_type_high`
+from it.
+The neighbor finder keeps its eligible and special matrices, sparse or dense.
+On the same device its type is kept if the new system can use it.
+Otherwise, for example when the system moves between CPU and GPU or a
+[`GPUNeighborFinder`](@ref) is used with `grad_safe=true`, the neighbor finder that system
+setup chooses by default for the new device, `grad_safe` and boundary is used.
+Conversion to a higher precision can not recover the precision lost in the original values.
 """
-function System(sys::System{<:Any, <:Any, T, TH};
+function System(sys::System{<:Any, AT, T, TH};
                 atoms=sys.atoms,
                 coords=sys.coords,
                 boundary=sys.boundary,
@@ -1477,11 +1501,20 @@ function System(sys::System{<:Any, <:Any, T, TH};
                 energy_units=sys.energy_units,
                 k=sys.k,
                 float_type=T,
-                float_type_high=TH,
+                float_type_high=promote_type(float_type, TH),
+                units::Bool=(sys.energy_units != NoUnits),
+                array_type=AT,
                 data=sys.data,
                 grad_safe=sys.grad_safe,
                 strictness=default_strictness(),
-                launch_config=sys.launch_config) where {T, TH}
+                launch_config=sys.launch_config) where {AT, T, TH}
+    if float_type !== T || array_type !== AT || units != (sys.energy_units != NoUnits)
+        args = (; atoms, coords, boundary, velocities, atoms_data, topology, pairwise_inters,
+                specific_inter_lists, general_inters, constraints, virtual_sites,
+                neighbor_finder, loggers, force_units, energy_units, k)
+        return convert_system(sys, args, float_type, float_type_high, array_type, units,
+                              data, grad_safe, strictness, launch_config)
+    end
     return System(
         atoms=atoms,
         coords=coords,

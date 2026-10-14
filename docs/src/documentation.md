@@ -723,6 +723,17 @@ In this case, try using the same units throughout.
 The float type of a [`System`](@ref) is read from the boundary by default and can be set with the `float_type` argument.
 The coordinates, velocities and boundary should all use this float type; mixing `Float32` and `Float64` data silently loses the precision you asked for on CPU and can fail to compile on GPU, so it is reported according to `strictness`.
 
+A [`System`](@ref) can be converted to another float type, to unitless values or to another device by giving `float_type`, `units` or `array_type` to the copy constructor.
+For example, a system simulated with units in `Float32` on the GPU can be evaluated in `Float64` without units on the CPU, which is suitable for Enzyme:
+```julia
+sys_cpu = System(sys; float_type=Float64, units=false, array_type=Array, grad_safe=true)
+```
+The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites, neighbor finder and Boltzmann constant are converted, and loggers are dropped unless given with the `loggers` keyword argument.
+Units are stripped without conversion, so the numbers are in the units each value is stored with.
+Converting to a higher precision does not recover the precision lost when the original values were stored.
+Interaction types are rebuilt from their converted fields by calling the constructor of the same name with the fields in order.
+Custom types where this does not work, for example because they contain buffers, should define a method of `Molly.convert_component`; see its docstring.
+
 ## Atom types
 
 Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
