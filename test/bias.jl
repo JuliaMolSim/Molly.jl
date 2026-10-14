@@ -1336,6 +1336,15 @@ end
                                                                Molly.init_buffers!(sys_gpu, 1))
             @test_throws "non-finite value at step 7" forces(sys_gpu_base, nothing, 7;
                                                              general_inters=(bias,))
+
+            # Constrained systems reach forces! through compute_initial_total_virial!
+            sr = SHAKE_RATTLE(n_atoms=4, dist_constraints=[DistanceConstraint(1, 2, 1.0u"nm")])
+            sys_gpu_c = System(sys_gpu_base; general_inters=(bias,), constraints=(sr,))
+            @test_throws "non-finite value at step 7" virial(sys_gpu_c, nothing, 7)
+            @test_throws "non-finite value at step 7" forces_virial(sys_gpu_c, nothing, 7)
+            @test_throws "non-finite value at step 7" pressure(sys_gpu_c, nothing, 7)
+            @test_throws "non-finite value at step 7" pressure(sys_gpu_c, nothing, 7,
+                                                               Molly.init_buffers!(sys_gpu_c, 1))
             bias_tors = BiasPotential(CalcTorsion([1, 1, 3, 4], :wrap), # zero-length bond
                                       SquareBias(50.0u"kJ * mol^-1", 0.5))
             @test_throws ArgumentError forces(System(sys_cpu_base; general_inters=(bias_tors,)))
