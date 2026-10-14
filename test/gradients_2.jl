@@ -1178,3 +1178,108 @@ end
         test_params(name, sys_ref, params_dic)
     end
 end
+
+@testset "Parameters with units" begin
+    function garnet_sys(AT, units)
+        ff = MolecularForceField(
+            joinpath(ff_dir, "ethanol_garnet.xml");
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=units,
+        )
+        return System(
+            joinpath(data_dir, "ethanol_garnet.pdb"),
+            ff;
+            units=units,
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupCoulombReactionField(),
+            dist_cutoff=(units ? 1.0u"nm" : 1.0),
+            strictness=:nowarn,
+        )
+    end
+
+    # Single-threaded so that the energies and forces can be compared exactly
+    pe(sys) = potential_energy(sys; n_threads=1)
+    fs(sys) = from_device(forces(sys; n_threads=1))
+
+    sys_units   = garnet_sys(Array, true)
+    sys_nounits = garnet_sys(Array, false)
+    params_dic = extract_parameters(sys_units)
+
+    # Plain numbers in the units that each parameter is stored with in the system, which
+    #   for this force field are the same numbers as for the unitless system
+    @test params_dic isa Dict{String, Float64}
+    @test params_dic == extract_parameters(sys_nounits)
+    i_C1 = findfirst(ad -> ad.atom_type == "C1", sys_units.atoms_data)
+    @test params_dic["atom_C1_σ"] == ustrip(u"nm", sys_units.atoms[i_C1].σ)
+    @test params_dic["atom_C1_ϵ"] == ustrip(u"kJ * mol^-1", sys_units.atoms[i_C1].ϵ)
+    @test params_dic["atom_C1_mass"] == ustrip(u"g/mol", sys_units.atoms[i_C1].mass)
+
+    bonds_units = sys_units.specific_inter_lists[1]
+    bond_key = "inter_HB_$(bonds_units.types[1])_k"
+    @test params_dic[bond_key] == ustrip(u"kJ * mol^-1 * nm^-2", bonds_units.inters[1].k)
+
+    # Per-interaction helpers take plain numbers in the units of the fields or values
+    #   with units
+    bond = bonds_units.inters[1]
+    @test Molly.inject_parameters(bond, Molly.parameter_values(bond)...) == bond
+    @test Molly.inject_parameters(bond, ustrip.(Molly.parameter_values(bond))...) == bond
+    bond_Å = Molly.inject_parameters(bond, bond.k / 100 * u"nm^2/Å^2", 10 * bond.r0 * u"Å/nm")
+    @test bond_Å.k ≈ bond.k
+    @test bond_Å.r0 ≈ bond.r0
+    torsion = sys_units.specific_inter_lists[3].inters[1]
+    @test Molly.inject_parameters(torsion, ustrip.(Molly.parameter_values(torsion))...) == torsion
+
+    # Injecting unchanged values leaves the system unchanged
+    plan = ParameterPlan(sys_units, params_dic)
+    sys_rt = inject_gradients(sys_units, params_dic, plan)
+    @test sys_rt.atoms == sys_units.atoms
+    @test sys_rt.masses == sys_units.masses
+    @test all(il_rt.inters == il.inters for (il_rt, il) in zip(
+                values(sys_rt.specific_inter_lists), values(sys_units.specific_inter_lists)))
+    @test values(sys_rt.pairwise_inters) == values(sys_units.pairwise_inters)
+    @test pe(sys_rt) == pe(sys_units)
+    @test fs(sys_rt) == fs(sys_units)
+
+    # Inject one modified value per parameter family, into the system with units and into
+    #   the unitless system
+    torsion_key = only(k for k in keys(params_dic)
+                       if startswith(k, "inter_PT_H1/C1/C2/H4_") && endswith(k, "_k_3"))
+    modified = Dict(
+        "atom_C1_σ"     => params_dic["atom_C1_σ"] * 1.05,
+        "atom_O1_ϵ"     => params_dic["atom_O1_ϵ"] * 0.9,
+        "atom_H1_mass"  => params_dic["atom_H1_mass"] * 2,
+        bond_key        => params_dic[bond_key] * 0.8,
+        torsion_key     => params_dic[torsion_key] + 1.0,
+        "inter_DEXP_alpha" => params_dic["inter_DEXP_alpha"] * 1.1,
+    )
+    params_mod = merge(params_dic, modified)
+    sys_mod = inject_gradients(sys_units, params_mod, plan)
+    sys_mod_nounits = inject_gradients(sys_nounits, params_mod)
+
+    params_mod_extracted = extract_parameters(sys_mod)
+    for (k, v) in modified
+        @test params_mod_extracted[k] == v
+    end
+    @test params_mod_extracted == params_mod
+    @test unit(sys_mod.atoms[i_C1].σ) == u"nm"
+    @test eltype(sys_mod.masses) == eltype(sys_units.masses)
+    @test sys_mod.total_mass ≈ sum(sys_mod.masses)
+    @test sys_mod.total_mass > sys_units.total_mass
+
+    E_mod = pe(sys_mod)
+    @test !isapprox(E_mod, pe(sys_units); rtol=1e-6)
+    @test ustrip(u"kJ * mol^-1", E_mod) ≈ pe(sys_mod_nounits) rtol=1e-12
+    @test map(f -> ustrip.(u"kJ * mol^-1 * nm^-1", f), fs(sys_mod)) ≈ fs(sys_mod_nounits) rtol=1e-12
+
+    for AT in array_list[2:end]
+        sys_gpu = garnet_sys(AT, true)
+        plan_gpu = ParameterPlan(sys_gpu, params_dic)
+        @test extract_parameters(sys_gpu) == params_dic
+        @test pe(inject_gradients(sys_gpu, params_dic, plan_gpu)) ≈ pe(sys_units) rtol=1e-10
+        sys_mod_gpu = inject_gradients(sys_gpu, params_mod, plan_gpu)
+        @test sys_mod_gpu.atoms isa AT
+        @test extract_parameters(sys_mod_gpu) == params_mod
+        @test pe(sys_mod_gpu) ≈ E_mod rtol=1e-10
+    end
+end

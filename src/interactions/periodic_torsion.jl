@@ -80,8 +80,8 @@ parameter_values(inter::PeriodicTorsion) = (inter.phases..., inter.ks...)
 @inline function inject_parameters(inter::PeriodicTorsion{N, T, E}, vals::Tuple) where {N, T, E}
     return PeriodicTorsion{N, T, E}(
         inter.periodicities,
-        ntuple(i -> convert(T, vals[i]    ), N),
-        ntuple(i -> convert(E, vals[N + i]), N),
+        ntuple(i -> convert_parameter(T, vals[i]    ), N),
+        ntuple(i -> convert_parameter(E, vals[N + i]), N),
         inter.proper,
     )
 end
