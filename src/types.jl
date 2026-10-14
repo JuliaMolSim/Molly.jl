@@ -1473,7 +1473,7 @@ Units can not be added to a system without units.
 Loggers are dropped unless given with the `loggers` keyword argument, since their histories
 and observables are tied to the original float type, units and device.
 `float_type_high` defaults to the higher precision of `float_type` and the original
-`float_type_high`.
+`float_type_high` on the same device, and to the default for the new device otherwise.
 [`PME`](@ref) is set up again for the new system, taking `grad_safe` and `float_type_high`
 from it.
 The neighbor finder keeps its eligible and special matrices, sparse or dense.
@@ -1501,9 +1501,10 @@ function System(sys::System{<:Any, AT, T, TH};
                 energy_units=sys.energy_units,
                 k=sys.k,
                 float_type=T,
-                float_type_high=promote_type(float_type, TH),
                 units::Bool=(sys.energy_units != NoUnits),
                 array_type=AT,
+                float_type_high=(array_type === AT ? promote_type(float_type, TH) :
+                                 default_float_type_high(array_type, float_type)),
                 data=sys.data,
                 grad_safe=sys.grad_safe,
                 strictness=default_strictness(),
