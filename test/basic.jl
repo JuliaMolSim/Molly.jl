@@ -2069,8 +2069,7 @@ end
         [copy(coords) for _ in 1:n_replicas]
     )
 
-    # Since ReplicaSystem no longer stores full `System` objects in a `replicas` tuple,
-    # we test that the core unperturbed components were correctly absorbed by the AlchemicalPartition
+    # Test that the core unperturbed components were correctly absorbed by the AlchemicalPartition
     # and the state interaction arrays.
     @test repsys.partition.master_sys.atoms == sys.atoms
     for i in 1:n_replicas

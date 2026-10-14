@@ -8,6 +8,13 @@ export
     CubicSplineCutoff,
     PolynomialCutoff
 
+@public AbstractCutoff
+
+"""
+Base type for non-bonded interaction cutoffs.
+
+Custom cutoffs should subtype this.
+"""
 abstract type AbstractCutoff{P} end
 
 Base.:+(c1::T, ::T) where {T <: AbstractCutoff} = c1

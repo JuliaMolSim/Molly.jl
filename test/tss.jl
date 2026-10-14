@@ -83,7 +83,7 @@ mutable struct TSSSampleCounter
     n::Int
 end
 
-Molly.log_tss_sample!(counter::TSSSampleCounter, sample::TSSSample) = (counter.n += 1; counter)
+Molly.log_tss_sample!(counter::TSSSampleCounter, sample::Molly.TSSSample) = (counter.n += 1; counter)
 
 function tss_sample_record(sample)
     return (

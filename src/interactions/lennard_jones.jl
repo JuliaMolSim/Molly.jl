@@ -1049,7 +1049,6 @@ end
     val = (26 * σ6 * (1 - (λ*λR))) / 7
     R = inter.α * sqrt(cbrt(val))
 
-    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f * inv(r)) * dr
@@ -1123,7 +1122,6 @@ end
         return special ? pe * inter.weight_special : pe
     end
 
-    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
     pe = pe_cutoff(cutoff, inter, r, params)
     return special ? pe * inter.weight_special : pe

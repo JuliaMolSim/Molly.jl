@@ -179,7 +179,6 @@ end
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
-            # SoftCore no longer takes λ; it relies on the atom's λ properties
             pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
                              scheduler=Molly.LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder

@@ -893,7 +893,7 @@ function shake_cpu!(clusters::StructArray{C},
                     max_iters,
                     n_threads,
                     shake_cluster_fn,
-                    other_kernel_args...) where {C <: ConstraintKernelData}
+                    other_kernel_args...) where {C <: AbstractConstraintKernelData}
     n_clusters = length(clusters)
     cluster_idxs  = getproperty.(Ref(clusters), idx_keys(C))
     cluster_dists = getproperty.(Ref(clusters), dist_keys(C))
@@ -934,7 +934,7 @@ function shake_gpu!(clusters::StructArray{C},
                     gpu_block_size,
                     backend,
                     shake_kernel,
-                    other_kernel_args...) where {C <: ConstraintKernelData}
+                    other_kernel_args...) where {C <: AbstractConstraintKernelData}
     N_active_clusters = length(clusters)
     kern = shake_step!(backend, gpu_block_size)
     active_idxs = allocate(backend, Int32, N_active_clusters)

@@ -18,15 +18,12 @@ const CoreDRole::AlchemicalRole  = Int32(3)
 const InsertRole::AlchemicalRole = Int32(4)
 const DeleteRole::AlchemicalRole = Int32(5)
 
-# Supertype of the λ versions of the bonded interactions, see `virial_lambda_factor`
+# λ versions of bonded interactions, see `virial_lambda_factor`
 abstract type AlchemicalBondedInteraction end
 
-# SoftCore potential options
-abstract type SoftCore end
-
-struct BeutlerSoftCore <: SoftCore end
-struct GapsysSoftCore  <: SoftCore end
-struct ScaledSoftCore  <: SoftCore end
+struct BeutlerSoftCore end
+struct GapsysSoftCore end
+struct ScaledSoftCore end
 
 # Lambda Schedulers
 # The schedule of a `LambdaScheduler` is one of these empty types, which the scaling functions
@@ -338,9 +335,7 @@ to_lambda_function_single(interA, interB; kwargs...) =
 
 # `AbsoluteFESystem` and `RelativeFESystem` convert every specific interaction to its λ
 # counterpart, so only the λ types can appear on an alchemical atom and only they need the
-# coupling supplied. Weighting the bonded virial by the coupling comes from master (`6ec6ef4c`,
-# JuliaMolSim/Molly.jl#258); here the default of 1 keeps terms that scale their own forces from
-# being scaled twice, and the coupling has the sense of the role rather than raw `atom.λ`.
+# coupling supplied.
 @inline function virial_lambda_factor(inter::AlchemicalBondedInteraction, atoms)
     λ_glob = λ_mixing(inter.λ_mixing, atoms)
     roles = map(a -> a.alch_role, atoms)

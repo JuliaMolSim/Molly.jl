@@ -2270,7 +2270,7 @@ first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
 to be 3 otherwise.
 
-The `boundary` parameter is required, and must be an `AbstractBoundary`. 
+The `boundary` parameter is required, and must be a [`Molly.AbstractBoundary`](@ref). 
 Infinite boundaries are only accepted in all dimensions.
 
 CellListMap.jl chooses how many batches to split the work over from the number of Julia

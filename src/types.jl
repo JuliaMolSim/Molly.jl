@@ -1723,7 +1723,7 @@ topological and interactive components (e.g., bulk solvent) from state-specific 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
 
-Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory; 
+Furthermore, upon a successful exchange, coordinates and velocities are not physically swapped in memory; 
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
 
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the interface described there, 

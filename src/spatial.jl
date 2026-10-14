@@ -23,11 +23,18 @@ export
     scale_coords!,
     dipole_moment
 
-@public box_center,
+@public AbstractBoundary,
+    box_center,
     vector_1D,
     wrap_coord_1D
 
-# Parameters are dimension, float type and coordinate type
+"""
+Base type for boundary types.
+
+Parameters are dimension, float type and coordinate type.
+The built-in boundary types are [`CubicBoundary`](@ref), [`TriclinicBoundary`](@ref)
+and [`RectangularBoundary`](@ref), 
+"""
 abstract type AbstractBoundary{D, T, C} end
 
 """
