@@ -353,7 +353,8 @@ Whether `bias_gradient` of `bias_type` runs inside the GPU kernel of a [`BiasPot
 with a GPU CV type, without a transfer to the host.
 
 Defaults to `false`, so custom bias types run `bias_gradient` on the host.
-The built-in bias types return `true` when their parameters are plain data.
+The built-in bias types return `true` when their parameters are plain data; a GPU `System`
+rejects them otherwise.
 Define `Molly.uses_device_bias_gradient(::MyBias) = true` only if `bias_gradient` for `MyBias`
 is GPU-compilable and reads no host memory, for example no global arrays.
 It must also return the same type for every CV value, since the GPU buffer type comes from one
