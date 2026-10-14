@@ -436,6 +436,8 @@ end
             @test widened_equal(inter, Molly.convert_component(c, inter))
         end
 
+        @test Molly.convert_component(c, Dict("C" => T(0.17)u"nm")) == Dict("C" => Float64(T(0.17)))
+
         # A struct that can not be rebuilt from its fields gives an error naming it
         @test_throws "UnconvertibleInteraction" Molly.convert_component(c,
                                                     UnconvertibleInteraction(T(1.0)))

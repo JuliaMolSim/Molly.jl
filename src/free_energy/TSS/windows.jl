@@ -932,11 +932,6 @@ function other_window_for_state(state::TSSState, global_state::Integer)
     return other_window_for_state(state, state.active_window, global_state)
 end
 
-function switch_active_window!(state::TSSState; current_state::Integer = state.active_state.active_idx)
-    state.active_window = other_window_for_state(state, current_state)
-    return state
-end
-
 function check_windowed_tss_invariant(state::TSSState)
     active_window = state.windows[state.active_window]
     if !window_contains_state(active_window, state.active_state.active_idx)

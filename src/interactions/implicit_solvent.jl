@@ -460,7 +460,7 @@ screening parameter, the key `"-"` giving the value used for elements not in the
 Only compatible with 3D systems.
 Not compatible with virial calculation.
 """
-struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC} <: AbstractGBSA
+struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC, ER, ES} <: AbstractGBSA
     offset_radii::VD
     scaled_offset_radii::VD
     solvent_dielectric::T
@@ -486,6 +486,8 @@ struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC} <: Abstract
     buffer_pes::PT
     buffer_fs_mat::MT
     buffer_force_chunks::FC
+    element_to_radius::ER
+    element_to_screen::ES
 end
 
 function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
@@ -562,24 +564,27 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
         return ImplicitSolventOBC{T, D, typeof(bufs.B_grads), typeof(or), typeof(T(kappa)),
                         typeof(T(sa_factor)), typeof(factor_solute), typeof(bufs.born_forces),
                         typeof(bufs.born_forces_scaled), typeof(bufs.pes), typeof(bufs.fs_mat),
-                        typeof(bufs.force_chunks)}(
+                        typeof(bufs.force_chunks), typeof(element_to_radius),
+                        typeof(element_to_screen)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset),
                     T(dist_cutoff), use_ACE, α, β, γ, T(probe_radius), T(sa_factor),
                     factor_solute, factor_solvent, bufs.Bs, bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
-                    bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks)
+                    bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks,
+                    element_to_radius, element_to_screen)
     else
         bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, T(ustrip(sa_factor)),
                             T(ustrip(dist_cutoff)), ustrip(offset), factor_solute, n_threads)
         return ImplicitSolventOBC{T, T, typeof(bufs.B_grads), typeof(or), T, T, T,
                         typeof(bufs.born_forces), typeof(bufs.born_forces_scaled),
-                        typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks)}(
+                        typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks),
+                        typeof(element_to_radius), typeof(element_to_screen)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)),
                     T(ustrip(offset)), T(ustrip(dist_cutoff)), use_ACE, α, β, γ, T(ustrip(probe_radius)),
                     T(ustrip(sa_factor)), factor_solute, factor_solvent, bufs.Bs, bufs.B_grads,
                     bufs.atom_charges, bufs.born_forces, bufs.born_forces_scaled,
                     bufs.born_forces_mod, bufs.Is_nounits, bufs.pes, bufs.fs_mat,
-                    bufs.force_chunks)
+                    bufs.force_chunks, element_to_radius, element_to_screen)
     end
 end
 
@@ -615,7 +620,7 @@ end
 function inject_interaction(inter::ImplicitSolventOBC, params_dic, sys)
     key_prefix = "inter_OBC_"
     element_to_radius, element_to_screen = gb_element_dicts(key_prefix, params_dic,
-                                    mbondi2_element_to_radius, obc_element_to_screen)
+                                    inter.element_to_radius, inter.element_to_screen)
 
     ImplicitSolventOBC(
         sys.atoms,
@@ -645,10 +650,10 @@ function extract_parameters!(params_dic, inter::ImplicitSolventOBC, ff)
     params_dic[key_prefix * "offset"            ] = ustrip(inter.offset)
     params_dic[key_prefix * "probe_radius"      ] = ustrip(inter.probe_radius)
     params_dic[key_prefix * "sa_factor"         ] = ustrip(inter.sa_factor)
-    for (k, v) in mbondi2_element_to_radius
+    for (k, v) in inter.element_to_radius
         params_dic[key_prefix * "radius_" * k] = ustrip(v)
     end
-    for (k, v) in obc_element_to_screen
+    for (k, v) in inter.element_to_screen
         params_dic[key_prefix * "screen_" * k] = v
     end
     return params_dic
@@ -744,7 +749,8 @@ radii of each pair of atoms.
 Only compatible with 3D systems.
 Not compatible with virial calculation.
 """
-struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC} <: AbstractGBSA
+struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC, ER, ES, A, DD,
+                           DM} <: AbstractGBSA
     offset_radii::VD
     scaled_offset_radii::VD
     solvent_dielectric::T
@@ -775,6 +781,13 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC
     buffer_pes::PT
     buffer_fs_mat::MT
     buffer_force_chunks::FC
+    element_to_radius::ER
+    element_to_screen::ES
+    element_to_screen_nucleic::ES
+    atom_params::A
+    atom_params_nucleic::A
+    data_d0::DD
+    data_m0::DM
 end
 
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
@@ -898,35 +911,42 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
         return ImplicitSolventGBN2{T, D, typeof(bufs.B_grads), typeof(or), typeof(T(kappa)),
                         typeof(T(sa_factor)), typeof(factor_solute), typeof(d0s), typeof(m0s),
                         typeof(rcs), typeof(bufs.born_forces), typeof(bufs.born_forces_scaled),
-                        typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks)}(
+                        typeof(bufs.pes), typeof(bufs.fs_mat), typeof(bufs.force_chunks),
+                        typeof(element_to_radius), typeof(element_to_screen),
+                        typeof(atom_params), typeof(data_d0), typeof(data_m0)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset), T(dist_cutoff),
                     use_ACE, αs, βs, γs, T(probe_radius), T(sa_factor), factor_solute, factor_solvent,
                     d0s, m0s, rcs, neck_scale, neck_cut, bufs.Bs, bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
-                    bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks)
+                    bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks, element_to_radius,
+                    element_to_screen, element_to_screen_nucleic, atom_params, atom_params_nucleic,
+                    data_d0, data_m0)
     else
         bufs = gbsa_buffers(AT, T, n_atoms, offset_radii, ustrip(sa_factor),
                             T(ustrip(dist_cutoff)), T(ustrip(offset)), factor_solute, n_threads)
         return ImplicitSolventGBN2{T, T, typeof(bufs.B_grads), typeof(or), T, T, T, typeof(d0s),
                         typeof(m0s), typeof(rcs), typeof(bufs.born_forces),
                         typeof(bufs.born_forces_scaled), typeof(bufs.pes), typeof(bufs.fs_mat),
-                        typeof(bufs.force_chunks)}(
+                        typeof(bufs.force_chunks), typeof(element_to_radius),
+                        typeof(element_to_screen), typeof(atom_params), typeof(data_d0),
+                        typeof(data_m0)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)), T(ustrip(offset)),
                     T(ustrip(dist_cutoff)), use_ACE, αs, βs, γs, T(ustrip(probe_radius)), ustrip(sa_factor),
                     factor_solute, factor_solvent, d0s, m0s, rcs, neck_scale, ustrip(neck_cut),
                     bufs.Bs, bufs.B_grads, bufs.atom_charges, bufs.born_forces,
                     bufs.born_forces_scaled, bufs.born_forces_mod, bufs.Is_nounits, bufs.pes,
-                    bufs.fs_mat, bufs.force_chunks)
+                    bufs.fs_mat, bufs.force_chunks, element_to_radius, element_to_screen,
+                    element_to_screen_nucleic, atom_params, atom_params_nucleic, data_d0, data_m0)
     end
 end
 
 function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     key_prefix = "inter_GB_"
     element_to_radius, element_to_screen = gb_element_dicts(key_prefix, params_dic,
-                                    mbondi2_element_to_radius, gbn2_element_to_screen)
-    atom_params = empty(gbn2_atom_params)
-    for k in keys(gbn2_atom_params)
-        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
+                                    inter.element_to_radius, inter.element_to_screen)
+    atom_params = empty(inter.atom_params)
+    for k in keys(inter.atom_params)
+        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, inter.atom_params[k])
     end
 
     ImplicitSolventGBN2(
@@ -945,7 +965,11 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
         neck_cut=dict_get(params_dic, key_prefix * "neck_cut", ustrip(inter.neck_cut))u"nm",
         element_to_radius=element_to_radius,
         element_to_screen=element_to_screen,
+        element_to_screen_nucleic=inter.element_to_screen_nucleic,
         atom_params=atom_params,
+        atom_params_nucleic=inter.atom_params_nucleic,
+        data_d0=inter.data_d0,
+        data_m0=inter.data_m0,
         n_threads=gbsa_n_threads(inter),
     )
 end
@@ -960,13 +984,13 @@ function extract_parameters!(params_dic, inter::ImplicitSolventGBN2, ff)
     params_dic[key_prefix * "sa_factor"         ] = ustrip(inter.sa_factor)
     params_dic[key_prefix * "neck_scale"        ] = inter.neck_scale
     params_dic[key_prefix * "neck_cut"          ] = ustrip(inter.neck_cut)
-    for (k, v) in mbondi2_element_to_radius
+    for (k, v) in inter.element_to_radius
         params_dic[key_prefix * "radius_" * k] = ustrip(v)
     end
-    for (k, v) in gbn2_element_to_screen
+    for (k, v) in inter.element_to_screen
         params_dic[key_prefix * "screen_" * k] = v
     end
-    for (k, v) in gbn2_atom_params
+    for (k, v) in inter.atom_params
         params_dic[key_prefix * "params_" * k] = v
     end
     return params_dic

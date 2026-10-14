@@ -67,6 +67,11 @@ convert_component(c::SystemConversion, x::Unitful.Units) = (c.strip_units ? NoUn
 convert_component(c::SystemConversion, x::Union{Tuple, NamedTuple}) = map(y -> convert_component(c, y), x)
 convert_component(c::SystemConversion, x::StaticArray) = map(y -> convert_component(c, y), x)
 
+# Dictionaries are converted value by value and stay on the CPU
+function convert_component(c::SystemConversion, x::AbstractDict)
+    return Dict(k => convert_component(c, v) for (k, v) in x)
+end
+
 function convert_component(c::SystemConversion{<:Any, AT}, x::AbstractArray) where AT
     y = map(el -> convert_component(c, el), from_device(x))
     if AT <: AbstractGPUArray && isbitstype(eltype(y))
@@ -268,10 +273,16 @@ function convert_component(c::SystemConversion, pme::PME_λ)
                                     λ=convert_component(c, pme.λ)))
 end
 
+# Fields of implicit solvent holding the values it was set up from, which are kept as they are
+#   since setup takes them with units and in Float64 for any system
+const gbsa_setup_fields = (:element_to_radius, :element_to_screen, :element_to_screen_nucleic,
+                           :atom_params, :atom_params_nucleic, :data_d0, :data_m0)
+
 # The buffers of implicit solvent depend on the device and the number of threads, so they are
 #   set up again
 function convert_component(c::SystemConversion{T, AT}, inter::AbstractGBSA) where {T, AT}
-    params = NamedTuple(f => convert_component(c, getfield(inter, f))
+    params = NamedTuple(f => (f in gbsa_setup_fields ? getfield(inter, f) :
+                                                      convert_component(c, getfield(inter, f)))
                         for f in fieldnames(typeof(inter)) if !startswith(String(f), "buffer_"))
     # The number of threads of an implicit solvent interaction on CPU sets its force buffers
     if inter.buffer_force_chunks isa AbstractVector
