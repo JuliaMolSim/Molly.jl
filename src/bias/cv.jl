@@ -1636,7 +1636,7 @@ end
     phi = torsion_angle(ri, rj, rk, rl, boundary)
 
     if !torsion_bond_ok(b1n) || !torsion_bond_ok(b2n) || !torsion_bond_ok(b3n)
-        nan_s = NaN / oneunit(b2n)
+        nan_s = typeof(ustrip(b2n))(NaN) / oneunit(b2n)
         nan_v = SVector(nan_s, nan_s, nan_s)
         return phi, nan_v, nan_v, nan_v, nan_v
     end

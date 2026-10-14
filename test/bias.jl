@@ -353,7 +353,14 @@ Molly.bias_gradient(b::PlainBias, cv_sim) = b.k * cv_sim
         @test all(v -> all(x -> isfinite(ustrip(x)), v), grad_dev)
     end
 
-    coords_tor_near = SVector{3, Float32}[
+    # The degenerate-bond NaN keeps the coordinates' float type
+    for c in ([SVector(0f0, 0f0, 0f0), SVector(1f0, 0f0, 0f0), SVector(1f0, 1f0, 0f0), SVector(1f0, 1f0, 1f0)],
+              [SVector(0f0, 0f0, 0f0)u"nm", SVector(1f0, 0f0, 0f0)u"nm", SVector(1f0, 1f0, 0f0)u"nm", SVector(1f0, 1f0, 1f0)u"nm"])
+        b = CubicBoundary(10f0 * oneunit(c[1][1]))
+        @inferred Molly.torsion_cv_gradient(c..., b, 1f-6)
+    end
+
+    coords_tor_near =SVector{3, Float32}[
         SVector(0.0f0, 0.0f0, 0.0f0),
         SVector(1.0f0, 0.0f0, 0.0f0),
         SVector(2.0f0, 1.0f-7, 0.0f0),
