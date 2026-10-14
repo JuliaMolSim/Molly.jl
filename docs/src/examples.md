@@ -521,12 +521,12 @@ There is [an example](https://acesuit.github.io/ACEmd.jl/stable/molly) of using 
 
 [`ANIPotential`](@ref) is a native Julia implementation of the [ANI-2x](https://doi.org/10.1021/acs.jctc.0c00121) neural network potential (H, C, N, O, S, F, Cl), with no Python runtime dependency.
 It becomes available when [Lux.jl](https://github.com/LuxDL/Lux.jl) and [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) are loaded. Both energy and forces work with just those two packages; forces use an analytic backward pass built on [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) (a core Molly dependency), which runs on CPU or GPU.
-The weights (`ani2x.h5`) are distributed as a lazily-downloaded artifact; `ani2x_data_dir()` returns its location (downloading it on first use).
+The weights (`ani2x.h5`) are distributed as a lazily-downloaded artifact; [`Molly.ani2x_data_dir`](@ref) returns its location (downloading it on first use).
 ```julia
 using Molly
 using Lux, HDF5 # required to construct and run an ANIPotential (energy and forces)
 
-pot = ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))
+pot = ANIPotential(joinpath(Molly.ani2x_data_dir(), "ani2x.h5"))
 
 # A single water molecule (energies are in eV, forces in eV/Å)
 sys = System(
@@ -566,7 +566,6 @@ sys_gpu = System(sys; atoms=CuArray(sys.atoms), coords=CuArray(sys.coords),
 potential_energy(sys_gpu)
 forces(sys_gpu)
 ```
-The atomic environment vectors can also be computed directly with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
 
 ## Python ASE calculator
 

@@ -447,7 +447,9 @@ end
             if F_norm > zero(F_norm)
                 v_norm = sqrt(sum(sum_abs2, vels))
                 mix = alpha * v_norm / F_norm
-                vels .= (1 - alpha) .* vels .+ mix .* F
+                vel_scale = 1 - alpha
+                # `map!` rather than broadcasting to get round Enzyme error
+                map!((v, f) -> vel_scale * v + mix * f, vels, vels, F)
             end
             # Accelerate once the system has been moving downhill for long enough
             if n_downhill > sim.n_min

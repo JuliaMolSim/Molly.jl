@@ -723,11 +723,11 @@ The only exception in a single topology setup are the torsion potentials. These 
 
 $$E_{torsion} = (1-\lambda)E^A_{torsion} + \lambda E^B_{torsion}$$
 
-In Molly, a topology is chosen together with the lambda scheduler, see [`DefaultLambdaScheduler`](@ref):
+In Molly, a topology is chosen together with the lambda scheduler, see [`Molly.DefaultLambdaScheduler`](@ref):
 ```julia
 # Default lambda scheduler, where electrostatics are turned off before sterics are turned off.
 # The defaults are shown. With dual topology only the intraLJ option is used.
-DefaultLambdaScheduler(
+Molly.DefaultLambdaScheduler(
     dual=true,          # Dual topology (true) or single topology (false)
     LJindividual=false, # State (false) or individual (true) param scaling for LJ
     LJspecial=false,    # State (false) or individual (true) param scaling for LJ 1-4 inter.
@@ -738,7 +738,7 @@ DefaultLambdaScheduler(
 ```
 the default is dual topology while in OpenFE single topology is used, OpenFE also uses other settings during set up and the differences between default and OpenFE are outlined below.
 
-All schedulers are a [`LambdaScheduler`](@ref) with a different schedule, e.g. `DefaultLambdaScheduler()` is `LambdaScheduler(Molly.DefaultSchedule())`, so they take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
+All schedulers are a [`Molly.LambdaScheduler`](@ref) with a different schedule, e.g. `Molly.DefaultLambdaScheduler()` is `Molly.LambdaScheduler(Molly.DefaultSchedule())`, so they take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`Molly.LinearLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) and [`Molly.GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`Molly.NAMDLambdaScheduler`](@ref), [`Molly.QuartersLambdaScheduler`](@ref) and [`Molly.EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
 
 ![All lambda schedulers with the specific lambda scaling for each role (dual=true)](images/scheduler_plots.png)
 
@@ -757,13 +757,13 @@ Every [`Atom`](@ref) has an `alch_role` that tells the λ interactions how the a
 
 An interaction between several atoms takes one role from its atoms, the first present in the order `InsertRole`, `DeleteRole`, `CoreRole`, `CoreIRole`, `CoreDRole`, `EnvRole`. A Lennard-Jones pair between an inserted and an environment atom therefore follows the insertion schedule, and an interaction between environment atoms is never scaled. With `intraLJ=true` the Lennard-Jones interactions within the inserted atoms, or within the deleted atoms, count as environment and stay on at every $\lambda$.
 
-The torsions take their role the other way round: a torsion of inserted, deleted or environment atoms only is never scaled, so the atoms that appear or disappear keep their own torsions at both end states, while a torsion that also has a core atom follows that core atom. Only the torsions of one end state then act on the core at a time. This is what `Tscaled=true`, the default of every scheduler apart from [`OpenFEScheduler`](@ref), does. OpenFE leaves these torsions on at every $\lambda$, so `OpenFEScheduler` uses `Tscaled=false` and Molly reproduces OpenFE exactly; pass `Tscaled=true` to scale them with an OpenFE setup as well.
+The torsions take their role the other way round: a torsion of inserted, deleted or environment atoms only is never scaled, so the atoms that appear or disappear keep their own torsions at both end states, while a torsion that also has a core atom follows that core atom. Only the torsions of one end state then act on the core at a time. This is what `Tscaled=true`, the default of every scheduler apart from [`Molly.OpenFEScheduler`](@ref), does. OpenFE leaves these torsions on at every $\lambda$, so [`Molly.OpenFEScheduler`](@ref) uses `Tscaled=false` and Molly reproduces OpenFE exactly; pass `Tscaled=true` to scale them with an OpenFE setup as well.
 
 The schedulers scale the sterics and electrostatics of each role differently (see the plot above). In dual topology the bonded terms of inserted and deleted atoms stay at full strength at every $\lambda$, only their non-bonded interactions are scaled, so these atoms keep their geometry when decoupled; the bonded terms of the core copies are scaled by $\lambda$ and $1-\lambda$. In single topology the bonded parameters are interpolated.
 
 ### Matching OpenFE default settings
 
-Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the `OpenFEScheduler`. When using `OpenFEScheduler(), LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
+Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
 
 - Only using a softcore potential for the LennardJones potential, the CoulombEwald direct space is scaled by lambda directly without using a softcore.
 - In CoulombEwald potential, the charges are individually scaled for the regular interactions: 
@@ -781,22 +781,19 @@ So to run with OpenFE settings:
 ```julia
 # OpenFE lambda scheduler with its defaults: single topology, state parameter scaling for LJ,
 # LJ 1-4 and Coulomb 1-4 interactions, and individual parameter scaling for Coulomb.
-scheduler = OpenFEScheduler(
-                dual=false,          # Single topology
-                LJindividual=false,  # State parameter scaling for LJ
-                LJspecial=false,     # State parameter scaling for LJ 1-4 interactions
-                Cindividual=true,    # Individual parameter scaling for Coulomb
-                Cspecial=false,      # State parameter scaling for Coulomb 1-4 interactions
-                intraLJ=false,       # LJ between alchemical atoms is decoupled
-                            )
+scheduler = Molly.OpenFEScheduler(
+    dual=false,          # Single topology
+    LJindividual=false,  # State parameter scaling for LJ
+    LJspecial=false,     # State parameter scaling for LJ 1-4 interactions
+    Cindividual=true,    # Individual parameter scaling for Coulomb
+    Cspecial=false,      # State parameter scaling for Coulomb 1-4 interactions
+    intraLJ=false,       # LJ between alchemical atoms is decoupled
+)
 
 # For system setup, set LJsoftcore=:gapsys, Csoftcore=:scaled
 # More on system setup, see the example below
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
-                        scheduler=scheduler,
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:scaled
-                      )
+                       scheduler=scheduler, LJsoftcore=:gapsys, Csoftcore=:scaled)
 ```
 
 All the settings have been tested by comparing energies and forces between Molly and OpenFE, and the comparison is part of the test suite (`test/free_energy.jl`).
@@ -859,7 +856,7 @@ Then we can use these systems to set up a hybrid system for each leg (solvated v
 ```julia
 # --- Hybrid System Setup ---
 global_λ = FT(0.0)
-scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
+scheduler = Molly.DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 sys_solv = AbsoluteFESystem(sysb_solv, global_λ, mapping;
                              temp=298.0u"K",
@@ -952,12 +949,11 @@ Then we can use SystemA and SystemB to set up a hybrid system with a single topo
 # --- Hybrid System Setup ---
 global_λ = FT(0.0)
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; 
-                        temp=298.0u"K", 
-                        scheduler=OpenFEScheduler(dual=false),
-                        loggers=(),
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:scaled
-                      )
+                       temp=298.0u"K", 
+                       scheduler=Molly.OpenFEScheduler(dual=false),
+                       loggers=(),
+                       LJsoftcore=:gapsys,
+                       Csoftcore=:scaled)
 ```
 
 This system can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
@@ -1239,7 +1235,7 @@ julia scripts/awh_solvation.jl
 
 On one NVIDIA GeForce RTX 5090 the script takes roughly 2 h 45 min, about 2 h 5 min for the solvated leg and 35 min for the vacuum leg, including setup and equilibration.
 
-[`AbsoluteFESystem`](@ref) decouples the solute from $\lambda=0$ (fully coupled) to $\lambda=1$ (fully decoupled), so the ladder of 20 states runs from the decoupled state 1 to the coupled state 20. The scheduler removes the charges from $\lambda=0$ to $\lambda=0.5$ with the sterics untouched, and then the sterics from $\lambda=0.5$ to $\lambda=1$. The intramolecular electrostatics of benzene are annihilated with its charges, while `intraLJ = true` keeps its intramolecular Lennard-Jones interactions. For the GROMACS convention with two PME grids, use `GROMACSLambdaABFEScheduler` instead.
+[`AbsoluteFESystem`](@ref) decouples the solute from $\lambda=0$ (fully coupled) to $\lambda=1$ (fully decoupled), so the ladder of 20 states runs from the decoupled state 1 to the coupled state 20. The scheduler removes the charges from $\lambda=0$ to $\lambda=0.5$ with the sterics untouched, and then the sterics from $\lambda=0.5$ to $\lambda=1$. The intramolecular electrostatics of benzene are annihilated with its charges, while `intraLJ = true` keeps its intramolecular Lennard-Jones interactions. For the GROMACS convention with two PME grids, use [`Molly.GROMACSLambdaABFEScheduler`](@ref) instead.
 
 ```julia
 FT = Float32
@@ -1257,7 +1253,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 ```
 
 The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and a Langevin integrator coupled to an NPT barostat. The vacuum leg uses short-range Coulomb with an infinite boundary and infinite non-bonded cutoff so the benzene molecule is not split by a finite cutoff.
@@ -1800,7 +1796,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 
 tss_solvation_replica_rngs(seed::Integer) =
     [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
@@ -2207,7 +2203,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 ```
 
 `HREMD_TIME` is the simulated time for each $\lambda$ state. One sample per state is written to that state's trajectory every `SAMPLE_TIME`, and the first `EQUIL_FRAC` of the samples of each state are discarded before MBAR.

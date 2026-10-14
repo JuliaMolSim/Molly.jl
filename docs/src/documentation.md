@@ -811,6 +811,7 @@ The available general interactions are:
 - [`LJDispersionCorrection`](@ref)
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
+- [`ANIPotential`](@ref)
 - [`MullerBrown`](@ref)
 - [`ASECalculator`](@ref)
 
