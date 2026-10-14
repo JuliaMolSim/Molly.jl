@@ -2119,6 +2119,30 @@ Jackknife SE (kJ mol^-1):            0.176
 
 The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.23 kJ mol^-1 above this result, or 1.3 jackknife standard errors.
 
+### Logging TSS samples
+
+System loggers see only the physical system. To record what TSS knows about each sample, pass sample loggers to [`TSSSimulation`](@ref): `sample_loggers` for one replica, or `replica_sample_loggers` with one collection per replica.
+[`log_tss_sample!`](@ref) is called with each logger for every collected sample, after each block of `n_md_steps` MD steps, in adaptive and frozen runs. Like the system loggers, the sample loggers also see the initial configuration of each replica, at the start step of the first [`simulate!`](@ref) call.
+The [`TSSSample`](@ref) it receives gives the absolute MD step, the replica, its active system, the active state and window, the window's state indices, the reduced potentials of the sampled coordinates in the window states, the log normalization `log_den` and the conditional state weights.
+For example, to store the window reduced potentials of every fifth sample:
+
+```julia
+sample_logger = TSSSampleLogger(Vector{FT}, 5 * N_MD_STEPS) do sample
+    return copy(sample.reduced_potentials)
+end
+
+tss_sim = TSSSimulation(
+    tss_state;
+    n_md_steps = N_MD_STEPS,
+    n_cycles = N_CYCLES,
+    sample_loggers = (reduced_potentials = sample_logger,),
+)
+simulate!(tss_sim)
+values(sample_logger)
+```
+
+The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
+
 ## Free energies with REMD
 
 ### Method overview
