@@ -1336,6 +1336,7 @@ end
             buffers = Molly.init_buffers!(sys_gpu, 1)
             fs = Molly.zero_forces(sys_gpu)
             @test Molly.forces!(fs, sys_gpu, nothing, 1, buffers, Val(false)) isa Tuple
+            @test all(f -> all(isfinite, ustrip.(f)), Molly.from_device(fs))
             err = try
                 Molly.forces!(fs, sys_gpu, nothing, Molly.BIAS_FINITE_CHECK_EVERY, buffers, Val(false))
                 nothing
@@ -1383,6 +1384,7 @@ end
                              velocities=copy(sys_gpu_base.velocities), general_inters=(bias,))
             @test_throws "non-finite value at step 1" simulate!(sys_run, VelocityVerlet(dt=0.002u"ps"),
                                                                 5; init_step=1)
+            @test all(c -> all(isfinite, ustrip.(c)), Molly.from_device(sys_run.coords))
         end
 
         @testset "Custom bias type on GPU matches CPU" begin

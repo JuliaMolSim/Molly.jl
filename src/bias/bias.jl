@@ -251,6 +251,7 @@ are converted to the system float type.
 For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps,
 at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with
 the step at which they first appeared.
+Until then such a force is applied as zero, so the coordinates stay finite.
 """
 struct BiasPotential{C, B}
     cv_type::C
@@ -453,7 +454,7 @@ end
 
 # Sync-free GPU path for the biases with persistent buffers: bias_cv_step! runs each bias's CV
 # kernels, then bias_batched_tail! evaluates bias_gradient, applies the forces and checks them
-# for every bias at once in 3 launches, without reading anything back to the host. Non-finite
+# for every bias at once in 2 launches, without reading anything back to the host. Non-finite
 # values are recorded on the device and reported by check_bias_finite_flags!.
 #
 # The kernels recurse over tuples with one entry per bias, which keeps indexing type-stable when
@@ -475,47 +476,34 @@ end
     idx == 1 && _bias_gradient_recurse(d_bias_bufs, d_bufs, bias_types)
 end
 
-@inline function _bias_apply_recurse(grads::Tuple{Any}, fs_svecs::Tuple{Any}, d_bias_bufs::Tuple{Any}, i)
-    v = d_bias_bufs[1][1] * grads[1][i]
-    fs_svecs[1][i] = v
+# A non-finite force is applied as zero and flagged in bad_step, reported later by
+# check_bias_finite_flags!. bad_step only ever gets the same step_n, so no atomic is needed.
+@inline function _bias_apply_one(grad, fs_svec, d_bias_buf, d_buf, bad_step, i, step_n)
+    v = d_bias_buf[1] * grad[i]
+    finite = bias_all_finite(v)
+    if (!finite || (i == 1 && !bias_all_finite(d_buf[1]))) && bad_step[1] < 0
+        bad_step[1] = step_n
+    end
+    v = finite ? v : zero(v)
+    fs_svec[i] = v
     return v
 end
-@inline function _bias_apply_recurse(grads::Tuple, fs_svecs::Tuple, d_bias_bufs::Tuple, i)
-    v = d_bias_bufs[1][1] * grads[1][i]
-    fs_svecs[1][i] = v
-    return v + _bias_apply_recurse(Base.tail(grads), Base.tail(fs_svecs), Base.tail(d_bias_bufs), i)
+@inline function _bias_apply_recurse(grads::Tuple{Any}, fs_svecs::Tuple{Any}, d_bias_bufs::Tuple{Any},
+                                     d_bufs::Tuple{Any}, bad_steps::Tuple{Any}, i, step_n)
+    return _bias_apply_one(grads[1], fs_svecs[1], d_bias_bufs[1], d_bufs[1], bad_steps[1], i, step_n)
+end
+@inline function _bias_apply_recurse(grads::Tuple, fs_svecs::Tuple, d_bias_bufs::Tuple,
+                                     d_bufs::Tuple, bad_steps::Tuple, i, step_n)
+    v = _bias_apply_one(grads[1], fs_svecs[1], d_bias_bufs[1], d_bufs[1], bad_steps[1], i, step_n)
+    return v + _bias_apply_recurse(Base.tail(grads), Base.tail(fs_svecs), Base.tail(d_bias_bufs),
+                                   Base.tail(d_bufs), Base.tail(bad_steps), i, step_n)
 end
 
 @kernel inbounds=true function bias_batched_apply_kernel!(fs, grads::Tuple, fs_svecs::Tuple,
-                                                            d_bias_bufs::Tuple)
+                                                            d_bias_bufs::Tuple, @Const(d_bufs::Tuple),
+                                                            bad_steps::Tuple, step_n::Int)
     i = @index(Global, Linear)
-    fs[i] -= _bias_apply_recurse(grads, fs_svecs, d_bias_bufs, i)
-end
-
-# d_bias is finite whenever the CV value is, so a non-finite CV gradient always gives a
-# non-finite force: checking the CV value and the forces covers everything. Each bias's bad_step
-# is only ever set to the same step_n, so no atomic is needed.
-@inline function _bias_check_one(fs_svec, d_buf, bad_step, i, step_n)
-    bad = (i <= length(fs_svec) && !bias_all_finite(fs_svec[i])) ||
-          (i == 1 && !bias_all_finite(d_buf[1]))
-    if bad && bad_step[1] < 0
-        bad_step[1] = step_n
-    end
-    return nothing
-end
-@inline function _bias_check_recurse(fs_svecs::Tuple{Any}, d_bufs::Tuple{Any}, bad_steps::Tuple{Any},
-                                     i, step_n)
-    return _bias_check_one(fs_svecs[1], d_bufs[1], bad_steps[1], i, step_n)
-end
-@inline function _bias_check_recurse(fs_svecs::Tuple, d_bufs::Tuple, bad_steps::Tuple, i, step_n)
-    _bias_check_one(fs_svecs[1], d_bufs[1], bad_steps[1], i, step_n)
-    return _bias_check_recurse(Base.tail(fs_svecs), Base.tail(d_bufs), Base.tail(bad_steps), i, step_n)
-end
-
-@kernel inbounds=true function bias_batched_finite_kernel!(fs_svecs::Tuple, @Const(d_bufs::Tuple),
-                                                             bad_steps::Tuple, step_n::Int)
-    i = @index(Global, Linear)
-    _bias_check_recurse(fs_svecs, d_bufs, bad_steps, i, step_n)
+    fs[i] -= _bias_apply_recurse(grads, fs_svecs, d_bias_bufs, d_bufs, bad_steps, i, step_n)
 end
 
 # Per-bias half of the sync-free path: the CV kernels, which differ per CV type
@@ -544,9 +532,8 @@ function bias_batched_tail!(fs, biases::Tuple, scratches::Tuple, step_n)
     grad_kernel! = bias_batched_gradient_kernel!(backend, 1)
     grad_kernel!(d_bias_bufs, d_bufs, bias_types; ndrange=1)
     apply_kernel! = bias_batched_apply_kernel!(backend, min(n_atoms, 256))
-    apply_kernel!(fs, grads, fs_svecs, d_bias_bufs; ndrange=n_atoms)
-    check_kernel! = bias_batched_finite_kernel!(backend, min(n_atoms, 256))
-    check_kernel!(fs_svecs, d_bufs, map(s -> s.bad_step, scratches), Int(step_n); ndrange=n_atoms)
+    apply_kernel!(fs, grads, fs_svecs, d_bias_bufs, d_bufs, map(s -> s.bad_step, scratches),
+                  Int(step_n); ndrange=n_atoms)
     return nothing
 end
 

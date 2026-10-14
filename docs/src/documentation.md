@@ -663,7 +663,7 @@ When the [`System`](@ref) is on the GPU:
 - [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
 - Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
 - With the GPU CV types, `bias_gradient` of the built-in bias types also runs on the GPU; custom bias types run it on the host unless they opt in (see above).
-- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps, at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with the step at which they first appeared.
+- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps, at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with the step at which they first appeared. Until then such a force is applied as zero, so the coordinates stay finite.
 
 ## Monte Carlo sampling
 
