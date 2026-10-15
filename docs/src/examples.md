@@ -521,12 +521,12 @@ There is [an example](https://acesuit.github.io/ACEmd.jl/stable/molly) of using 
 
 [`ANIPotential`](@ref) is a native Julia implementation of the [ANI-2x](https://doi.org/10.1021/acs.jctc.0c00121) neural network potential (H, C, N, O, S, F, Cl), with no Python runtime dependency.
 It becomes available when [Lux.jl](https://github.com/LuxDL/Lux.jl) and [HDF5.jl](https://github.com/JuliaIO/HDF5.jl) are loaded. Both energy and forces work with just those two packages; forces use an analytic backward pass built on [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) (a core Molly dependency), which runs on CPU or GPU.
-The weights (`ani2x.h5`) are distributed as a lazily-downloaded artifact; `ani2x_data_dir()` returns its location (downloading it on first use).
+The weights (`ani2x.h5`) are distributed as a lazily-downloaded artifact; [`Molly.ani2x_data_dir`](@ref) returns its location (downloading it on first use).
 ```julia
 using Molly
 using Lux, HDF5 # required to construct and run an ANIPotential (energy and forces)
 
-pot = ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))
+pot = ANIPotential(joinpath(Molly.ani2x_data_dir(), "ani2x.h5"))
 
 # A single water molecule (energies are in eV, forces in eV/Å)
 sys = System(
@@ -566,7 +566,6 @@ sys_gpu = System(sys; atoms=CuArray(sys.atoms), coords=CuArray(sys.coords),
 potential_energy(sys_gpu)
 forces(sys_gpu)
 ```
-The atomic environment vectors can also be computed directly with `compute_aevs_ka`, and a full energy evaluation kept on-device with `compute_ani_energy_ka`, when [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) is loaded.
 
 ## Python ASE calculator
 
@@ -1374,32 +1373,32 @@ simulate!(sys, simulator, 10_000)
 
 ### Installation
 
-1. Install the KIM API and make the shared library discoverable:
-    ```bash
-    conda create -n kim-api kim-api=2.4 -c conda-forge
-    conda activate kim-api
-    export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
-    ```
+Install the KIM API and make the shared library discoverable:
+```bash
+conda create -n kim-api kim-api=2.4 -c conda-forge
+conda activate kim-api
+export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
+```
 
-2. Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
-    ```bash
-    $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Found installed driver... SW__MD_335816936951_005
-    [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
-    Install the project...
-    -- Install configuration: "Debug"
-    -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
-    -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
-    
-    Success!
-    ```
+Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
+```bash
+$ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
+Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
+Found installed driver... SW__MD_335816936951_005
+[100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
+Install the project...
+-- Install configuration: "Debug"
+-- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
+-- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
 
-3. Add the package to your Julia environment:
-    ```julia
-    using Pkg
-    Pkg.add("KIM_API")
-    ```
+Success!
+```
+
+Add the package to your Julia environment:
+```julia
+using Pkg
+Pkg.add("KIM_API")
+```
 
 ### Stillinger-Weber silicon supercell
 

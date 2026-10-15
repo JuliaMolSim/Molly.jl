@@ -1,11 +1,12 @@
 export
     DistanceConstraint,
     AngleConstraint,
-    apply_position_constraints!,
-    apply_velocity_constraints!,
     check_position_constraints,
     check_velocity_constraints,
     check_constraints
+
+@public apply_position_constraints!,
+    apply_velocity_constraints!
 
 # Split `n_items` constraints or clusters over at most `n_threads` chunks on CPU
 # The ranges are contiguous rather than strided, since the per-constraint data is read in order
@@ -21,6 +22,8 @@ end
     DistanceConstraint(i, j, dist)
 
 Constraint between two atoms that maintains a fixed distance between the atoms.
+
+Given to a constraint algorithm such as [`SHAKE_RATTLE`](@ref) or [`LINCS`](@ref).
 """
 struct DistanceConstraint{D, I}
     i::I
@@ -33,6 +36,7 @@ end
 
 Constraint between three atoms that maintains a fixed angle and two bond lengths.
 
+Given to a constraint algorithm such as [`SHAKE_RATTLE`](@ref) or [`LINCS`](@ref).
 Atoms `i` and `k` should be connected to central atom `j` with fixed bond distances
 given by `dist_ij` and `dist_jk`, forming the angle `angle_ijk` in radians.
 Internally, an `AngleConstraint` is converted into 3 distance constraints.
@@ -43,7 +47,7 @@ For example, a water molecule can be defined as
 `AngleConstraint(1, 2, 3, deg2rad(104.5), 0.9572u"Å", 0.9572u"Å")`
 where atom 2 is oxygen and atoms 1/3 are hydrogen.
 
-Linear molecules like CO2 can not be constrained.
+Linear molecules like CO2 cannot be constrained.
 """
 struct AngleConstraint{D, I}
     i::I
@@ -99,8 +103,8 @@ function copyto_constraint_scratch!(scratch, values)
     end
 end
 
-# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
-abstract type ConstraintKernelData{D, N, M} end
+# These types will enable coalesced memory access via StructArray{AbstractConstraintKernelData}
+abstract type AbstractConstraintKernelData{D, N, M} end
 
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer) = 1
 @inline constraint_virial_lambda(::Nothing, i::Integer, j::Integer, k::Integer) = 1
@@ -172,7 +176,7 @@ function make_cluster_data(raw_is, raw_js, raw_ds)
     is_angle_cluster = (N_constraints == 3 && N_unique_atoms == 3)
 
     if is_single_bond || is_angle_cluster # No central atom, order agnostic
-        return ConstraintKernelData(Int32.(raw_unique_idxs)..., raw_ds...)
+        return constraint_kernel_data(Int32.(raw_unique_idxs)..., raw_ds...)
     else # Order matters, need to place central atom first
         unique_idxs = order_atoms(raw_is, raw_js)
         central = unique_idxs[1]
@@ -189,7 +193,7 @@ function make_cluster_data(raw_is, raw_js, raw_ds)
                 end
             end
         end
-        return ConstraintKernelData(Int32.(unique_idxs)..., dists...)
+        return constraint_kernel_data(Int32.(unique_idxs)..., dists...)
     end
 end
 
@@ -390,7 +394,7 @@ function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
 end
 
 function n_dof_lost(D::Integer,
-                    constraint_clusters::AbstractVector{C}) where {C <: ConstraintKernelData}
+                    constraint_clusters::AbstractVector{C}) where {C <: AbstractConstraintKernelData}
     return length(constraint_clusters) * n_constraints(C)
 end
 
@@ -402,8 +406,8 @@ function calculate_n_dof(D::Integer, n_atoms::Integer, boundary)
 end
 
 """
-    apply_position_constraints!(sys, coord_storage; context=nothing, n_threads=Threads.nthreads(),
-                                strictness=:warn)
+    apply_position_constraints!(sys, coord_storage; context=nothing,
+                                n_threads=Threads.nthreads(), strictness=:warn)
     apply_position_constraints!(sys, coord_storage, vel_storage, dt; context=nothing,
                                 n_threads=Threads.nthreads(), strictness=:warn)
 
@@ -523,31 +527,31 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     return out
 end
 
-n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
-n_constraints(::Type{<:ConstraintKernelData{<:Any, N}}) where {N} = N
-n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
-n_atoms_cluster(::Type{<:ConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
+n_constraints(::AbstractConstraintKernelData{<:Any, N}) where {N} = N
+n_constraints(::Type{<:AbstractConstraintKernelData{<:Any, N}}) where {N} = N
+n_atoms_cluster(::AbstractConstraintKernelData{<:Any, <:Any, M}) where {M} = M
+n_atoms_cluster(::Type{<:AbstractConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
 
 host_constraint_clusters(constraint_clusters) = constraint_clusters
 host_constraint_clusters(constraint_clusters::StructArray) =
     replace_storage(Array, constraint_clusters)
 
-struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
+struct NoClusterData <: AbstractConstraintKernelData{Nothing, 0, 0} end
 
 # This is effectivelly just a distance constraint
-struct Cluster12Data{D} <: ConstraintKernelData{D, 1, 2}
+struct Cluster12Data{D} <: AbstractConstraintKernelData{D, 1, 2}
     k1::Int32
     k2::Int32
     dist12::D
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, dist12::D) where D
+function constraint_kernel_data(k1::Int32, k2::Int32, dist12::D) where D
     return Cluster12Data{D}(k1, k2, dist12)
 end
 
 cluster_interactions(kd::Cluster12Data) = ((kd.k1, kd.k2, kd.dist12),)
 
-struct Cluster23Data{D} <: ConstraintKernelData{D, 2, 3}
+struct Cluster23Data{D} <: AbstractConstraintKernelData{D, 2, 3}
     k1::Int32
     k2::Int32
     k3::Int32
@@ -555,7 +559,7 @@ struct Cluster23Data{D} <: ConstraintKernelData{D, 2, 3}
     dist13::D
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D, dist13::D) where D
+function constraint_kernel_data(k1::Int32, k2::Int32, k3::Int32, dist12::D, dist13::D) where D
     return Cluster23Data{D}(k1, k2, k3, dist12, dist13)
 end
 
@@ -566,7 +570,7 @@ cluster_interactions(kd::Cluster23Data) = (
 idx_keys(::Type{<:Cluster23Data}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:Cluster23Data}) = (:dist12, :dist13)
 
-struct Cluster34Data{D} <: ConstraintKernelData{D, 3, 4}
+struct Cluster34Data{D} <: AbstractConstraintKernelData{D, 3, 4}
     k1::Int32
     k2::Int32
     k3::Int32
@@ -576,7 +580,7 @@ struct Cluster34Data{D} <: ConstraintKernelData{D, 3, 4}
     dist14::D
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, k4::Int32, dist12::D,
+function constraint_kernel_data(k1::Int32, k2::Int32, k3::Int32, k4::Int32, dist12::D,
                               dist13::D, dist14::D) where D
     return Cluster34Data{D}(k1, k2, k3, k4, dist12, dist13, dist14)
 end
@@ -589,7 +593,7 @@ cluster_interactions(kd::Cluster34Data) = (
 idx_keys(::Type{<:Cluster34Data}) = (:k1, :k2, :k3, :k4)
 dist_keys(::Type{<:Cluster34Data}) = (:dist12, :dist13, :dist14)
 
-struct AngleClusterData{D} <: ConstraintKernelData{D, 3, 3}
+struct AngleClusterData{D} <: AbstractConstraintKernelData{D, 3, 3}
     k1::Int32 # Central atom, different to AngleConstraint
     k2::Int32
     k3::Int32
@@ -605,8 +609,8 @@ function AngleClusterData(ac::AngleConstraint)
                             ac.dist_ij, ac.dist_jk, ac.dist_ik)
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D,
-                              dist13::D, dist23::D) where D
+function constraint_kernel_data(k1::Int32, k2::Int32, k3::Int32, dist12::D,
+                                dist13::D, dist23::D) where D
     return AngleClusterData{D}(k1, k2, k3, dist12, dist13, dist23)
 end
 

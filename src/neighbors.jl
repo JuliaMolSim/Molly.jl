@@ -3,9 +3,7 @@
 export
     use_neighbors,
     neighbor_pairs,
-    has_ragged_neighbors,
     ragged_neighbors,
-    ragged_counts,
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
@@ -13,6 +11,9 @@ export
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
+
+@public has_ragged_neighbors,
+    ragged_counts
 
 """
     use_neighbors(inter)
@@ -73,9 +74,9 @@ end
 The neighbors of each atom in a neighbor list, as a padded matrix.
 
 The neighbors of atom `i` are `ragged_neighbors(nl)[1:ragged_counts(nl)[i], i]`, with
-the entries past `ragged_counts(nl)[i]` undefined. Only some neighbor lists store
-this, which [`has_ragged_neighbors`](@ref) reports. The matrix belongs to the list, so
-it should not be used after the list is passed back to [`find_neighbors`](@ref), which
+the entries past `ragged_counts(nl)[i]` undefined, see [`Molly.ragged_counts`](@ref).
+Only some neighbor lists store this, which [`Molly.has_ragged_neighbors`](@ref) reports. The matrix belongs to the list,
+so it should not be used after the list is passed back to [`find_neighbors`](@ref), which
 may overwrite it.
 """
 ragged_neighbors(nl) = no_ragged_neighbors(nl)
@@ -259,8 +260,9 @@ uses_gpu_neighbor_finder(AT) = false
     GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
                       array_type=nothing, initialized=false, strictness=:warn)
 
-Neighbor finder for CUDA systems that uses Molly's tiled pairwise kernels.
+Neighbor finder for CUDA systems that uses tiled pairwise kernels.
 
+See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
 Instead, the CUDA pairwise force and energy paths reorder atoms on a Morton
 curve and build a compact list of interacting 32x32 tiles directly on the device.
@@ -2180,8 +2182,8 @@ The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` an
 [`DistanceNeighborFinder`](@ref).
 The pairs are stored on the CPU.
 
-Can not be used if one or more dimensions has infinite boundaries.
-Can not be used with [`TriclinicBoundary`](@ref).
+Cannot be used if one or more dimensions has infinite boundaries.
+Cannot be used with [`TriclinicBoundary`](@ref).
 """
 struct TreeNeighborFinder{D, B, S}
     eligible::B
@@ -2269,7 +2271,7 @@ first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
 to be 3 otherwise.
 
-The `boundary` parameter is required, and must be an `AbstractBoundary`. 
+The `boundary` parameter is required, and must be a [`Molly.AbstractBoundary`](@ref). 
 Infinite boundaries are only accepted in all dimensions.
 
 CellListMap.jl chooses how many batches to split the work over from the number of Julia

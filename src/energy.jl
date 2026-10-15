@@ -2,16 +2,17 @@
 
 export
     total_energy,
-    kinetic_energy_tensor,
     kinetic_energy,
     virial,
     scalar_virial,
     temperature,
-    potential_energy,
+    potential_energy
+
+@public kinetic_energy_tensor,
     pairwise_pe
 
 """
-    total_energy(system, neighbors=find_neighbors(sys), step_n=0, buffers=nothing;
+    total_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                  specific_inter_lists=system.specific_inter_lists,
                  general_inters=system.general_inters, strictness=:warn)
@@ -37,9 +38,10 @@ Calculate the kinetic energy of a system in its tensorial form.
 
 The kinetic energy tensor is defined as
 ```math
-bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
+\bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
+See [`kinetic_energy`](@ref) for the scalar kinetic energy.
 """
 function kinetic_energy_tensor(sys::System{D, <:Any, <:Any, TH}; kin_tensor=nothing) where {D, TH}
     if isnothing(kin_tensor)
@@ -208,19 +210,24 @@ general interactions.
 
     potential_energy(inter, vec_ij, atom_i, atom_j, energy_units, special, coord_i, coord_j,
                      boundary, velocity_i, velocity_j, step_n)
-    potential_energy(inter, coord_i, boundary, atom_i, energy_units, velocity_i, step_n)
+    potential_energy(inter, coord_i, boundary, atom_i, energy_units, velocity_i, step_n,
+                     data)
     potential_energy(inter, coord_i, coord_j, boundary, atom_i, atom_j, energy_units,
-                     velocity_i, velocity_j, step_n)
+                     velocity_i, velocity_j, step_n, data)
     potential_energy(inter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k,
-                     energy_units, velocity_i, velocity_j, velocity_k, step_n)
+                     energy_units, velocity_i, velocity_j, velocity_k, step_n, data)
     potential_energy(inter, coord_i, coord_j, coord_k, coord_l, boundary, atom_i, atom_j,
                      atom_k, atom_l, energy_units, velocity_i, velocity_j, velocity_k,
-                     velocity_l, step_n)
-    potential_energy(bias_pot, cv; kwargs...)
+                     velocity_l, step_n, data)
+    potential_energy(inter, coord_i, coord_j, coord_k, coord_l, coord_m, boundary, atom_i,
+                     atom_j, atom_k, atom_l, atom_m, energy_units, velocity_i, velocity_j,
+                     velocity_k, velocity_l, velocity_m, step_n, data)
+    potential_energy(bias_type, cv_sim; kwargs...)
 
 Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
+Pairwise interactions can use [`Molly.pairwise_pe`](@ref) to apply a cutoff.
 """
 function potential_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads);

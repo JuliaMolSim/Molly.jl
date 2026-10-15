@@ -197,7 +197,6 @@ end
 Base.show(io::IO, ::MIME"text/plain", coupling::WindowedTSSCoupling) = show(io, coupling)
 
 """
-    TSSState
     TSSState(thermo_states; graph=nothing, first_state=1, first_window=nothing,
              gamma=nothing, initial_f=nothing, ETA=2.0, dens_reg=1e-6,
              reuse_neighbors=true, history_forgetting=nothing,
@@ -206,10 +205,12 @@ Base.show(io::IO, ::MIME"text/plain", coupling::WindowedTSSCoupling) = show(io, 
              visit_control_max_iterations=1000,
              visit_control_damping=1.0, pi_regularization=1e-3)
 
-Mutable state for a TSS simulation over a set of thermodynamic states.
+Mutable state for a Times Square Sampling (TSS) simulation over a set of thermodynamic states.
 
+See [Predescu et al. 2024](https://doi.org/10.1080/10618600.2023.2291108).
 `thermo_states` defines the global expanded ensemble. `graph` may be omitted for
-a single-window TSS run, or provided as a `TSSGraph` for windowed TSS.
+a single-window TSS run, or provided as a graph from [`Molly.tss_grid_graph`](@ref) for
+windowed TSS. `history_forgetting` can be a [`Molly.TSSHistoryForgetting`](@ref).
 The state owns the active thermodynamic state, local window estimators,
 visit-control coupling state, and diagnostic histories.
 Loggers are attached by [`TSSSimulation`](@ref), not by `TSSState`.
@@ -396,10 +397,12 @@ end
 """
     tss_grid_graph(shape; window_size, periodic=false)
 
-Construct a regular TSS grid graph.
+Construct a regular TSS grid graph, given as `graph` to [`TSSState`](@ref).
 
-This is a convenience wrapper around `TSSGraphBuilder`, `add_tss_edge!`, and
-`build_tss_graph` for a single anonymous edge with regular windows.
+The thermodynamic states lie on a grid of the given `shape`, which is tiled by windows of
+`window_size` states along each dimension, along with windows offset by half a window that
+overlap them. `shape` must be divisible by `window_size`, which must be even.
+`periodic=true` wraps the grid around, for example for a torsion angle.
 """
 function tss_grid_graph(shape; window_size, periodic = false)
     shape = tss_shape_tuple(shape)
@@ -800,14 +803,14 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
         graph = single_window_tss_graph(K)
     elseif !(graph isa TSSGraph)
         throw(ArgumentError("graph must be a TSSGraph; construct one with " *
-                            "tss_grid_graph or build_tss_graph."))
+                            "tss_grid_graph or build_tss_graph"))
     end
     if graph.n_states != K
         throw(ArgumentError("TSS graph contains $(graph.n_states) states but " *
-                            "TSSState was given $(K) thermodynamic states."))
+                            "TSSState was given $(K) thermodynamic states"))
     end
     if !(1 <= first_state <= K)
-        throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)."))
+        throw(ArgumentError("first_state ($(first_state)) out of range 1:$(K)"))
     end
 
     active_state = ActiveThermoState(state_space, first_state)

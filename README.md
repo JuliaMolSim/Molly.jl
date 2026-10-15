@@ -18,19 +18,20 @@ Implemented features include:
 - Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants for alchemical simulation.
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Ewald and particle mesh Ewald (PME) electrostatic summation.
-- Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
+- Interface to allow definition of new interactions, simulators, thermostats, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl).
 - Write out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC.
-- Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
+- Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin, Nosé-Hoover and multiple time stepping integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
 - C-rescale, Monte Carlo and Berendsen barostats with flexible virial calculation.
 - Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
 - Periodic, triclinic and infinite boundary conditions.
-- Constraints with SHAKE and RATTLE
+- Constraints with SHAKE and RATTLE.
+- Virtual sites.
 - Flexible loggers to track arbitrary properties throughout simulations.
-- Cutoff algorithms for non-bonded interactions.
+- Cutoff and mixing algorithms for non-bonded interactions.
 - Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
@@ -60,7 +61,7 @@ Features not yet implemented include:
 It is recommended to run on the current stable Julia release for the best performance.
 Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
-If you want to run on a GPU you will also need to install the appropriate package, e.g. `add CUDA`.
+If you want to run on a GPU you will also need to install the appropriate package for your system, e.g. `add CUDA`.
 
 ## Usage
 
@@ -79,6 +80,7 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 pairwise_inters = (LennardJones(),)
+
 simulator = VelocityVerlet(
     dt=0.002u"ps",
     coupling=AndersenThermostat(temp, 1.0u"ps"),

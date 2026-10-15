@@ -17,8 +17,10 @@ export
     MTSLangevinIntegrator,
     ReplicaExchangeMD,
     simulate_remd!,
+    MetropolisMonteCarlo
+
+@public NaNSimulationError,
     remd_exchange!,
-    MetropolisMonteCarlo,
     random_uniform_translation!,
     random_normal_translation!
 
@@ -88,6 +90,11 @@ next_nograd!(::Nothing) = nothing
 update_nograd!(progress, val) = ProgressMeter.update!(progress, val)
 update_nograd!(::Nothing, val) = nothing
 
+"""
+    NaNSimulationError(msg)
+
+An error when a `NaN` is encountered during a simulation or setup.
+"""
 struct NaNSimulationError <: Exception
     msg::String
 end
@@ -195,24 +202,28 @@ end
     simulate!(system, simulator, n_steps::Integer; <keyword arguments>)
     simulate!(system, simulator, sim_time; <keyword arguments>)
     simulate!(system, simulator; <keyword arguments>)
-    simulate!(awh_sim::AWHSimulation, n_steps)
+    simulate!(awh_sim::AWHSimulation, n_steps; <keyword arguments>)
+    simulate!(tss_sim::TSSSimulation; <keyword arguments>)
 
 Run a simulation on a system according to the rules of the given simulator.
 
 For simulators that run for a given period of time, the third argument can either be an
 `Integer` number of steps or a simulation time (e.g. `10.0u"ns"` or `10.0` if not using units).
+Energy minimizers such as [`SteepestDescentMinimizer`](@ref) do not take a third argument.
 Custom simulators should implement this function.
-Constraints are applied during minimization, which can lead to issues.
+For a [`ReplicaSystem`](@ref) and [`ReplicaExchangeMD`](@ref) this calls
+[`simulate_remd!`](@ref).
 
 # Arguments
 - `n_threads=Threads.nthreads()`: the number of threads to run the simulation on, only
     relevant when running on CPU.
 - `run_loggers`: whether to run the loggers during the simulation. Can be `true`, `false`
     or `:skipstart`, in which case the loggers are not run before the first step. `run_loggers`
-    is `true` by default except for [`SteepestDescentMinimizer`](@ref), where it is `false`.
-- `shortcut=nothing`: when to stop the simulation early. A struct with the `shortcut_sim`
-    method defined can be provided. `shortcut_sim` is checked at the end of each step.
-    Unused for REMD simulations.
+    is `true` by default except for the energy minimizers, where it is `false`.
+- `shortcut=nothing`: when to stop the simulation early. A struct with a `Molly.shortcut_sim`
+    method defined can be provided. `Molly.shortcut_sim(shortcut, sys, buffers, neighbors,
+    step_n; kwargs...)` is checked at the end of each step and stops the simulation if it
+    returns `true`. Unused for REMD simulations.
 - `init_step=0`: the step number before the first step is taken, useful for time-dependent
     potentials.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in
@@ -226,16 +237,15 @@ Constraints are applied during minimization, which can lead to issues.
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 
-Alternatively:
+Alternatively, run an AWH simulation for a given number of molecular dynamics steps.
+The total number of AWH iterations is determined by dividing `n_steps` by the
+`num_md_steps` given to the [`AWHSimulation`](@ref).
 
-Run an AWH simulation for a given number of molecular dynamics steps.
-
-The total number of AWH iterations is automatically determined by dividing `n_steps` 
-by the `num_md_steps` defined in the `AWHSimulation` struct.
-
-# Arguments
-- `awh_sim::AWHSimulation`: The [`AWHSimulation`](@ref) struct defining the AWH parameters and state.
-- `n_steps::Int`: The total number of molecular dynamics steps to perform.
+Alternatively, run the cycles of a [`TSSSimulation`](@ref).
+`replica_rngs` supplies one RNG stream per replica, otherwise each replica RNG is reseeded
+from `rng`. `replica_parallel` can be `:serial`, `:threads` to run the replicas on separate
+threads (CPU only), or `:auto` to use threads on CPU when there are multiple replicas and
+threads.
 """
 @inline function simulate!(sys::System{<:Any, <:Any, T},
                            sim::SteepestDescentMinimizer;
@@ -441,7 +451,9 @@ end
             if F_norm > zero(F_norm)
                 v_norm = sqrt(sum(sum_abs2, vels))
                 mix = alpha * v_norm / F_norm
-                vels .= (1 - alpha) .* vels .+ mix .* F
+                vel_scale = 1 - alpha
+                # `map!` rather than broadcasting to get round Enzyme error
+                map!((v, f) -> vel_scale * v + mix * f, vels, vels, F)
             end
             # Accelerate once the system has been moving downhill for long enough
             if n_downhill > sim.n_min
@@ -1716,7 +1728,8 @@ without applying constraints.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient. If units are used, it should have a
-    dimensionality of mass per time. Note this is a different friction from `Langevin` which has dimensionality of inverse time.
+    dimensionality of mass per time. Note this is a different friction from [`Langevin`](@ref),
+    which has dimensionality of inverse time.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
@@ -2491,9 +2504,13 @@ end
 @doc raw"""
     ReplicaExchangeMD(; dt, exchange_time)
 
-A generalized simulator for Replica Exchange Molecular Dynamics (REMD). 
+A generalized simulator for Replica Exchange Molecular Dynamics (REMD).
+
+See [Sugita and Okamoto 1999](https://doi.org/10.1016/S0009-2614(99)01123-9).
 Handles Temperature REMD, Hamiltonian REMD, or multi-dimensional combinations 
-automatically based on the definitions in the `ThermoState`s of the `ReplicaSystem`.
+automatically based on the definitions in the [`ThermoState`](@ref)s of the [`ReplicaSystem`](@ref).
+Run with [`simulate!`](@ref) or [`simulate_remd!`](@ref), with exchanges attempted by
+[`Molly.remd_exchange!`](@ref).
 
 # Arguments
 - `dt::DT`: the time step of the simulation.
@@ -2552,16 +2569,25 @@ function simulate!(sys::ReplicaSystem,
 end
 
 @doc raw"""
-    remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer; <keyword arguments>)
+    remd_exchange!(sys::ReplicaSystem, sim::ReplicaExchangeMD, i::Integer, j::Integer;
+                   rng=Random.default_rng())
 
 Attempt a generalized replica exchange between the replicas in thermodynamic states `i` and `j`.
+
+The exchange is accepted with probability ``\min(1, \exp(-\Delta))``, where
+```math
+\Delta = \beta_i \left( U_i(x_j) - U_i(x_i) \right) + \beta_j \left( U_j(x_i) - U_j(x_j) \right)
+```
+and ``x_i`` and ``x_j`` are the coordinates of the replicas currently in states `i` and `j`.
+Velocities are rescaled when the temperatures of the states differ.
+Returns ``\Delta`` and whether the exchange was accepted.
+Custom replica exchange simulators should implement this function.
 """
 function remd_exchange!(sys::ReplicaSystem,
                         sim::ReplicaExchangeMD,
                         i::Integer,
                         j::Integer;
                         rng=Random.default_rng())
-    
     # Identify the replica m and n assigned to the thermodynamic states i and j, respectively
     m = sys.state_indices[i]
     n = sys.state_indices[j]
@@ -2674,7 +2700,7 @@ end
 
 Run a Replica Exchange Molecular Dynamics (REMD) simulation on a multiple-replica system.
 
-The simulation divides the total `n_steps` into cycles based on the time step and exchange time specified in the `ReplicaExchangeMD` simulator. Within each cycle, standard molecular dynamics propagation is independently executed for each replica. At the end of every cycle, replica exchange attempts are made between neighboring states. Any remaining steps that do not fit evenly into the exchange cycles are executed at the end of the run.
+The simulation divides the total `n_steps` into cycles based on the time step and exchange time specified in the [`ReplicaExchangeMD`](@ref) simulator. Within each cycle, standard molecular dynamics propagation is independently executed for each replica. At the end of every cycle, replica exchange attempts are made between neighboring states. Any remaining steps that do not fit evenly into the exchange cycles are executed at the end of the run.
 
 # Arguments
 - `sys::ReplicaSystem`: the partitioned system containing the replicas and thermodynamic states.
@@ -2962,18 +2988,24 @@ const remd_workers_key = Ref{Any}(nothing)
     return rep_id_proc, n_blocks
 end
 
-"""
+@doc raw"""
     MetropolisMonteCarlo(; <keyword arguments>)
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
 
+A trial move with potential energy change ``\Delta E`` is accepted with probability
+``\min(1, \exp(-\Delta E / k_B T))``.
+[`MonteCarloLogger`](@ref) can be used to record the acceptances.
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
 # Arguments
 - `temperature::T`: the temperature of the system.
-- `trial_moves::M`: a function that performs the trial moves.
-- `trial_args::Dict`: a dictionary of arguments to be passed to the trial move function.
+- `trial_moves::M`: a function that performs the trial moves, called as
+    `trial_moves(sys; trial_args...)`, for example
+    [`Molly.random_uniform_translation!`](@ref) or [`Molly.random_normal_translation!`](@ref).
+- `trial_args::Dict=Dict()`: a dictionary of keyword arguments to be passed to the trial
+    move function.
 """
 struct MetropolisMonteCarlo{T, M}
     temperature::T
@@ -3050,7 +3082,7 @@ end
     random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))),
                                 rng=Random.default_rng())
 
-Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
+Perform a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
 
 The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
@@ -3069,7 +3101,7 @@ end
     random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))),
                                rng=Random.default_rng())
 
-Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
+Perform a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
 
 The translation is generated using a uniformly chosen direction and length selected from
 the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`

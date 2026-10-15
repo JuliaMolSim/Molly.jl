@@ -210,7 +210,7 @@
         core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
         ref_inter = LennardJones()
         # intraLJ=true keeps the sterics between alchemical atoms of the same role on
-        scheduler = DefaultLambdaScheduler(intraLJ=true)
+        scheduler = Molly.DefaultLambdaScheduler(intraLJ=true)
 
         for inter in (LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler),
                       LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler))
@@ -400,7 +400,7 @@
 
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
-        scheduler = DefaultLambdaScheduler()
+        scheduler = Molly.DefaultLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
@@ -411,10 +411,10 @@
         rc_test = 1.0u"nm"
 
         for (scaled_inter, ref_inter, ref_i, ref_j) in (
-            (CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
-            (CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            (Molly.CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
+            (Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
              CoulombReactionField(dist_cutoff=rc_test), pair_i, pair_j),
-            (CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            (Molly.CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
              CoulombEwald(dist_cutoff=rc_test), charge_i, charge_j),
         )
             @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
@@ -439,9 +439,9 @@
         off_j = Atom(charge=-0.8, λ=0.25, alch_role=Molly.InsertRole)
         dr_zero = zero(dr12)
         for scaled_inter in (
-            CoulombScaled(scheduler=scheduler),
-            CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-            CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            Molly.CoulombScaled(scheduler=scheduler),
+            Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            Molly.CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
         )
             @test all(iszero, force(scaled_inter, dr12, off_i, off_j))
             @test iszero(potential_energy(scaled_inter, dr12, off_i, off_j))
@@ -449,10 +449,10 @@
             @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
         end
 
-        scheduler = EleScaledLambdaScheduler()
+        scheduler = Molly.EleScaledLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         ref_i, ref_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
-        scaled_inter = CoulombScaled(scheduler=scheduler)
+        scaled_inter = Molly.CoulombScaled(scheduler=scheduler)
 
         @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
                        force(Coulomb(), dr12, ref_i, ref_j);
@@ -814,7 +814,7 @@
 
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = DefaultLambdaScheduler()
+            scheduler = Molly.DefaultLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
@@ -844,7 +844,7 @@
                 atoms=atoms_raw,
                 coords=coords_pme,
                 boundary=boundary_pme,
-                pairwise_inters=(CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
+                pairwise_inters=(Molly.CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
                 general_inters=(PME(rc, atoms_raw, boundary_pme; scheduler=scheduler),),
             )
             sys_ref_full = System(
@@ -863,7 +863,7 @@
 
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = EleScaledLambdaScheduler()
+            scheduler = Molly.EleScaledLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [

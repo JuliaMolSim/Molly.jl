@@ -1427,17 +1427,19 @@ end
 
 """
     Molly.compute_aevs_ka(coords, species_indices, p, n_species;
-                          backend=nothing, neighbors=nothing, workgroup=256)
+                          backend=nothing, neighbors=nothing, workgroup=256,
+                          write_reduce=:auto)
 
-GPU-portable AEV computation using KernelAbstractions. One thread per atom.
+GPU-portable AEV computation using KernelAbstractions.
 `coords` can be a CPU Vector{SVector} or a GPU array (CuArray, ROCArray, etc.).
 Pass `backend=MetalBackend()`/`CUDABackend()` to run on GPU; defaults to the
 backend of `coords`.
 
 `neighbors` selects the algorithm:
   * `nothing`     — O(N²)/O(N³) all-pairs kernel (only viable for tiny systems).
-  * a `NeighborList` — consume the neighbors from the system's finder (production path;
-                    `DistanceNeighborFinder` on GPU, `CellListMapNeighborFinder` on CPU) →
+  * a [`NeighborList`](@ref) — consume the neighbors from the system's finder (production
+                    path; [`DistanceNeighborFinder`](@ref) on GPU,
+                    [`CellListMapNeighborFinder`](@ref) on CPU) →
                     O(N·k)/O(N·k²) neighbor-list kernel. Preferred for ≥1000 atoms.
   * `:auto`       — O(N²) host build from coords, then the neighbor-list kernel
                     (benchmarking fallback only — does not use a real finder).
@@ -1448,6 +1450,8 @@ backend of `coords`.
 `write_reduce=true` (with a neighbor list) uses the one-workgroup-per-atom kernel that
 accumulates each atom's AEV row in shared threadgroup memory and writes it to global once,
 instead of a global read-modify-write per term. Results match to Float32 rounding (~1e-6).
+`write_reduce=false` uses one thread per atom, and the default `:auto` uses the
+one-workgroup-per-atom kernel on GPU and one thread per atom on CPU.
 
 Returns the AEV matrix on the same device as `coords`.
 """

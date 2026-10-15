@@ -16,6 +16,7 @@ For differentiable simulations there are a number of related packages:
 
 In Julia there are a number of packages related to atomic simulation, some of which are involved with the [JuliaMolSim](https://juliamolsim.github.io) organisation:
 - [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl)
+- [ACEpotentials.jl](https://github.com/ACEsuit/ACEpotentials.jl)
 - [JuLIP.jl](https://github.com/JuliaMolSim/JuLIP.jl)
 - [CellListMap.jl](https://github.com/m3g/CellListMap.jl)
 - [DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl)
@@ -23,3 +24,6 @@ In Julia there are a number of packages related to atomic simulation, some of wh
 - [AtomicGraphNets.jl](https://github.com/Chemellia/AtomicGraphNets.jl)
 - [InteratomicPotentials.jl](https://github.com/cesmix-mit/InteratomicPotentials.jl), [Atomistic.jl](https://github.com/cesmix-mit/Atomistic.jl) and [PotentialLearning.jl](https://github.com/cesmix-mit/PotentialLearning.jl) from the CESMIX project at MIT
 - [NBodySimulator.jl](https://github.com/SciML/NBodySimulator.jl), [DiffEqPhysics.jl](https://github.com/SciML/DiffEqPhysics.jl) and the [SciML](https://sciml.ai) ecosystem more broadly
+- [BioStructures.jl](https://github.com/BioJulia/BioStructures.jl)
+- [PDBTools.jl](https://github.com/m3g/PDBTools.jl)
+- [MolSimToolkit.jl](https://github.com/m3g/MolSimToolkit.jl)

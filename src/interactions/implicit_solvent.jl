@@ -429,7 +429,8 @@ function gbsa_buffers(::Type{AT}, ::Type{T}, n_atoms, offset_radii, sa_factor_us
 end
 
 """
-    ImplicitSolventOBC(atoms, atoms_data, bonds=nothing; solvent_dielectric=gb_solvent_dielectric,
+    ImplicitSolventOBC(atoms, atoms_data, bonds=nothing;
+                       solvent_dielectric=gb_solvent_dielectric,
                        solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
                        offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
                        sa_factor=gb_sa_factor, use_ACE=true, use_OBC2=false,
@@ -438,7 +439,8 @@ end
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a Coulomb interaction.
+See [Onufriev et al. 2004](https://doi.org/10.1002/prot.20033).
+Should be used along with a Coulomb interaction such as [`Coulomb`](@ref).
 [`SetupImplicitSolventOBC`](@ref) provides parameters when setting up a system from a file.
 
 `atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
@@ -662,7 +664,8 @@ end
 """
     SetupImplicitSolventOBC(; use_OBC2=false, solvent_dielectric=gb_solvent_dielectric,
                             solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                            offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
+                            offset=obc_offset, dist_cutoff=0.0u"nm",
+                            probe_radius=gb_probe_radius,
                             sa_factor=gb_sa_factor, use_ACE=true,
                             element_to_radius=mbondi2_element_to_radius,
                             element_to_screen=obc_element_to_screen)
@@ -708,7 +711,8 @@ function setup_implicit_solvent(is::SetupImplicitSolventOBC, atoms, atoms_data, 
 end
 
 """
-    ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing; solvent_dielectric=gb_solvent_dielectric,
+    ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing;
+                        solvent_dielectric=gb_solvent_dielectric,
                         solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
                         offset=gbn2_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
                         sa_factor=gb_sa_factor, use_ACE=true, neck_scale=gbn2_neck_scale,
@@ -721,7 +725,8 @@ end
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a Coulomb interaction.
+See [Nguyen et al. 2013](https://doi.org/10.1021/ct3010485).
+Should be used along with a Coulomb interaction such as [`Coulomb`](@ref).
 [`SetupImplicitSolventGBN2`](@ref) provides parameters when setting up a system from a file.
 
 `atoms_data` gives the element and residue of each atom and `bonds` the bonded pairs,
@@ -999,9 +1004,11 @@ end
 """
     SetupImplicitSolventGBN2(; solvent_dielectric=gb_solvent_dielectric,
                              solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                             offset=gbn2_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
-                             sa_factor=gb_sa_factor, use_ACE=true, neck_scale=gbn2_neck_scale,
-                             neck_cut=gbn2_neck_cut, element_to_radius=mbondi2_element_to_radius,
+                             offset=gbn2_offset, dist_cutoff=0.0u"nm",
+                             probe_radius=gb_probe_radius, sa_factor=gb_sa_factor,
+                             use_ACE=true, neck_scale=gbn2_neck_scale,
+                             neck_cut=gbn2_neck_cut,
+                             element_to_radius=mbondi2_element_to_radius,
                              element_to_screen=gbn2_element_to_screen,
                              element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
                              atom_params=gbn2_atom_params,

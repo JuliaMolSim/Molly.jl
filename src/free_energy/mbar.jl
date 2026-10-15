@@ -1,5 +1,4 @@
-export
-    assemble_mbar_inputs,
+@public assemble_mbar_inputs,
     iterate_mbar,
     mbar_weights,
     mbar_pmf,
@@ -257,15 +256,20 @@ function mbar_partitioned_workspace_or_nothing(states::AbstractVector{<:ThermoSt
     end
 end
 
-"""
+@doc raw"""
     assemble_mbar_inputs(coords_k, boundaries_k, states;
                          target_state=nothing, shift=false)
 
 Assemble the reduced potentials matrix `u` (size `N×K`) for MBAR from per-window
-coordinates and boundaries. The default implementation uses an
-`AlchemicalPartition`-backed reduced-potential workspace so shared interactions
-are evaluated once per frame; a full-potential fallback is kept for states that
-cannot be partitioned safely.
+coordinates and boundaries.
+
+The reduced potential of frame ``n`` in state ``k`` is
+```math
+u_k(x_n) = \beta_k \left( U_k(x_n) + p_k V(x_n) \right)
+```
+where ``\beta_k`` and ``p_k`` are the inverse temperature and pressure of the
+[`ThermoState`](@ref), and the pressure term is omitted for states without a pressure.
+Interactions shared between the states are evaluated once per frame where possible.
 
 # Arguments
 - `coords_k::Vector{<:Vector}` - subsampled coordinates for each window `k`.
@@ -277,7 +281,7 @@ cannot be partitioned safely.
 - `shift::Bool=false` - if `true`, subtract per-frame row minima from `u` and return the `shifts`.
 
 # Returns
-MBARInput with:
+An `MBARInput` struct, which can be given to [`Molly.mbar_weights`](@ref), with:
 - `u::Matrix{Float64}` - `N×K` reduced potentials.
 - `u_target::Union{Vector{Float64}, Nothing}` - reduced potential at `target_state` or `nothing`.
 - `N::Vector{Int}` - sample counts per window.
@@ -414,11 +418,17 @@ function mbar_iteration(u, f_init, logN)
     return f_new
 end
 
-"""
+@doc raw"""
     iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter=10_000)
 
 Solve the MBAR self-consistent equations, see
 [Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq C3.
+
+The relative free energies satisfy
+```math
+f_i = -\ln \sum_{n=1}^{N} \frac{\exp(-u_i(x_n))}{\sum_{k=1}^{K} N_k \exp(f_k - u_k(x_n))}
+```
+where the sum over ``n`` runs over the frames from all states.
 
 # Arguments
 - `u::AbstractMatrix` - `N×K` reduced potentials (`rows = frames`, `cols = states`).
@@ -667,7 +677,7 @@ High-level MBAR wrapper that computes free energies and reweighting weights from
 pre-assembled `MBARInput` struct.
 
 # Arguments
-`mbar_generator::MBARInput` - result from [`assemble_mbar_inputs`](@ref) containing:
+`mbar_generator::MBARInput` - result from [`Molly.assemble_mbar_inputs`](@ref) containing:
   - `u::AbstractMatrix` - reduced potentials (`N×K`).
   - `u_target::Union{AbstractVector, Nothing}` - reduced potentials at the target state.
   - `N::AbstractVector` - sample counts per state.
@@ -680,7 +690,7 @@ pre-assembled `MBARInput` struct.
 - `w_target::Vector{Float64}` - target-state weights.
 - `logD::Vector{Float64}` - per-frame log normalizers.
 
-This routine runs [`iterate_mbar`](@ref) to obtain relative free energies `F_k` and
+This routine runs [`Molly.iterate_mbar`](@ref) to obtain relative free energies `F_k` and
 then calls the lower-level `mbar_weights(u, u_target, f, N_counts, logN)`
 using the contents of `mbar_generator`.
 All internal consistency checks are disabled for speed.
@@ -704,9 +714,9 @@ end
              shifts=nothing, zero=:min, kBT=nothing)
 
 Compute a target-state PMF from solved MBAR quantities using the shared
-log-space PMF accumulator. Unlike `pmf_with_uncertainty`, this routine supports
-multi-dimensional observables and arbitrary grids, but it does not compute the
-large-sample covariance estimate.
+log-space PMF accumulator. Unlike [`Molly.pmf_with_uncertainty`](@ref), this routine
+supports multi-dimensional observables and arbitrary grids, but it does not compute
+the large-sample covariance estimate.
 """
 function mbar_pmf(u::AbstractMatrix,
                   u_target::AbstractVector,
@@ -997,7 +1007,7 @@ computes the PMF along `CV`.
 - `shift::Bool=false` - subtract per-frame minima from `u` for stability.
 
 # Returns
-Same `PMF` struct as the lower-level `pmf_with_uncertainty`.
+Same `PMF` struct as the lower-level [`Molly.pmf_with_uncertainty`](@ref).
 """
 function pmf_with_uncertainty(coords_k::AbstractVector,
                               boundaries_k::AbstractVector,

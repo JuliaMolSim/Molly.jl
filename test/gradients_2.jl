@@ -332,7 +332,7 @@ end
         )
 
         # Gradient of bias function with respect to CV
-        d_bias = bias_gradient(bias.bias_type, cv_sim)
+        d_bias = Molly.bias_gradient(bias.bias_type, cv_sim)
 
         fs_svec = d_bias .* d_coords
 
@@ -383,7 +383,7 @@ end
         fs_zero_anl = zero(fs)
 
         forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
-        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=Molly.cv_gradient)
         @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end
 end
@@ -1100,7 +1100,7 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc), ()),
-        ("CoulombScaled"    , CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
+        ("CoulombScaled"    , Molly.CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
@@ -1109,7 +1109,7 @@ end
                                     coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
-        ("CRFScaled"        , CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
+        ("CRFScaled"        , Molly.CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
@@ -1119,7 +1119,7 @@ end
         ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
-        ("CoulombEwaldScaled", CoulombEwaldScaled(dist_cutoff=nb_cutoff,
+        ("CoulombEwaldScaled", Molly.CoulombEwaldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
@@ -1134,8 +1134,8 @@ end
     for (name, inter, broken) in pairwise_inters
         sys_ref = pairwise_sys(inter)
         params_dic = Dict{String, Float64}()
-        Molly.extract_block!(params_dic, parameter_prefix(inter), Molly.parameter_keys(inter),
-                             Molly.parameter_values(inter))
+        Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                             Molly.parameter_keys(inter), Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
     end
 
@@ -1172,7 +1172,7 @@ end
         sys_ref = specific_sys(inter_list)
         params_dic = Dict{String, Float64}()
         for (inter, inter_type) in zip(inter_list.inters, inter_list.types)
-            Molly.extract_block!(params_dic, parameter_prefix(inter, inter_type),
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter, inter_type),
                                  Molly.parameter_keys(inter), Molly.parameter_values(inter))
         end
         test_params(name, sys_ref, params_dic)

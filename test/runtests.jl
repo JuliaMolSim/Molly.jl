@@ -45,8 +45,7 @@ end
 
 const init_code_block = quote
     using Molly
-    using Molly: from_device, to_device, NaNSimulationError, ForceFieldXMLError,
-                 MissingResidueTemplateError
+    using Molly: from_device, to_device
     # The workers evaluate this block, so they need the lazy artifact machinery below
     using LazyArtifacts: LazyArtifacts
     using Aqua

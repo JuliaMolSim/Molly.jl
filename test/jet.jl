@@ -59,30 +59,30 @@
 
     for (sys_name, sys) in jet_systems
         neighbors = find_neighbors(sys)
-        JET.test_call(find_neighbors       , Base.typesof(sys); jet_config...)
-        JET.test_call(forces               , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(forces_virial        , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(accelerations        , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(potential_energy     , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(kinetic_energy       , Base.typesof(sys); jet_config...)
-        JET.test_call(kinetic_energy_tensor, Base.typesof(sys); jet_config...)
-        JET.test_call(total_energy         , Base.typesof(sys); jet_config...)
-        JET.test_call(temperature          , Base.typesof(sys); jet_config...)
-        JET.test_call(virial               , Base.typesof(sys); jet_config...)
-        JET.test_call(scalar_virial        , Base.typesof(sys); jet_config...)
-        JET.test_call(pressure             , Base.typesof(sys); jet_config...)
-        JET.test_call(scalar_pressure      , Base.typesof(sys); jet_config...)
-        JET.test_call(masses               , Base.typesof(sys); jet_config...)
-        JET.test_call(density              , Base.typesof(sys); jet_config...)
-        JET.test_call(dipole_moment        , Base.typesof(sys); jet_config...)
+        JET.test_call(find_neighbors             , Base.typesof(sys); jet_config...)
+        JET.test_call(forces                     , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(forces_virial              , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(accelerations              , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(potential_energy           , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(kinetic_energy             , Base.typesof(sys); jet_config...)
+        JET.test_call(Molly.kinetic_energy_tensor, Base.typesof(sys); jet_config...)
+        JET.test_call(total_energy               , Base.typesof(sys); jet_config...)
+        JET.test_call(temperature                , Base.typesof(sys); jet_config...)
+        JET.test_call(virial                     , Base.typesof(sys); jet_config...)
+        JET.test_call(scalar_virial              , Base.typesof(sys); jet_config...)
+        JET.test_call(pressure                   , Base.typesof(sys); jet_config...)
+        JET.test_call(scalar_pressure            , Base.typesof(sys); jet_config...)
+        JET.test_call(masses                     , Base.typesof(sys); jet_config...)
+        JET.test_call(density                    , Base.typesof(sys); jet_config...)
+        JET.test_call(dipole_moment              , Base.typesof(sys); jet_config...)
 
         # The observables that do not need the forces or the potential energy are also
         #   gated on being free of runtime dispatch
-        JET.test_opt(kinetic_energy       , Base.typesof(sys); jet_config...)
-        JET.test_opt(kinetic_energy_tensor, Base.typesof(sys); jet_config...)
-        JET.test_opt(temperature          , Base.typesof(sys); jet_config...)
-        JET.test_opt(masses               , Base.typesof(sys); jet_config...)
-        JET.test_opt(density              , Base.typesof(sys); jet_config...)
+        JET.test_opt(kinetic_energy             , Base.typesof(sys); jet_config...)
+        JET.test_opt(Molly.kinetic_energy_tensor, Base.typesof(sys); jet_config...)
+        JET.test_opt(temperature                , Base.typesof(sys); jet_config...)
+        JET.test_opt(masses                     , Base.typesof(sys); jet_config...)
+        JET.test_opt(density                    , Base.typesof(sys); jet_config...)
     end
 
     # These functions do not go through the force and energy function barriers, so they are
@@ -98,7 +98,7 @@
             (hydrodynamic_radius   , Base.typesof(coords, boundary)),
             (Molly.molecule_centers, Base.typesof(coords, boundary, sys.topology)),
             (volume                , Base.typesof(boundary)),
-            (box_center            , Base.typesof(boundary)),
+            (Molly.box_center      , Base.typesof(boundary)),
             (scale_boundary        , Base.typesof(boundary, 1.01)),
             (random_coord          , Base.typesof(boundary)),
             (vector                , Base.typesof(coords[1], coords[2], boundary)),
@@ -149,10 +149,10 @@
         JET.test_call(virial          , Base.typesof(sys); jet_config...)
         JET.test_call(pressure        , Base.typesof(sys); jet_config...)
         JET.test_call(simulate!       , Base.typesof(sys, VelocityVerlet(dt=0.0002u"ps"), 1);
-                        jet_config...)
+                      jet_config...)
         JET.test_call(displacements   , Base.typesof(coords, boundary); jet_config...)
         JET.test_call(volume          , Base.typesof(boundary); jet_config...)
-        JET.test_call(box_center      , Base.typesof(boundary); jet_config...)
+        JET.test_call(Molly.box_center, Base.typesof(boundary); jet_config...)
         JET.test_call(random_coord    , Base.typesof(boundary); jet_config...)
         JET.test_call(scale_boundary  , Base.typesof(boundary, 1.01); jet_config...)
     end
@@ -366,7 +366,7 @@
                                         gi_fractions=ntuple(i -> 1, length(sys.general_inters)),
                                         remove_CM_motion=false),
             "MetropolisMonteCarlo" => MetropolisMonteCarlo(temperature=temp,
-                                        trial_moves=random_uniform_translation!,
+                                        trial_moves=Molly.random_uniform_translation!,
                                         trial_args=Dict(:shift_size => 0.1u"nm")),
             "AndersenThermostat" => Langevin(dt=dt, temperature=temp, friction=friction,
                                         coupling=AndersenThermostat(temp, 1.0u"ps")),
@@ -433,11 +433,11 @@
         ]
         for (coupler_name, coupler) in couplers
             types = Base.typesof(sys, buffers, coupler, sim, neighbors, 1)
-            JET.test_call(apply_coupling!, types; jet_config...)
+            JET.test_call(Molly.apply_coupling!, types; jet_config...)
             # The barostats call pressure and potential_energy, which go through the
             #   function barriers, so only the thermostats can be gated on runtime dispatch
             if coupler isa Molly.AbstractThermostat
-                JET.test_opt(apply_coupling!, types; jet_config...)
+                JET.test_opt(Molly.apply_coupling!, types; jet_config...)
             end
         end
     end
@@ -480,13 +480,13 @@
     )
     neighbors = find_neighbors(sys)
     buffers = Molly.init_buffers!(sys, 1)
-    JET.test_call(apply_loggers!, Base.typesof(sys, neighbors, 1, buffers, true);
-                    jet_config...)
+    JET.test_call(Molly.apply_loggers!, Base.typesof(sys, neighbors, 1, buffers, true);
+                  jet_config...)
     JET.test_call(simulate!, Base.typesof(sys, VelocityVerlet(dt=0.0002u"ps"), 1);
-                    jet_config...)
+                  jet_config...)
     for (logger_name, logger) in pairs(sys.loggers)
-        JET.test_call(log_property!, Base.typesof(logger, sys, neighbors, 1, buffers);
-                        jet_config...)
+        JET.test_call(Molly.log_property!, Base.typesof(logger, sys, neighbors, 1, buffers);
+                      jet_config...)
     end
 
     # Constraints
@@ -494,15 +494,15 @@
         sys = jet_protein(; constraints=:hbonds, rigid_water=true, constraint_algorithm=algo)
         coord_storage = copy(sys.coords)
         vel_storage = copy(sys.velocities)
-        JET.test_call(apply_position_constraints!, Base.typesof(sys, coord_storage);
+        JET.test_call(Molly.apply_position_constraints!, Base.typesof(sys, coord_storage);
                       jet_config...)
-        JET.test_call(apply_position_constraints!,
+        JET.test_call(Molly.apply_position_constraints!,
                       Base.typesof(sys, coord_storage, vel_storage, 0.0005f0u"ps");
                       jet_config...)
-        JET.test_call(apply_velocity_constraints!, Base.typesof(sys); jet_config...)
-        JET.test_call(check_position_constraints , Base.typesof(sys); jet_config...)
-        JET.test_call(check_velocity_constraints , Base.typesof(sys); jet_config...)
-        JET.test_call(check_constraints          , Base.typesof(sys); jet_config...)
+        JET.test_call(Molly.apply_velocity_constraints!, Base.typesof(sys); jet_config...)
+        JET.test_call(check_position_constraints       , Base.typesof(sys); jet_config...)
+        JET.test_call(check_velocity_constraints       , Base.typesof(sys); jet_config...)
+        JET.test_call(check_constraints                , Base.typesof(sys); jet_config...)
         dt, temp = 0.0005u"ps", 300.0u"K"
         simulators = [
             "VelocityVerlet"    => VelocityVerlet(dt=dt),

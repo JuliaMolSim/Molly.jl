@@ -3,6 +3,13 @@
 export
     MolecularForceField
 
+@public ForceFieldXMLError
+
+"""
+    ForceFieldXMLError(msg)
+
+An error when reading a force field XML file.
+"""
 struct ForceFieldXMLError <: Exception
     msg::String
 end
@@ -1155,7 +1162,7 @@ custom template file to the `custom_residue_templates` keyword argument.
 is determined later when creating the [`System`](@ref).
 Behavior with unsupported files is determined by the `strictness` keyword argument.
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
-Failures when reading in force field XML files throw a `ForceFieldXMLError` exception.
+Failures when reading in force field XML files throw a [`Molly.ForceFieldXMLError`](@ref).
 """
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
