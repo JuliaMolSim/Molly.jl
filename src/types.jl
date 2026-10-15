@@ -1030,6 +1030,12 @@ function default_float_type_high(::Type{AT}, ::Type{T}) where {AT <: AbstractGPU
     return default_float_type_high(get_backend(AT{Float32}(undef, 0)), T)
 end
 
+# The float type of a system with float type T moved to arrays of type AT, which is Float32
+#   instead of Float64 on backends that do not support Float64 such as Metal
+function default_float_type(::Type{AT}, ::Type{T}) where {AT, T}
+    return ((T == Float64 && default_float_type_high(AT, Float32) != Float64) ? Float32 : T)
+end
+
 function check_n_dims(coords::AbstractVector{SVector{DC, C}},
                       vels::AbstractVector{SVector{DV, V}},
                       D) where {DC, C, DV, V}
@@ -1464,13 +1470,15 @@ Convenience constructor for changing properties in a `System`.
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
 
-Changing `float_type`, `units` or `array_type` converts the system, for example
+Changing `float_type`, `units`, `array_type` or `grad_safe` converts the system, for example
 `System(sys; float_type=Float64, units=false, array_type=Array)` gives a unitless `Float64`
 copy on the CPU.
+On a device without Float64 support, such as Metal, `float_type` defaults to `Float32`.
 Everything except `atoms_data`, `topology` and `data` is converted, including values given
 as keyword arguments.
 Units are stripped without conversion and can not be added.
-Loggers are dropped with a warning unless given with the `loggers` keyword argument.
+When the float type, units or device change, loggers are dropped with a warning unless given
+with the `loggers` keyword argument.
 On a new device, or with `grad_safe=true`, the neighbor finder is the one setup would choose.
 Custom types that can not be rebuilt from their converted fields should define a method of
 `Molly.convert_component(conversion, x)`.
@@ -1492,16 +1500,17 @@ function System(sys::System{<:Any, AT, T, TH};
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
                 k=sys.k,
-                float_type=T,
-                units::Bool=(sys.energy_units != NoUnits),
                 array_type=AT,
+                float_type=(array_type === AT ? T : default_float_type(array_type, T)),
+                units::Bool=(sys.energy_units != NoUnits),
                 float_type_high=(array_type === AT ? promote_type(float_type, TH) :
                                  default_float_type_high(array_type, float_type)),
                 data=sys.data,
                 grad_safe=sys.grad_safe,
                 strictness=default_strictness(),
                 launch_config=sys.launch_config) where {AT, T, TH}
-    if float_type !== T || array_type !== AT || units != (sys.energy_units != NoUnits)
+    if float_type !== T || array_type !== AT || units != (sys.energy_units != NoUnits) ||
+            grad_safe != sys.grad_safe
         args = (; atoms, coords, boundary, velocities, atoms_data, topology, pairwise_inters,
                 specific_inter_lists, general_inters, constraints, virtual_sites,
                 neighbor_finder, loggers, force_units, energy_units, k)

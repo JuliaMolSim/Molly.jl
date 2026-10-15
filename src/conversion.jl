@@ -8,8 +8,8 @@
 The target of a System conversion, passed to `convert_component`.
 
 The type parameters are the new float type, array type and `float_type_high`.
-`strip_units` and `grad_safe` are the settings of the new system, and `same_device` is
-whether it is on the same device as the original one.
+`strip_units`, `grad_safe` and `strictness` are the settings of the new system, and
+`same_device` is whether it is on the same device as the original one.
 `atoms`, `coords` and `boundary` are the converted values, available when converting
 the parts of the system that depend on them such as the neighbor finder and PME.
 =#
@@ -20,12 +20,14 @@ struct SystemConversion{T, AT, TH, A, C, B}
     atoms::A # Needed for PME constructors
     coords::C # Needed for CellListMapNeighborFinder
     boundary::B # For PME and CellListMapNeighborFinder
+    strictness::Symbol
 end
 
 function SystemConversion{T, AT, TH}(strip_units, grad_safe, same_device=true, atoms=nothing,
-                                     coords=nothing, boundary=nothing) where {T, AT, TH}
+                                     coords=nothing, boundary=nothing,
+                                     strictness=default_strictness()) where {T, AT, TH}
     return SystemConversion{T, AT, TH, typeof(atoms), typeof(coords), typeof(boundary)}(
-                strip_units, grad_safe, same_device, atoms, coords, boundary)
+                strip_units, grad_safe, same_device, atoms, coords, boundary, strictness)
 end
 
 #=
@@ -91,11 +93,16 @@ function convert_struct(c::SystemConversion, x::X) where X
         throw_conversion_error(W)
     end
     # Catch constructors that take different arguments to the fields
-    if !(typeof(y).name.wrapper === W && all(i -> isequal(getfield(y, i), fields[i]), 1:n))
+    if !(typeof(y).name.wrapper === W && all(i -> same_values(getfield(y, i), fields[i]), 1:n))
         throw_conversion_error(W)
     end
     return y
 end
+
+# Arrays are compared on the CPU, as a constructor can store an array on another device, for
+#   example collective variables keep their atom indices on the CPU
+same_values(a::AbstractArray, b::AbstractArray) = isequal(from_device(a), from_device(b))
+same_values(a, b) = isequal(a, b)
 
 function throw_conversion_error(W)
     throw(ArgumentError("$W can not be converted to another float type, unit setting or " *
@@ -128,7 +135,10 @@ function convert_system(sys, args, ::Type{T}, ::Type{TH}, ::Type{AT}, units::Boo
     if units && sys.energy_units == NoUnits
         throw(ArgumentError("units can not be added to a System without units"))
     end
-    if args.loggers === sys.loggers && length(sys.loggers) > 0
+    same_device = (AT === array_type(sys))
+    # Loggers are tied to the float type, units and device but not to grad_safe
+    retyped = (T !== float_type(sys) || !same_device || units != (sys.energy_units != NoUnits))
+    if retyped && args.loggers === sys.loggers && length(sys.loggers) > 0
         report_issue("the loggers are dropped when converting a System to another float type, " *
                      "unit setting or device, give new loggers with the loggers keyword " *
                      "argument to keep them", strictness)
@@ -136,12 +146,13 @@ function convert_system(sys, args, ::Type{T}, ::Type{TH}, ::Type{AT}, units::Boo
     else
         loggers = args.loggers
     end
-    same_device = (AT === array_type(sys))
-    c_atoms = SystemConversion{T, AT, TH}(!units, grad_safe, same_device)
+    c_atoms = SystemConversion{T, AT, TH}(!units, grad_safe, same_device, nothing, nothing,
+                                          nothing, strictness)
     atoms = convert_component(c_atoms, args.atoms)
     coords = convert_component(c_atoms, args.coords)
     boundary = convert_component(c_atoms, args.boundary)
-    c = SystemConversion{T, AT, TH}(!units, grad_safe, same_device, atoms, coords, boundary)
+    c = SystemConversion{T, AT, TH}(!units, grad_safe, same_device, atoms, coords, boundary,
+                                    strictness)
     return System(
         atoms=atoms,
         coords=coords,

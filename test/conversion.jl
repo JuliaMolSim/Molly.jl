@@ -231,7 +231,25 @@ end
                 @test nf_type(sys_back) === nf_type(sys_gpu)
                 @test isapprox(potential_energy(sys_back), ustrip(E_gpu); rtol=1e-5)
             end
+
+            # Collective variables keep their atom indices on the CPU
+            sys = builders[2][2](Float64, Array)
+            bias = BiasPotential(CalcDist([1], [5]),
+                                 SquareBias(100.0u"kJ * mol^-1 * nm^-2", 0.5u"nm"))
+            sys = System(sys; general_inters=(bias,))
+            sys_gpu = System(sys; array_type=AT, float_type=Float32)
+            @test sys_gpu.general_inters[1].cv_type.atom_inds_1 isa Vector{Int}
+            @test isapprox(potential_energy(sys_gpu), potential_energy(sys);
+                           rtol=rtols_float32["DEXP reaction field"])
         end
+    end
+
+    # Backends without Float64 support, such as Metal, give Float32 by default
+    for AT in array_list_metal
+        AT in array_list && continue
+        sys_moved = System(builders[2][2](Float64, Array); array_type=AT)
+        @test float_type(sys_moved) == Float32
+        @test Molly.float_type_high(sys_moved) == Float32
     end
 
     @testset "Neighbor finders" begin
@@ -253,7 +271,7 @@ end
             # A GPUNeighborFinder can not be used with grad_safe, so the one setup chooses for
             #   a gradient safe system is used
             sys = build_dexp(Float32, AT)
-            sys_gs = System(sys; float_type=Float64, grad_safe=true)
+            sys_gs = System(sys; grad_safe=true)
             @test !(sys_gs.neighbor_finder isa GPUNeighborFinder)
             @test nf_masks(sys_gs) == nf_masks(sys)
             @test isapprox(potential_energy(sys_gs), potential_energy(sys);
@@ -457,7 +475,23 @@ end
         sys_kw = System(sys; float_type=Float64, units=false, coords=sys.coords .* 1.01f0)
         @test widened_equal(sys.coords .* 1.01f0, sys_kw.coords)
         # Without a conversion the copy constructor does not change the values
-        @test System(sys; grad_safe=true).atoms === sys.atoms
+        @test System(sys; coords=sys.coords).atoms === sys.atoms
+        # grad_safe alone sets up PME again for gradients and keeps the loggers
+        sys_pme = System(builders[1][2](Float64, Array); loggers=(temp=TemperatureLogger(10),))
+        sys_gs = @test_nowarn System(sys_pme; grad_safe=true, strictness=:warn)
+        @test sys_gs.general_inters[1].grad_safe
+        @test sys_gs.loggers === sys_pme.loggers
+        @test isapprox(potential_energy(sys_gs; n_threads=1),
+                       potential_energy(sys_pme; n_threads=1); rtol=1e-12)
+        # A SHAKE tolerance too small for Float32 gives the warning of the SHAKE constructor
+        sys_shake = System(joinpath(data_dir, "water_3mol_triclinic.pdb"), ff_tip3p;
+                           nonbonded_method=SetupCoulombReactionField(), dist_cutoff=0.5u"nm",
+                           constraints=:hbonds, rigid_water=true,
+                           constraint_algorithm=SetupSHAKE_RATTLE(dist_tolerance=1e-8u"nm",
+                                                vel_tolerance=1e-8u"nm^2 * ps^-1"),
+                           strictness=:nowarn)
+        @test_logs (:warn, r"SHAKE dist_tolerance") match_mode=:any System(sys_shake;
+                                                    float_type=Float32, strictness=:warn)
         sys_nounits = System(sys; units=false)
         @test_throws ArgumentError System(sys_nounits; units=true)
     end
