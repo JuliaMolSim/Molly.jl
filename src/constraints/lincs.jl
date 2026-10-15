@@ -90,7 +90,8 @@ The masses and constraints should always be on the CPU, even for a GPU system; t
 [`System`](@ref) constructor moves the constraint data to the device of the system.
 [`SetupLINCS`](@ref) provides LINCS parameters when setting up a system from a file.
 
-Velocity constraints are applied implicitly through position constraint correction.
+Velocity constraints are applied by projecting out the velocity components along the
+constraints, see `iter_vel_correction`.
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
 
@@ -225,7 +226,8 @@ end
 
 """
     SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
-               n_rec=4, n_iter=1, iter_vel_correction::Bool=false, gpu_block_size::Integer=128)
+               n_rec=4, n_iter=1, iter_vel_correction::Bool=false,
+               gpu_block_size::Integer=128)
 
 Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
 

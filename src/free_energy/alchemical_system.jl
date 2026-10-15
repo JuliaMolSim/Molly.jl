@@ -1,7 +1,8 @@
 export
     AbsoluteFESystem,
-    set_lambda!,
     RelativeFESystem
+
+@public set_lambda!
 
 ### Checks for hybrid system ###
 # same atoms in environment in both A and B
@@ -275,22 +276,23 @@ end
 """
     set_lambda!(sys, λ)
 
-Set the global λ of an alchemical system in place, without rebuilding it.
+Set the global λ of an alchemical system, as set up by [`AbsoluteFESystem`](@ref) or
+[`RelativeFESystem`](@ref), in place without rebuilding it.
 
-Only the λ of the alchemical atoms, the mesh weight of [`PME`](@ref)'s two grid form and the
-precomputed factors of the λ dispersion correction depend on λ; the neighbor masks, the interaction
+Only the λ of the alchemical atoms, the mesh weight of [`Molly.PME_λ`](@ref) and the
+precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
 lists, the topology, the constraints and the virtual sites do not, which is what makes this much
 cheaper than building the system again. Environment atoms keep λ = 1.
 
 A ladder of states can share everything λ-independent:
 
 ```julia
-states = [set_lambda!(System(sys), λ) for λ in 0:0.1:1]
+states = [Molly.set_lambda!(System(sys), λ) for λ in 0:0.1:1]
 ```
 
 `System(sys)` shares its arrays, so the masks exist once, but the states then also share the scratch
-buffers of `PME` and of any constraint algorithm. States run at the same time need their own, which
-`ReplicaSystem` arranges through `remd_unshared`; a hand-written threaded loop over states does not.
+buffers of [`PME`](@ref) and of any constraint algorithm. States run at the same time need their
+own, which [`ReplicaSystem`](@ref) arranges; a hand-written threaded loop over states does not.
 """
 function set_lambda!(sys::System, λ)
     FT = float_type(sys)
@@ -342,7 +344,7 @@ end
 
 """
     AbsoluteFESystem(sys, global_λ, mapping; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up an alchemical system for an absolute free energy calculation, in which the atoms in
@@ -357,10 +359,10 @@ random velocities are generated at `temp`.
 - `global_λ`: the global λ of the system, from 0 (coupled) to 1 (decoupled).
 - `mapping`: a vector with the indices of the atoms to decouple.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
@@ -448,7 +450,7 @@ end
 
 """
     RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up a hybrid system for a relative free energy calculation that transforms system A
@@ -468,16 +470,16 @@ of A and as a massless copy with the parameters of B. Interactions are replaced 
 - `global_λ`: the global λ of the system, from 0 (state A) to 1 (state B).
 - `mapping`: a dictionary of atom index vectors, where `"core"` and `"unique_A"` index into
     `sysA` and `"unique_B"` into `sysB`. An `"env"` entry is added to it. An atom unique to one
-    end state can not be bonded to an atom outside the mapping, as it is switched off at the
+    end state cannot be bonded to an atom outside the mapping, as it is switched off at the
     other end state; such an atom belongs in `"core"`, where only its parameters change, which
     is how a covalently bound ligand is set up.
 - `core_mapAB`: a dictionary from each core atom index in `sysA` to its index in `sysB`.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and `dual=false`
-    single topology (parameter scaling), which does not support `intraLJ=true`.
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaRBFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and
+    `dual=false` single topology (parameter scaling), which does not support `intraLJ=true`.
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`

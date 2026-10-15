@@ -70,7 +70,7 @@ autodiff(
 grads_enzyme # Contains gradients
 ```
 If the system is on GPU, this will run on GPU as well.
-A custom interaction becomes compatible with this interface by defining [`parameter_prefix`](@ref) and [`parameter_fields`](@ref).
+A custom interaction becomes compatible with this interface by defining [`Molly.parameter_prefix`](@ref) and [`Molly.parameter_fields`](@ref).
 
 The same functions also work on systems with units, for example to put modified parameters into a system that is then simulated without gradients.
 In this case [`extract_parameters`](@ref) returns plain numbers in the units that each parameter is stored with in the system, and [`ParameterPlan`](@ref) and [`inject_gradients`](@ref) take the dictionary values in those units and re-attach the units of each parameter.

@@ -36,7 +36,7 @@ EXPERIMENT = -3.67u"kJ * mol^-1"
 # electrostatics are annihilated with its charges, and intraLJ=true keeps its internal LJ.
 # For the GROMACS convention with two PME grids, use GROMACSLambdaABFEScheduler instead.
 lambda_schedule = FT.(range(1.0, stop=0.0, length=N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
+scheduler = Molly.DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 # --- Force Field Setup ---
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
@@ -183,7 +183,7 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     tss_state = TSSState(
         thermo_states;
         graph = tss_graph,
-        history_forgetting = TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
+        history_forgetting = Molly.TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
         adaptive_gamma = :covdet,
     )
 
@@ -247,8 +247,8 @@ simulate!(
 
 
 ##
-jk_solv = tss_free_energy_uncertainties(tss_state_solv)
-jk_vac  = tss_free_energy_uncertainties(tss_state_vac)
+jk_solv = Molly.tss_free_energy_uncertainties(tss_state_solv)
+jk_vac  = Molly.tss_free_energy_uncertainties(tss_state_vac)
 
 ##
 f_solv = jk_solv.free_energies

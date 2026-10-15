@@ -1,5 +1,6 @@
-export 
-    CMAPTorsion
+export CMAPTorsion
+
+@public CMAPTorsionλ
 
 """
     CMAPTorsion(index, size)
@@ -7,6 +8,7 @@ export
 Torsional correction map (CMAP) for sets of five atoms, for example protein ϕ and ψ
 backbone torsion angles.
 
+See [Mackerell et al. 2004](https://doi.org/10.1002/jcc.20065).
 The CMAP data is stored in the `data` field of the associated [`InteractionList5Atoms`](@ref).
 
 Only compatible with 3D systems.
@@ -348,8 +350,34 @@ end
     return pe
 end
 
-# λ version of `CMAPTorsion` for alchemical systems, built by `to_lambda_function`.
-@kwdef struct CMAPTorsionλ{I,LM,SCH} <: AlchemicalBondedInteraction
+@doc raw"""
+    CMAPTorsionλ(; index, size, λ_mixing=MinimumMixing(),
+                 scheduler=Molly.DefaultLambdaScheduler())
+
+Torsional correction map (CMAP) for sets of five atoms in an alchemical system, the λ version
+of [`CMAPTorsion`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`CMAPTorsion`](@ref)
+to this type.
+The potential energy is defined as
+```math
+V(\phi, \psi) = w V_{\mathrm{CMAP}}(\phi, \psi)
+```
+where ``V_{\mathrm{CMAP}}`` is the potential energy of the [`CMAPTorsion`](@ref) with the
+same `index` and `size`, and the CMAP data is stored as for [`CMAPTorsion`](@ref).
+The weight ``w`` depends on the alchemical roles of the atoms and on ``\lambda``, the `λ` of
+the atoms mixed with `λ_mixing`.
+``w = 1 - \lambda`` if the interaction involves a core atom with the parameters of state A,
+``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
+involves only unique and environment atoms.
+
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
+Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
+an error if the scheduler has `dual=false`.
+
+Only compatible with 3D systems.
+"""
+@kwdef struct CMAPTorsionλ{I, LM, SCH} <: AlchemicalBondedInteraction
     index::I
     size::I
     λ_mixing::LM = MinimumMixing()

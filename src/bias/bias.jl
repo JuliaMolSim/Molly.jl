@@ -2,12 +2,12 @@
 
 export
     LinearBias,
-    bias_gradient,
     SquareBias,
     FlatBottomSquareBias,
     PeriodicFlatBottomBias,
     BiasPotential
 
+@public bias_gradient
 
 @doc raw"""
     LinearBias(k, cv_target)
@@ -35,15 +35,18 @@ function potential_energy(lb::LinearBias, cv_sim; kwargs...)
 end
 
 """
-    bias_gradient(bias::BiasType, cv_sim::Real)
+    bias_gradient(bias_type, cv_sim)
 
 Calculate the gradient of a bias potential with respect to the value of a
 collective variable.
 
+Custom bias types should implement this function along with [`potential_energy`](@ref).
+
 # Arguments
-- `b::BiasType`: A struct that defines the type of bias to be used.
-- `cv_sim::Real`: The value of a measured collective variable given
-    the coordinates of a simulation.
+- `bias_type`: a struct that defines the type of bias to be used, such as
+    [`LinearBias`](@ref).
+- `cv_sim`: the value of a measured collective variable given the coordinates
+    of a simulation.
 """
 function bias_gradient(lb::LinearBias, cv_sim)
     d = cv_sim - lb.cv_target
@@ -153,7 +156,8 @@ The potential energy is defined as
 ```math
 V(\boldsymbol{s}) = \frac{1}{2} k (|\boldsymbol{s} - \boldsymbol{s}_t| - r_{fb})^2 H
 ```
-where $s$ and $s_t$ are the system and target CV values respectively, and
+where $s$ and $s_t$ are the system and target CV values respectively,
+``\boldsymbol{s} - \boldsymbol{s}_t`` is wrapped into the range ``[-\pi, \pi)``, and
 ```math
 H = \left\{ \begin{array}{cl}
 0 & \text{if} & |\boldsymbol{s} - \boldsymbol{s}_t| < r_{fb} \\
@@ -223,15 +227,20 @@ as an AtomsCalculators.jl calculator.
 The `cv_type` could for example be [`CalcDist`](@ref) and the `bias_type`
 could be [`LinearBias`](@ref).
 
-Forces resulting from the bias potential are evaluated in two steps, specfically by
-(1) calculating the gradient of the bias potential with respect to the value of the CV, and
-(2) calculating the gradient of the CV with respect to the atomic coordinates.
+Forces resulting from the bias potential are evaluated in two steps, specifically by
+(1) calculating the gradient of the bias potential with respect to the value of the CV
+using [`Molly.bias_gradient`](@ref), and
+(2) calculating the gradient of the CV with respect to the atomic coordinates using
+[`Molly.cv_gradient`](@ref).
 
 Gradients can be calculated with either automatic differentiation or explicitly defined
 gradient functions.
 Enzyme should be imported in the first case.
 
-Virial contributions must be explicitly defined.
+Molecules are made whole before calculating the CV if the `correction` of `cv_type`
+is `:pbc`.
+The virial contribution is only calculated for CV types that define it, which includes
+the built-in CV types when `has_virial` is `true`.
 """
 struct BiasPotential{C, B}
     cv_type::C

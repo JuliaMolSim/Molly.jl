@@ -1,9 +1,10 @@
 export
-    TSSHistoryForgetting,
     TSSState,
     TSSSimulation,
+    TSSSampleLogger
+
+@public TSSHistoryForgetting,
     TSSSample,
-    TSSSampleLogger,
     log_tss_sample!,
     tss_grid_graph,
     tss_free_energy_uncertainties,

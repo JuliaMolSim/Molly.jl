@@ -1,5 +1,7 @@
 export MorseBond
 
+@public MorseBondλ
+
 @doc raw"""
     MorseBond(; D, a, r0)
 
@@ -42,7 +44,28 @@ end
     return b.D * (1 - ralp)^2
 end
 
-# λ version of `MorseBond` for alchemical systems, built by `to_lambda_function`.
+@doc raw"""
+    MorseBondλ(; D, a, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+
+A Morse potential bond between two atoms in an alchemical system, the λ version of
+[`MorseBond`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`MorseBond`](@ref)
+to this type.
+The potential energy is defined as
+```math
+V(r) = w D(1 - e^{-a(r - r_0)})^2
+```
+where the weight ``w`` depends on the alchemical roles of the atoms and on ``\lambda``, the
+`λ` of the atoms mixed with `λ_mixing`.
+``w = 1`` if the bond involves an atom unique to one state or only environment atoms,
+otherwise ``w = 1 - \lambda`` if it involves a core atom with the parameters of state A and
+``w = \lambda`` if it involves a core atom with the parameters of state B.
+
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
+Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
+an error if the scheduler has `dual=false`.
+"""
 @kwdef struct MorseBondλ{T, A, R, LM, SCH} <: AlchemicalBondedInteraction
     D::T
     a::A
