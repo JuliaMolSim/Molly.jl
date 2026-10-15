@@ -551,7 +551,7 @@ neighbor_finder = DistanceNeighborFinder(
 )
 sys = System(sys; neighbor_finder=neighbor_finder)
 ```
-(`CellListMapNeighborFinder` works too.)
+([`CellListMapNeighborFinder`](@ref) works too.)
 An NVE trajectory can be written to a DCD file with a [`TrajectoryWriter`](@ref):
 ```julia
 sys = System(sys; loggers=(writer=TrajectoryWriter(10, "water_ani.dcd"),))
@@ -665,31 +665,31 @@ potential_energy(sys) # -2080.2391023908813 eV
 using Molly
 using Lux
 using Random
-using StaticArrays
 using Zygote
+import AtomsCalculators
 
 # 1. Define the custom interaction struct
 struct MachineLearningPotential{M, P, S}
-    model::M      
-    ps::P         
-    st::S         
+    model::M
+    ps::P
+    st::S
 end
 
-# 2. Implement the potential energy function
-function Molly.potential_energy(s::System, inter::MachineLearningPotential, neighbors=nothing)
-    flat_coords = Float32.(reduce(vcat, s.coords)) 
+# 2. Implement the potential energy function of the general interaction
+function AtomsCalculators.potential_energy(sys, inter::MachineLearningPotential; kwargs...)
+    flat_coords = Float32.(reduce(vcat, sys.coords))
     energy, _ = inter.model(flat_coords, inter.ps, inter.st)
-    return energy[1] 
+    return energy[1]
 end
 
-# 3. Implement analytical forces via Zygote
-function Molly.forces(s::System, inter::MachineLearningPotential, neighbors=nothing)
-    flat_coords = Float32.(reduce(vcat, s.coords))
+# 3. Implement the forces via Zygote, adding them to fs
+function AtomsCalculators.forces!(fs, sys, inter::MachineLearningPotential; kwargs...)
+    flat_coords = Float32.(reduce(vcat, sys.coords))
     grad = Zygote.gradient(c -> first(inter.model(c, inter.ps, inter.st)[1]), flat_coords)[1]
-    
-    n_atoms = length(s.coords)
-    neg_grad = -grad
-    return [SVector{3}(neg_grad[3i-2], neg_grad[3i-1], neg_grad[3i]) for i in 1:n_atoms]
+    for i in eachindex(fs)
+        fs[i] -= SVector(grad[3i-2], grad[3i-1], grad[3i])
+    end
+    return fs
 end
 
 # Setup a dummy 3-atom system
@@ -714,11 +714,13 @@ sys = System(
     boundary=boundary,
     general_inters=(inter,),
     energy_units=NoUnits,
-    force_units=NoUnits
+    force_units=NoUnits,
 )
 
-println("System Energy: ", Molly.potential_energy(sys, inter))
-println("System Forces: ", Molly.forces(sys, inter))
+println("System Energy: ", potential_energy(sys))
+println("System Forces: ", forces(sys))
+
+simulate!(sys, VelocityVerlet(dt=0.001), 100)
 ```
 
 ## Density functional theory
@@ -1160,6 +1162,7 @@ save("mie.png", f)
 ## Different soft-core potentials
 
 The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters.
+The interactions take ``\lambda`` from the atoms, and how it is applied depends on the alchemical role of the atoms and the λ scheduler of the interaction (see [Alchemical roles](@ref)).
 The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter ``\sigma_Q``.
 
 These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``.
@@ -1171,23 +1174,29 @@ using Molly
 using GLMakie
 
 boundary = CubicBoundary(5.0u"nm")
-a1 = Atom(charge=0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
-a2 = Atom(charge=-0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
 dists = 0.01:0.005:0.8
 
-energies(inter) = map(dists) do dist
-    c1 = SVector(1.0, 1.0, 1.0)u"nm"
-    c2 = SVector(dist + 1.0, 1.0, 1.0)u"nm"
-    vec = vector(c1, c2, boundary)
-    potential_energy(inter, vec, a1, a2, NoUnits)
+# The first atom is inserted, so it is decoupled at λ=0 and fully coupled at λ=1
+# The linear scheduler scales the sterics and electrostatics in the same way
+scheduler = Molly.LinearLambdaScheduler()
+
+function energies(inter, λ)
+    a1 = Atom(charge=0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1", λ=λ, alch_role=Molly.InsertRole)
+    a2 = Atom(charge=-0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)u"nm"
+        c2 = SVector(dist + 1.0, 1.0, 1.0)u"nm"
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, u"kJ * mol^-1")
+    end
 end
 
 function plot_interactions(ax, title, xlabel, ylabel, data, ylims_range)
     ax.title = title
     ax.xlabel = xlabel
     ax.ylabel = ylabel
-    for (label, inter) in data
-        lines!(ax, dists, ustrip.(energies(inter)), label=label)
+    for (label, inter, λ) in data
+        lines!(ax, dists, ustrip.(energies(inter, λ)), label=label)
     end
     ylims!(ax, ylims_range)
     axislegend(ax, position=:rt)
@@ -1196,31 +1205,31 @@ end
 f = Figure(size=(1200, 800))
 ax1, ax2, ax3, ax4 = Axis(f[1, 1]), Axis(f[1, 2]), Axis(f[2, 1]), Axis(f[2, 2])
 
-LJ = Dict(
-    "LJ" => LennardJones(),
-    "LJ-Beutler" => LennardJonesSoftCoreBeutler(α=0.3, λ=0.5),
-    "LJ-Gapsys" => LennardJonesSoftCoreGapsys(α=0.85, λ=0.5),
-)
+LJ = [
+    ("LJ", LennardJones(), 1.0),
+    ("LJ-Beutler", LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler), 0.5),
+    ("LJ-Gapsys", LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler), 0.5),
+]
 plot_interactions(
     ax1,
     "Soft-core Lennard-Jones potentials \nin comparison to standard LJ for λ=0.5",
     "Distance / nm",
     "Potential Energy / kJ * mol^-1",
-    sort(LJ),
+    LJ,
     (-5, 400),
 )
 
-Cou = Dict(
-    "Coulomb" => Coulomb(),
-    "Coulomb-Beutler" => CoulombSoftCoreBeutler(α=0.3, λ=0.5),
-    "Coulomb-Gapsys" => CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u"nm"),
-)
+Cou = [
+    ("Coulomb", Coulomb(), 1.0),
+    ("Coulomb-Beutler", CoulombSoftCoreBeutler(α=0.3, scheduler=scheduler), 0.5),
+    ("Coulomb-Gapsys", CoulombSoftCoreGapsys(α=0.3, σQ=1u"nm", scheduler=scheduler), 0.5),
+]
 plot_interactions(
     ax2,
     "Soft-core Coulomb potentials \nin comparison to standard Coulomb for λ=0.5",
     "Distance / nm",
     "Potential Energy / kJ * mol^-1",
-    sort(Cou),
+    Cou,
     (-400, 0),
 )
 
@@ -1229,16 +1238,16 @@ plot_interactions(
     "Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)",
     "Distance / nm",
     "Potential Energy / kJ * mol^-1",
-    [(string("λ=$λ"), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    [("λ=$λ", LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler), λ) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
 
 plot_interactions(
     ax4,
-    "Effect of λ on soft-core Coulomb potential (Gapsys et al.)",
+    "Effect of λ on soft-core Lennard-Jones potential (Gapsys et al.)",
     "Distance / nm",
     "Potential Energy / kJ * mol^-1",
-    [(string("λ=$λ"), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    [("λ=$λ", LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler), λ) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
 
@@ -1278,8 +1287,8 @@ sys = System(
     force_units=u"kJ * mol^-1 * nm^-1",
 )
 ```
-Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
-These paramaters must be added to the [`System`](@ref) manually by making use of the copy constructor:
+Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic parameters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
+These parameters must be added to the [`System`](@ref) manually by making use of the copy constructor:
 ```julia
 σ = 0.34u"nm"
 ϵ = (4.184 * 0.24037)u"kJ * mol^-1"

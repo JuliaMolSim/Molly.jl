@@ -221,7 +221,7 @@ One must take into account that the simulations will start from an initial (idea
 # pulling.jl
 
 tu      = unit(Δt)                   # Time units used for timestep
-max_t   = uconvert(u, FT(0.5)u"ns")  # Simulation time in appropriate time units
+max_t   = uconvert(tu, FT(0.5)u"ns") # Simulation time in appropriate time units
 N_STEPS = Int(floor(max_t / Δt))     # Number of simulation steps
 ```
 
@@ -246,6 +246,7 @@ sys_0 = System(
     nonbonded_method=SetupCoulombReactionField(),
 )
 
+simulate!(sys_0, SteepestDescentMinimizer()) # Relax the structure for these settings first
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
 ```
 
@@ -377,7 +378,7 @@ l = 7
 eq_θ = FT(-0.48948112328583804) # We get this from the equilibrium structure
 
 tu         = unit(Δt)                 # Time units used for timestep
-max_t      = uconvert(u, FT(50)u"ns") # Simulation time in appropriate time units
+max_t      = uconvert(tu, FT(50)u"ns") # Simulation time in appropriate time units
 N_STEPS    = Int(floor(max_t / Δt))   # Number of simulation steps
 
 τ_T        = FT(1)u"ps"               # Thermostat coupling constant
@@ -527,7 +528,7 @@ Threads.@threads for nt in 1:N_TRJ
         boundary = current_sys.boundary
 
         # Measure the CV at the current frame
-        ϕ = _dihedral_geom(coords[i], coords[j], coords[k], coords[l], boundary)
+        ϕ, = _dihedral_geom(coords[i], coords[j], coords[k], coords[l], boundary)
 
         push!(u, pe)
         push!(c, coords)
@@ -555,14 +556,14 @@ Next, we define a vector of thermodynamic states to represent each Hamiltonian u
 # MBAR.jl
 
 # Assemble the thermodynamic systems for each umbrella window
-energy_units = TRJ_SYSTEMS[1].system.energy_units
+energy_units = TRJ_SYSTEMS[1].sys.energy_units
 kBT          = uconvert(energy_units, Unitful.R * temp)
-βi           = Float64(ustrip(1.0 / kBT))
 
-states = ThermoState[ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)
-                     for i in eachindex(TRJ_SYSTEMS)]
+# No integrator is needed to evaluate energies, so nothing is given
+states = ThermoState[ThermoState(TRJ_SYSTEMS[i].sys, nothing; temperature=temp,
+                                 pressure=pres, name="win_$i") for i in eachindex(TRJ_SYSTEMS)]
 
-target_state = ThermoState("target", βi, pres, sys_nobias)
+target_state = ThermoState(sys_nobias, nothing; temperature=temp, pressure=pres, name="target")
 ```
 
 We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`Molly.assemble_mbar_inputs`](@ref) method:
@@ -573,7 +574,6 @@ We are finally in possession of everything needed to solve the MBAR equations an
 mbar_gen = Molly.assemble_mbar_inputs(
     C, B, states; # Coordinates, boundaries and thermodynamic states
     target_state=target_state, # The target state, in our case the unbiased system
-    energy_units=energy_units,
 )
 
 u        = mbar_gen.u        # Reduced energy matrix, K states by N sampled conformations
@@ -922,6 +922,7 @@ sys_vac = AbsoluteFESystem(sysb_vac, global_λ, mapping;
 ```
 
 These systems can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
+[`Molly.set_lambda!`](@ref) changes the global λ of such a system in place, which is much cheaper than setting up the system again.
 
 ### Example set up for RBFE
 Here we demonstrate how to set up a hybrid system to interpolate between two ligands for TYK2 (ejm31 and ejm50) using the OpenFE settings. See below how OpenFE settings were matched using Molly settings.
@@ -980,7 +981,7 @@ core_mapAB = Dict()
 for (i,a) in enumerate(sysA.atoms_data)
     if i in mapping["core"]
         for (j,b) in enumerate(sysB.atoms_data)
-            if a.atom_name == b.atom_name && a.atom_name == b.atom_name
+            if a.atom_name == b.atom_name
                 core_mapAB[i] = j
             end
         end
@@ -1114,7 +1115,7 @@ pmf_deconv = PMFDeconvolution(
 
     Do not use the automatic path if:
 
-    * The state contains extra `BiasPotential`s that are not PMF windows.
+    * The state contains extra [`BiasPotential`](@ref)s that are not PMF windows.
     * The bias order does not match the PMF grid axes.
     * More than one bias contributes to one PMF dimension.
     * The coordinate used for the plotted PMF is transformed differently from the coordinate seen by the bias.
@@ -1172,11 +1173,11 @@ awh_sim = AWHSimulation(
 simulate!(awh_sim, TOTAL_STEPS)
 ```
 
-`AWHSimulation` stores its absolute MD step, so couplers and loggers retain their cadence
-across AWH iterations and repeated `simulate!` calls. Pass `initial_step` when resuming from
+[`AWHSimulation`](@ref) stores its absolute MD step, so couplers and loggers retain their cadence
+across AWH iterations and repeated [`simulate!`](@ref) calls. Pass `initial_step` when resuming from
 a checkpoint whose coordinates and velocities already correspond to a nonzero step.
 
-After the run, `Molly.pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
+After the run, calling [`Molly.pmf`](@ref) on `awh_sim.pmf` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
 
 ```julia
 pmf_result = Molly.pmf(awh_sim.pmf)
@@ -1258,7 +1259,7 @@ save("awh_dipeptide_convergence.png", fig_df)
 
 ![AWH dipeptide convergence](images/awh_dipeptide_convergence.png)
 
-The script also saves a normalized histogram of the visited AWH thermodynamic states. This is a simple diagnostic for how the sampler moved over the 400 biased $\phi/\psi$ windows.
+The script also saves a normalized histogram of the visited AWH thermodynamic states, using the helper functions `save_state_histogram` and `awh_visited_states` defined in the script. This is a simple diagnostic for how the sampler moved over the 400 biased $\phi/\psi$ windows.
 
 ```julia
 state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
@@ -1578,7 +1579,7 @@ Molly's TSS implementation uses local estimators on graph windows; a graph defin
 
 The reference distribution over rungs is called $\gamma$. It sets the asymptotic density used by the free energy estimator. With `adaptive_gamma = :covdet`, Molly updates $\gamma$ from a covariance-determinant estimate of local thermodynamic state density. This gives a larger target density to regions where the local state geometry indicates that more resolution is useful.
 
-TSS can also forget early history. With `TSSHistoryForgetting(alpha, n_epochs)`, estimator history before approximately $\alpha \cdot t$ is dropped at TSS iteration $t$. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.
+TSS can also forget early history. With [`Molly.TSSHistoryForgetting`](@ref) and its `alpha` and `n_epochs` keyword arguments, estimator history before approximately $\alpha \cdot t$ is dropped at TSS iteration $t$. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.
 
 ### Alanine dipeptide PMF
 
@@ -1714,7 +1715,7 @@ simulate!(
 )
 ```
 
-`TSSSimulation` likewise stores one absolute MD step shared by its physical replicas.
+[`TSSSimulation`](@ref) likewise stores one absolute MD step shared by its physical replicas.
 Each MD block receives that step, and repeated calls resume from `tss_sim.current_step`.
 Use the `initial_step` constructor keyword when restoring an existing simulation state.
 
@@ -1798,7 +1799,7 @@ save("tss_dipeptide_convergence.png", fig_df)
 
 ![TSS dipeptide convergence](images/tss_dipeptide_convergence.png)
 
-The script also saves a normalized histogram of the visited TSS thermodynamic states. With multiple replicas, the histogram combines the state histories from all replicas.
+The script also saves a normalized histogram of the visited TSS thermodynamic states, using the helper functions `save_state_histogram` and `tss_visited_states` defined in the script. With multiple replicas, the histogram combines the state histories from all replicas.
 
 ```julia
 state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
@@ -2183,7 +2184,7 @@ simulate!(tss_sim)
 values(sample_logger)
 ```
 
-The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `Molly.log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
+The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement [`Molly.log_tss_sample!`](@ref), called as `log_tss_sample!(logger, sample)`, and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
 
 ## Free energies with REMD
 
