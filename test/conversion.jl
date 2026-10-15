@@ -134,11 +134,7 @@ end
         )),
     )
 
-    # Tolerance for comparing an energy calculated in Float32 with a Float64 one, or with a
-    #   Float32 one for slightly different values, which is limited by the error of the Float32
-    #   calculation rather than by the conversion. Measured Float32 errors: about 8e-6 for the
-    #   steep double exponential repulsion, 2e-4 for Ewald, 5e-6 for the cancellation in the
-    #   9 atom triclinic water and 2e-6 for implicit solvent on the GPU. 1e-6 otherwise.
+    # Float32 energies are compared with this tolerance, set by the Float32 error of each system
     rtols_float32 = Dict(
         "DEXP reaction field"      => 1e-5,
         "benzene Ewald with SHAKE" => 5e-4,
@@ -354,7 +350,7 @@ end
                           nonbonded_method=SetupPME(), dist_cutoff=1.0u"nm",
                           center_coords=false)
         sys = AbsoluteFESystem(sys_solv, 0.5, collect(1:12);
-                               scheduler=GROMACSLambdaABFEScheduler(dual=true))
+                               scheduler=Molly.GROMACSLambdaABFEScheduler(dual=true))
         sys_conv = System(sys; units=false)
         @test isapprox(potential_energy(sys_conv; n_threads=1),
                        ustrip(potential_energy(sys; n_threads=1)); rtol=1e-12)
@@ -367,7 +363,7 @@ end
         atoms = [Atom(index=i, mass=T(10.0), charge=T(0.1), σ=T(0.3), ϵ=T(0.4)) for i in 1:4]
         cutoff = DistanceCutoff(T(1.0))
         cc = T(ustrip(Molly.coulomb_const))
-        λ_kwargs = (λ_mixing=Molly.MinimumMixing(), scheduler=DefaultLambdaScheduler())
+        λ_kwargs = (λ_mixing=Molly.MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
         inters = (
             LennardJones(cutoff=cutoff, weight_special=T(0.5)),
             Molly.LennardJonesScaled(cutoff=cutoff),
@@ -449,7 +445,9 @@ end
     @testset "Keyword arguments" begin
         sys = builders[2][2](Float32, Array)
         sys_log = System(sys; loggers=(temp=TemperatureLogger(10),))
-        @test System(sys_log; float_type=Float64).loggers == ()
+        sys_nolog = @test_logs (:warn, r"loggers are dropped") match_mode=:any System(
+                        sys_log; float_type=Float64, strictness=:warn)
+        @test sys_nolog.loggers == ()
         loggers = (temp=TemperatureLogger(Float64, 10),)
         @test System(sys_log; float_type=Float64, loggers=loggers).loggers === loggers
         # float_type_high keeps the higher precision on the same device

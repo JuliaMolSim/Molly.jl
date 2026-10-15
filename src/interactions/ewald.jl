@@ -2239,3 +2239,49 @@ function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, fo
     end
     return nothing
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# The number of threads a PME on CPU was set up for, which sets the size of its buffers
+pme_n_threads(pme) = (pme.recip_conv_buffer isa Vector ? length(pme.recip_conv_buffer) :
+                      Threads.nthreads())
+
+# PME is rebuilt through its constructor, which sets up the grids, buffers and FFT plans.
+#   α is kept from the original, as it is in CoulombEwald and EwaldExclusionData.
+function convert_component(c::SystemConversion{<:Any, <:Any, TH}, pme::PME) where TH
+    pme_new = PME(
+        convert_component(c, pme.dist_cutoff),
+        c.atoms,
+        c.boundary;
+        error_tol=convert_component(c, pme.error_tol),
+        order=pme.order,
+        ϵr=convert_component(c, pme.ϵr),
+        # The charge sums are not stored for gradient safe PME, so fixed charges are not
+        #   assumed in that case
+        fixed_charges=!isnothing(pme.pc_sum),
+        mesh_dims=pme.mesh_dims,
+        scheduler=convert_component(c, pme.scheduler),
+        float_type_high=TH,
+        grad_safe=c.grad_safe,
+        n_threads=pme_n_threads(pme),
+    )
+    return replace_fields(pme_new, (α=convert_component(c, pme.α),))
+end
+
+# The λ field holds the mesh weight rather than λ, so it is kept from the original
+function convert_component(c::SystemConversion, pme::PME_λ)
+    pme_new = PME_λ(
+        convert_component(c, pme.dist_cutoff),
+        c.atoms,
+        c.boundary;
+        error_tol=convert_component(c, pme.error_tol),
+        order=pme.order,
+        ϵr=convert_component(c, pme.ϵr),
+        fixed_charges=false,
+        mesh_dims=pme.mesh_dims,
+        scheduler=convert_component(c, pme.scheduler),
+        grad_safe=c.grad_safe,
+        n_threads=pme_n_threads(pme),
+    )
+    return replace_fields(pme_new, (α=convert_component(c, pme.α),
+                                    λ=convert_component(c, pme.λ)))
+end

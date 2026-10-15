@@ -1369,3 +1369,8 @@ Calculated as the sum of the coordinates multiplied by the partial charges,
 Requires the charges on the atoms to be set.
 """
 dipole_moment(sys) = sum(sys.coords .* charges(sys))
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(c::SystemConversion, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(convert_component(c, b.basis_vectors); approx_images=A)
+end

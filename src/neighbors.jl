@@ -2458,3 +2458,61 @@ function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder, DistanceNei
     println(io, "  n_steps = " , neighbor_finder.n_steps)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Neighbor finders are rebuilt from their eligible and special matrices, which are passed on
+#   as they are stored, sparse or dense. On the same device the type of neighbor finder is
+#   kept if it can be used by the new system. Otherwise the neighbor finder that system setup
+#   would choose for the new device, gradient safety and boundary is used, so that moving a
+#   system to another device and back gives the original type of neighbor finder.
+function convert_component(c::SystemConversion{<:Any, AT},
+                           nf::Union{DistanceNeighborFinder, TreeNeighborFinder,
+                                     CellListMapNeighborFinder, GPUNeighborFinder,
+                                     GPUCellListNeighborFinder}) where AT
+    dist_cutoff = convert_component(c, nf.dist_cutoff)
+    if isnothing(nf.eligible)
+        # The output modes of GPUCellListNeighborFinder that ignore the exceptions store no
+        #   matrices, which is the same as every pair being eligible and none special
+        matrices = (n_atoms=nf.n_atoms,)
+    else
+        matrices = (eligible=from_device(nf.eligible), special=from_device(nf.special))
+    end
+    on_gpu = AT <: AbstractGPUArray
+    gpu_nf_allowed = on_gpu && uses_gpu_neighbor_finder(AT) && !c.grad_safe
+    if c.same_device
+        if nf isa GPUNeighborFinder && gpu_nf_allowed
+            return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                     n_steps=nf.n_steps, array_type=AT)
+        elseif nf isa GPUCellListNeighborFinder && on_gpu
+            return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                             n_steps=nf.n_steps, array_type=AT,
+                                             max_neighbors=nf.max_neighbors,
+                                             output=nf.output, ragged=nf.ragged)
+        elseif nf isa TreeNeighborFinder && !on_gpu
+            return TreeNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                      n_steps=nf.n_steps)
+        elseif nf isa CellListMapNeighborFinder && !on_gpu
+            return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                             n_steps=nf.n_steps, x0=c.coords,
+                                             boundary=c.boundary)
+        elseif nf isa DistanceNeighborFinder
+            return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                          n_steps=nf.n_steps, array_type=AT)
+        end
+    end
+    # The choice made by system setup
+    if gpu_nf_allowed
+        return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+                                 array_type=AT)
+    elseif on_gpu && gpu_cell_list_suitable(c.boundary, dist_cutoff)
+        return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                         n_steps=nf.n_steps, array_type=AT, ragged=false)
+    elseif !on_gpu && !has_infinite_boundary(c.boundary) &&
+                minimum(box_sides(c.boundary)) >= 2 * dist_cutoff
+        return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                         n_steps=nf.n_steps, x0=c.coords,
+                                         boundary=c.boundary)
+    end
+    return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+                                  array_type=AT)
+end

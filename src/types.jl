@@ -1464,33 +1464,16 @@ Convenience constructor for changing properties in a `System`.
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
 
-The system can also be converted to another float type, to unitless values or to another
-device by changing `float_type`, `units` or `array_type`.
-For example `System(sys; float_type=Float64, units=false, array_type=Array)` gives a
-unitless `Float64` copy of a system on the CPU.
-The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites,
-neighbor finder and Boltzmann constant are converted, including any given as keyword
-arguments.
-Floats and values with units are converted, arrays are converted element-wise and moved to
-the new device, and other structs are rebuilt from their converted fields with the
-constructor of the same name.
-Custom types for which this does not work, for example because they hold buffers, should
-define a method of `Molly.convert_component(conversion, x)`.
-Units are stripped without conversion, so the numbers are in the units each value is stored
-with.
-Units can not be added to a system without units.
-Loggers are dropped unless given with the `loggers` keyword argument, since their histories
-and observables are tied to the original float type, units and device.
-`float_type_high` defaults to the higher precision of `float_type` and the original
-`float_type_high` on the same device, and to the default for the new device otherwise.
-[`PME`](@ref) is set up again for the new system, taking `grad_safe` and `float_type_high`
-from it.
-The neighbor finder keeps its eligible and special matrices, sparse or dense.
-On the same device its type is kept if the new system can use it.
-Otherwise, for example when the system moves between CPU and GPU or a
-[`GPUNeighborFinder`](@ref) is used with `grad_safe=true`, the neighbor finder that system
-setup chooses by default for the new device, `grad_safe` and boundary is used.
-Conversion to a higher precision can not recover the precision lost in the original values.
+Changing `float_type`, `units` or `array_type` converts the system, for example
+`System(sys; float_type=Float64, units=false, array_type=Array)` gives a unitless `Float64`
+copy on the CPU.
+Everything except `atoms_data`, `topology` and `data` is converted, including values given
+as keyword arguments.
+Units are stripped without conversion and can not be added.
+Loggers are dropped with a warning unless given with the `loggers` keyword argument.
+On a new device, or with `grad_safe=true`, the neighbor finder is the one setup would choose.
+Custom types that can not be rebuilt from their converted fields should define a method of
+`Molly.convert_component(conversion, x)`.
 """
 function System(sys::System{<:Any, AT, T, TH};
                 atoms=sys.atoms,

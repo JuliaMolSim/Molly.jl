@@ -673,3 +673,12 @@ function constraints_to_bonds(sys::System{<:Any, AT, T}, k_in) where {AT, T}
         return InteractionList2Atoms(Any)
     end
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# AngleConstraint stores the third distance rather than the angle, so the angle is found
+#   from the converted distances
+function convert_component(c::SystemConversion, ac::AngleConstraint)
+    d_ij, d_jk, d_ik = convert_component.((c,), (ac.dist_ij, ac.dist_jk, ac.dist_ik))
+    angle_ijk = acos(clamp((d_ij^2 + d_jk^2 - d_ik^2) / (2 * d_ij * d_jk), -1, 1))
+    return AngleConstraint(ac.i, ac.j, ac.k, angle_ijk, d_ij, d_jk)
+end

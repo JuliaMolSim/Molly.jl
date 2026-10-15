@@ -1907,3 +1907,33 @@ function AtomsCalculators.potential_energy(sys::AtomsBase.AbstractSystem{3}, int
     gbsa_setup!(inter, sys, Bs)
     return gbsa_energy(sys, inter, Bs, inter.buffer_atom_charges, n_threads)
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Fields of implicit solvent holding the values it was set up from, which are kept as they are
+#   since setup takes them with units and in Float64 for any system
+const gbsa_setup_fields = (:element_to_radius, :element_to_screen, :element_to_screen_nucleic,
+                           :atom_params, :atom_params_nucleic, :data_d0, :data_m0)
+
+# The buffers of implicit solvent depend on the device and the number of threads, so they are
+#   set up again
+function convert_component(c::SystemConversion{T, AT}, inter::AbstractGBSA) where {T, AT}
+    params = NamedTuple(f => (f in gbsa_setup_fields ? getfield(inter, f) :
+                                                      convert_component(c, getfield(inter, f)))
+                        for f in fieldnames(typeof(inter)) if !startswith(String(f), "buffer_"))
+    # The number of threads of an implicit solvent interaction on CPU sets its force buffers
+    if inter.buffer_force_chunks isa AbstractVector
+        n_threads = length(inter.buffer_force_chunks)
+    else
+        n_threads = Threads.nthreads()
+    end
+    bufs = gbsa_buffers(AT, T, length(params.offset_radii), params.offset_radii,
+                        params.sa_factor, params.dist_cutoff, params.offset,
+                        params.factor_solute, n_threads)
+    buffers = (buffer_Bs=bufs.Bs, buffer_B_grads=bufs.B_grads,
+               buffer_atom_charges=bufs.atom_charges, buffer_born_forces=bufs.born_forces,
+               buffer_born_forces_scaled=bufs.born_forces_scaled,
+               buffer_born_forces_mod=bufs.born_forces_mod, buffer_Is_nounits=bufs.Is_nounits,
+               buffer_pes=bufs.pes, buffer_fs_mat=bufs.fs_mat,
+               buffer_force_chunks=bufs.force_chunks)
+    return replace_fields(inter, merge(params, buffers))
+end

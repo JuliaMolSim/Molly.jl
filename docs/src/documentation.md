@@ -728,11 +728,11 @@ For example, a system simulated with units in `Float32` on the GPU can be evalua
 ```julia
 sys_cpu = System(sys; float_type=Float64, units=false, array_type=Array, grad_safe=true)
 ```
-The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites, neighbor finder and Boltzmann constant are converted, and loggers are dropped unless given with the `loggers` keyword argument.
+The atoms, coordinates, velocities, boundary, interactions, constraints, virtual sites, neighbor finder and Boltzmann constant are converted, and loggers are dropped with a warning unless given with the `loggers` keyword argument.
 Units are stripped without conversion, so the numbers are in the units each value is stored with.
 Converting to a higher precision does not recover the precision lost when the original values were stored.
 Interaction types are rebuilt from their converted fields by calling the constructor of the same name with the fields in order.
-Custom types where this does not work, for example because they contain buffers, should define a method of `Molly.convert_component(conversion, x)`; see `src/conversion.jl` for the existing methods.
+Custom types where this does not work, for example because they contain buffers, should define a method of `Molly.convert_component(conversion, x)`; see the existing methods in the Molly source for examples.
 
 ## Atom types
 

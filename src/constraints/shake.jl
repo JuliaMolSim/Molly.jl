@@ -1399,3 +1399,19 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RAT
     KernelAbstractions.synchronize(backend)
     return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Constraints are converted on the CPU, the System constructor moves them to the device
+function convert_component(c::SystemConversion, sr::SHAKE_RATTLE)
+    clusters = map((sr.clusters12, sr.clusters23, sr.clusters34, sr.angle_clusters)) do cl
+        cl_cpu = host_constraint_clusters(cl)
+        if length(cl_cpu) == 0
+            return cl_cpu
+        else
+            return StructArray([convert_component(c, cd) for cd in cl_cpu])
+        end
+    end
+    return SHAKE_RATTLE(clusters..., convert_component(c, sr.dist_tolerance),
+                        convert_component(c, sr.vel_tolerance), sr.gpu_block_size,
+                        sr.max_iters)
+end
