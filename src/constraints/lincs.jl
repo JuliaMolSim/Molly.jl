@@ -1420,3 +1420,27 @@ function move_constraints_to_device(lincs::LINCS, ::Type{AT}) where {AT <: Abstr
                  lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
                  lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(c::SystemConversion, lincs::LINCS)
+    # The distance constraints from the angle constraints are added at the end
+    n_angle = (isnothing(lincs.angle_constraints) ? 0 : length(lincs.angle_constraints))
+    n_dist = length(lincs.dist_constraints) - 3 * n_angle
+    dist_constraints = [convert_component(c, dc) for dc in lincs.dist_constraints[1:n_dist]]
+    if n_angle > 0
+        angle_constraints = [convert_component(c, ac) for ac in lincs.angle_constraints]
+    else
+        angle_constraints = nothing
+    end
+    return LINCS(
+        masses=mass.(from_device(c.atoms)),
+        dist_tolerance=convert_component(c, lincs.dist_tolerance),
+        vel_tolerance=convert_component(c, lincs.vel_tolerance),
+        dist_constraints=dist_constraints,
+        angle_constraints=angle_constraints,
+        n_rec=lincs.lincs_data.n_rec,
+        n_iter=lincs.lincs_data.n_iter,
+        iter_vel_correction=lincs.iter_vel_correction,
+        gpu_block_size=lincs.gpu_block_size,
+    )
+end

@@ -52,6 +52,21 @@ struct SHAKE_RATTLE{D, A, B, C, E, V}
     max_iters::Int
 end
 
+function check_shake_tolerances(dist_tolerance, vel_tolerance, strictness)
+    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
+        err_str = "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
+    end
+
+    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
+        err_str = "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
+    end
+    return nothing
+end
+
 function SHAKE_RATTLE(; n_atoms,
                       dist_tolerance=1e-8u"nm",
                       vel_tolerance=1e-8u"nm^2 * ps^-1",
@@ -71,17 +86,7 @@ function SHAKE_RATTLE(; n_atoms,
                             "provided to SHAKE_RATTLE"))
     end
 
-    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
-        err_str = "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
-                  "to convergence issues"
-        report_issue(err_str, strictness)
-    end
-
-    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
-        err_str = "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
-                  "to convergence issues"
-        report_issue(err_str, strictness)
-    end
+    check_shake_tolerances(dist_tolerance, vel_tolerance, strictness)
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
         throw(ArgumentError("constraints should be passed to SHAKE_RATTLE on CPU, data will " *
@@ -1398,4 +1403,22 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RAT
 
     KernelAbstractions.synchronize(backend)
     return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
+end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Constraints are converted on the CPU, the System constructor moves them to the device
+function convert_component(c::SystemConversion, sr::SHAKE_RATTLE)
+    clusters = map((sr.clusters12, sr.clusters23, sr.clusters34, sr.angle_clusters)) do cl
+        cl_cpu = host_constraint_clusters(cl)
+        if length(cl_cpu) == 0
+            return cl_cpu
+        else
+            return StructArray([convert_component(c, cd) for cd in cl_cpu])
+        end
+    end
+    dist_tolerance = convert_component(c, sr.dist_tolerance)
+    vel_tolerance = convert_component(c, sr.vel_tolerance)
+    check_shake_tolerances(dist_tolerance, vel_tolerance, c.strictness)
+    return SHAKE_RATTLE(clusters..., dist_tolerance, vel_tolerance, sr.gpu_block_size,
+                        sr.max_iters)
 end

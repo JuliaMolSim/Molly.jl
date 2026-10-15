@@ -99,3 +99,10 @@ end
 function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
 end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(::SystemConversion, ::ANIPotential)
+    throw(ArgumentError("ANIPotential can not be converted to another float type, unit " *
+                        "setting or device, it should be given to the new system with the " *
+                        "general_inters keyword argument"))
+end

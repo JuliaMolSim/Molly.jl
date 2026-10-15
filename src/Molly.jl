@@ -56,6 +56,7 @@ end
 include("types.jl")
 include("sparse_pairs.jl")
 include("parameters.jl")
+include("conversion.jl")
 include("units.jl")
 include("cuda_config.jl")
 include("spatial.jl")
