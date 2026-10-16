@@ -176,13 +176,16 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
                                       reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
 
+    # Deep-copy interactions: the partition systems must own isolated copies of any
+    # mutable per-evaluation state (e.g. PME grids/plans, ML/GBSA buffers). Types with
+    # non-copyable internals must implement Base.deepcopy (cf. PME).
     master_sys = System(deepcopy(ref_sys);
-        pairwise_inters      = (master_pils...,),
-        general_inters       = (master_gils...,),
-        specific_inter_lists = (master_sils_1a...,
-                                master_sils_2a...,
-                                master_sils_3a...,
-                                master_sils_4a...),
+        pairwise_inters      = deepcopy((master_pils...,)),
+        general_inters       = deepcopy((master_gils...,)),
+        specific_inter_lists = deepcopy((master_sils_1a...,
+                                         master_sils_2a...,
+                                         master_sils_3a...,
+                                         master_sils_4a...)),
         neighbor_finder      = master_nf,
         loggers              = (),
     )
@@ -198,9 +201,9 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                                      boundary=ref_sys.boundary)
         λ_sys = System(deepcopy(ref_sys);
             atoms                = λ_atoms[length(λ_systems) + 1],
-            pairwise_inters      = (λ_p...,),
-            general_inters       = (λ_g...,),
-            specific_inter_lists = (λ_s...,),
+            pairwise_inters      = deepcopy(λ_p),
+            general_inters       = deepcopy(λ_g),
+            specific_inter_lists = deepcopy(λ_s),
             neighbor_finder      = λ_nf,
             loggers              = (),
         )
