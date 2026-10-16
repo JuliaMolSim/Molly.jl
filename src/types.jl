@@ -27,6 +27,10 @@ export
     MollyCalculator,
     ASECalculator
 
+@public pairwise_uses_velocity,
+    from_device,
+    to_device
+
 # Base type for Molly interaction types
 abstract type AbstractInteraction end
 
@@ -45,7 +49,14 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
-# Whether a pairwise interaction uses velocities in its force/potential energy calculation
+"""
+    pairwise_uses_velocity(inter)
+
+Whether a pairwise interaction uses velocities in its force or potential energy calculation.
+
+`false` by default.
+Custom pairwise interaction should implement this function if they use velocities.
+"""
 pairwise_uses_velocity(inter) = false
 
 @inline any_uses_velocity(::Union{Tuple{}, @NamedTuple{}}) = false
@@ -1934,13 +1945,23 @@ function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
     )
 end
 
-# Avoid unnecessary Array calls on CPU
-from_device(x::Array) = x
+"""
+    from_device(arr)
+
+Copy an array to the CPU, or return it if it is already on the CPU.
+"""
+from_device(x::Array) = x # Avoid unnecessary Array calls on CPU
 from_device(x::BitArray) = x
 from_device(x) = Array(x)
 from_device(x::StructArray) = replace_storage(Array, x)
 from_device(t::Tuple) = map(from_device, t)
 
+"""
+    to_device(arr, arr_type)
+
+Copy an array to the GPU, e.g. `to_device(arr, CuArray)`, or return it
+if it is already on the GPU.
+"""
 to_device(x::Nothing, ::Type{AT}) where AT = nothing
 to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
 to_device(x, ::Type{AT}) where AT = AT(x)

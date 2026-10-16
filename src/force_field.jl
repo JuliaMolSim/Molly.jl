@@ -1122,6 +1122,25 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
     end
 end
 
+# 1-4 scaling factors given in different files only have to agree to this tolerance,
+#   since some files write 5/6 as 0.833333
+const scale_14_tol = 1e-5
+
+# Store a 1-4 scaling factor at index i of ff_param_array, with whether it has been
+#   set atindex i + 1
+function set_scale_14!(ff_param_array, i, w, force_name, attr_name, ff_file)
+    if ff_param_array[i + 1]
+        if abs(w - ff_param_array[i]) > scale_14_tol
+            throw(ForceFieldXMLError("multiple $force_name entries with different " *
+                    "$attr_name, $(ff_param_array[i]) was read before $w in $ff_file"))
+        end
+    else
+        ff_param_array[i] = w
+        ff_param_array[i + 1] = true
+    end
+    return ff_param_array
+end
+
 """
     MolecularForceField(ff_files...; units=true, custom_residue_templates=nothing,
                         custom_renaming_scheme=nothing, float_type=Float64,
@@ -1149,25 +1168,6 @@ Behavior with unsupported files is determined by the `strictness` keyword argume
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 Failures when reading in force field XML files throw a [`Molly.ForceFieldXMLError`](@ref).
 """
-# 1-4 scaling factors given in different files only have to agree to this tolerance,
-#   since some files write 5/6 as 0.833333
-const scale_14_tol = 1e-5
-
-# Store a 1-4 scaling factor at index i of ff_param_array, with whether it has been
-#   set atindex i + 1
-function set_scale_14!(ff_param_array, i, w, force_name, attr_name, ff_file)
-    if ff_param_array[i + 1]
-        if abs(w - ff_param_array[i]) > scale_14_tol
-            throw(ForceFieldXMLError("multiple $force_name entries with different " *
-                    "$attr_name, $(ff_param_array[i]) was read before $w in $ff_file"))
-        end
-    else
-        ff_param_array[i] = w
-        ff_param_array[i + 1] = true
-    end
-    return ff_param_array
-end
-
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}

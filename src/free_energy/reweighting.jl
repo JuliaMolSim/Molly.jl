@@ -249,7 +249,7 @@ end
     pmf(acc::OnlinePMFAccumulator; zero=:min, kBT=nothing)
 
 Extract the current PMF estimate from a [`PMFDeconvolution`](@ref) or an online PMF
-accumulator as a `PMF` result, with the same fields as returned by
+accumulator as a [`PMF`](@ref) result, with the same fields as returned by
 [`Molly.pmf_with_uncertainty`](@ref) though the uncertainties may be `nothing`.
 
 PMF values are reported in reduced units, shifted according to `zero`, which can be `:min`,

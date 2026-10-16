@@ -9,6 +9,7 @@ export
     potential_energy
 
 @public kinetic_energy_tensor,
+    potential_energy_gpu,
     pairwise_pe
 
 """
@@ -229,6 +230,8 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 Pairwise interactions can use [`Molly.pairwise_pe`](@ref) to apply a cutoff.
+A GPU-specific version can be defined with [`Molly.potential_energy_gpu`](@ref), but this
+is not generally required.
 """
 function potential_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads);
@@ -569,7 +572,12 @@ function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
     return only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 end
 
-# Allow GPU-specific potential energy functions to be defined if required
+"""
+Calculate the potential energy between atoms due to a given interaction type on GPU.
+
+See [`potential_energy`](@ref) for more details.
+This function is only required when a different code path is required on CPU and GPU.
+"""
 potential_energy_gpu(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
 potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn, data) = potential_energy(inter, ci, bnd, ai, eu, vi, sn, data)
 potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data)

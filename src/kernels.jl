@@ -1,5 +1,7 @@
 # KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
+@public required_atom_fields
+
 kernel_maybe_velocity(velocities, i) = velocities[i]
 kernel_maybe_velocity(::Nothing, i) = nothing
 
@@ -61,12 +63,16 @@ end
     return pe
 end
 
-# Atom fields read by a pairwise interaction in its force/energy calculation,
-# as a tuple of field name Symbols. Returning `nothing` (the default) conservatively
-# shuffles all Atom fields in the tiled GPU pairwise kernel. Narrowing this to the
-# fields actually used cuts warp-shuffle traffic (the dominant cost of that kernel),
-# but must list every field read or forces/energies will be silently wrong, so the
-# default is safe.
+"""
+    required_atom_fields(inter)
+
+Atom fields read by a pairwise interaction in its force or potential energy calculation,
+as a tuple of field name `Symbol`s.
+
+The default `nothing` conservatively shuffles all atom fields in the tiled GPU pairwise kernel.
+Narrowing this to the fields actually used cuts warp-shuffle traffic (the dominant cost of
+that kernel), but must list every field read or forces/energies will be silently wrong.
+"""
 required_atom_fields(inter) = nothing
 
 @inline merge_atom_fields(::Nothing, _) = nothing

@@ -14,7 +14,7 @@
         sys_out = System(
             sys;
             coords=[F * coord for coord in sys.coords],
-            boundary=TriclinicBoundary(F * Molly.boxmatrix(sys.boundary)),
+            boundary=TriclinicBoundary(F * Molly.box_matrix(sys.boundary)),
         )
         return potential_energy(sys_out, neighbors; n_threads=1)
     end
@@ -51,7 +51,7 @@
             z         o + q[2]   q[6];
             z         z          o + q[3]
         ]
-        boundary_new = TriclinicBoundary(F * Molly.boxmatrix(boundary))
+        boundary_new = TriclinicBoundary(F * Molly.box_matrix(boundary))
         return Molly.ewald_pe_forces!(
             nothing,
             nothing,
@@ -141,7 +141,7 @@
         nonbonded_method=SetupCoulombReactionField(),
     )
 
-    sys_trc = System(sys; boundary=TriclinicBoundary(Molly.boxmatrix(sys.boundary)))
+    sys_trc = System(sys; boundary=TriclinicBoundary(Molly.box_matrix(sys.boundary)))
     neighbors_virial = Molly.find_neighbors(sys_trc; n_threads=1)
 
     W_enzyme, _, _ = virial_enzyme(sys_trc, neighbors_virial)

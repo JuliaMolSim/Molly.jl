@@ -12,7 +12,10 @@ export
     forces,
     forces_virial
 
-@public pairwise_force
+@public force_gpu,
+    pairwise_force,
+    zero_forces,
+    forces!
 
 # Apply F = ma but give massless particles zero acceleration
 calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))
@@ -56,10 +59,17 @@ For pairwise interactions returns a single force vector and for specific interac
 returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
 Pairwise interactions can use [`Molly.pairwise_force`](@ref) to apply a cutoff.
+A GPU-specific version can be defined with [`Molly.force_gpu`](@ref), but this
+is not generally required.
 """
 function force end
 
-# Allow GPU-specific force functions to be defined if required
+"""
+Calculate the force between atoms due to a given interaction type on GPU.
+
+See [`force`](@ref) for more details.
+This function is only required when a different code path is required on CPU and GPU.
+"""
 force_gpu(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
 force_gpu(inter, ci, bnd, ai, fu, vi, sn, data) = force(inter, ci, bnd, ai, fu, vi, sn, data)
 force_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data)
@@ -730,6 +740,11 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       -1, UInt64(0), 0)
 end
 
+"""
+    zero_forces(sys)
+
+Return an zero array with the shape and units of the system [`forces`](@ref).
+"""
 zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
 
 """
@@ -789,6 +804,15 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     end
 end
 
+"""
+    forces!(fs, system, neighbors, step_n, buffers, needs_vir_val;
+            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
+            specific_inter_lists=system.specific_inter_lists,
+            general_inters=system.general_inters, strictness=:warn)
+
+Calculate the forces on all atoms in a system using the pairwise, specific and
+general interactions and add them to `fs`.
+"""
 function forces!(fs,
                  sys::System{<:Any, <:Any, T, TH},
                  neighbors,

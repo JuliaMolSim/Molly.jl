@@ -9,7 +9,8 @@ export
     CRescaleBarostat,
     MonteCarloBarostat
 
-@public apply_coupling!
+@public apply_coupling!,
+    needs_virial
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
@@ -36,8 +37,15 @@ function apply_coupling!(sys, buffers, couplers::Union{Tuple, NamedTuple}, sim, 
     return recompute_forces
 end
 
-# By default, couplers do not require the virial
-needs_virial(c) = Inf
+"""
+    needs_virial(coupler)
+
+The step interval at which a coupler requires the [`virial`](@ref), e.g. to calculate pressure.
+
+`Inf` by default, indicating that the virial is not required.
+Custom coupler should implement this function if the virial is required.
+"""
+needs_virial(c) = Inf # By default, couplers do not require the virial
 
 apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = false
 

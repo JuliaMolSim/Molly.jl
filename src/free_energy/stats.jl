@@ -1,3 +1,20 @@
+@public StatisticalInefficiency
+
+"""
+    StatisticalInefficiency(series; maxlag=nothing)
+
+Estimate the statistical inefficiency of a time series from its integrated autocorrelation
+time, truncated using the initial positive sequence.
+
+`maxlag` sets the maximum lag considered.
+The fields are `inefficiency`, `stride` (the inefficiency rounded up, useful for subsampling
+the series), `input_length`, `effective_size` (the number of uncorrelated samples) and `lag`
+(the truncation lag used).
+
+Uses initial positive sequence (IPS) on paired lags to choose L.
+Uses normalized ACF of the mean-removed series.
+Includes the (1 - τ/N) taper in the sum.
+"""
 struct StatisticalInefficiency{I, S, L, E, LG}
     inefficiency::I
     stride::S
@@ -6,23 +23,7 @@ struct StatisticalInefficiency{I, S, L, E, LG}
     lag::LG
 end
 
-# statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing, Int}=nothing)
-#
-# Integrated autocorrelation time estimator with IPS truncation and
-# finite-sample taper.
-#
-# Returns a StatisticalInefficiency struct with:
-# - inefficiency: statistical inefficiency
-# - stride: ceil(Int, g)
-# - input_length: input length
-# - effective_size: floor(N / stride)
-# - lag: truncation lag used
-#
-# Notes:
-# - Uses initial positive sequence (IPS) on paired lags to choose L.
-# - Uses normalized ACF of the mean-removed series.
-# - Includes the (1 - τ/N) taper in the sum.
-function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
+function StatisticalInefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
     x = ustrip.(series)
     N = length(x)
     if N < 3
@@ -73,10 +74,6 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
     stride = max(1, ceil(Int, g))
     N_eff = max(1, fld(N, stride))
     return StatisticalInefficiency(g, stride, N, N_eff, L)
-end
-
-function subsample(series::AbstractVector, stride::Integer; first::Integer=1)
-    return series[first:stride:end]
 end
 
 # ESS of a mask (no views with Bool indexing)

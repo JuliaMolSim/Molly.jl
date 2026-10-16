@@ -177,7 +177,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-box_wrapper(sys, args...; kwargs...) = boxmatrix(sys.boundary)
+box_wrapper(sys, args...; kwargs...) = box_matrix(sys.boundary)
 
 """
     BoxLogger(n_steps)

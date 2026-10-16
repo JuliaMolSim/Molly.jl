@@ -19,11 +19,20 @@ export
     simulate_remd!,
     MetropolisMonteCarlo
 
-@public NaNSimulationError,
+@public shortcut_sim,
+    NaNSimulationError,
     remd_exchange!,
     random_uniform_translation!,
     random_normal_translation!
 
+"""
+    shortcut_sim(shortcut, sys, buffers, neighbors, step_n; kwargs...)
+
+Determine whether to stop the simulation at a given simulation step.
+
+To provide a custom shortcut criteria, define a struct and a method for this function
+that dispatches on the struct as the first argument.
+"""
 shortcut_sim(::Nothing, args...; kwargs...) = false
 
 calc_n_steps(n_steps::Integer, dt) = n_steps
@@ -220,10 +229,10 @@ For a [`ReplicaSystem`](@ref) and [`ReplicaExchangeMD`](@ref) this calls
 - `run_loggers`: whether to run the loggers during the simulation. Can be `true`, `false`
     or `:skipstart`, in which case the loggers are not run before the first step. `run_loggers`
     is `true` by default except for the energy minimizers, where it is `false`.
-- `shortcut=nothing`: when to stop the simulation early. A struct with a `Molly.shortcut_sim`
-    method defined can be provided. `Molly.shortcut_sim(shortcut, sys, buffers, neighbors,
-    step_n; kwargs...)` is checked at the end of each step and stops the simulation if it
-    returns `true`. Unused for REMD simulations.
+- `shortcut=nothing`: when to stop the simulation early. A struct with a
+    [`Molly.shortcut_sim`](@ref) method defined can be provided.
+    `Molly.shortcut_sim(shortcut, sys, buffers, neighbors, step_n; kwargs...)` is checked at the
+    end of each step and stops the simulation if it returns `true`. Unused for REMD simulations.
 - `init_step=0`: the step number before the first step is taken, useful for time-dependent
     potentials.
 - `show_progress`: whether to show a progress bar for the simulation. `true` by default in

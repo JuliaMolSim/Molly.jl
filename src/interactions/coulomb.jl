@@ -11,10 +11,12 @@ export
     CoulombSoftCoreGapsysEwald,
     Yukawa
 
-@public CoulombScaled,
+@public coulomb_const,
+    CoulombScaled,
     CoulombReactionFieldScaled,
     CoulombEwaldScaled
 
+"The Coulomb constant, 1 / 4πϵ0, where ϵ0 is the vacuum permittivity."
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
 @doc raw"""

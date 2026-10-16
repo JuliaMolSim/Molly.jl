@@ -537,12 +537,12 @@ Threads.@threads for nt in 1:N_TRJ
     end
 
     # Estimate the decorrelation time from the timeseries of the potential energy
-    ineff = Molly.statistical_inefficiency(u; maxlag=n_frames-1)
+    ineff = Molly.StatisticalInefficiency(u; maxlag=n_frames-1)
 
     # Subsample arrays based on statistical inefficiency
-    sub_coords = Molly.subsample(c,  ineff.stride; first=1)
-    sub_bounds = Molly.subsample(b,  ineff.stride; first=1)
-    sub_CV     = Molly.subsample(cv, ineff.stride; first=1)
+    sub_coords =  c[1:ineff.stride:end]
+    sub_bounds =  b[1:ineff.stride:end]
+    sub_CV     = cv[1:ineff.stride:end]
 
     C[nt]  = sub_coords
     B[nt]  = sub_bounds

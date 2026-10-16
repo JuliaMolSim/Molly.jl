@@ -578,12 +578,12 @@ end
     # Scaling the box moves molecules rigidly, keeping the fractional coordinates of their
     #   centers, as barostats require
     μ = SMatrix{3, 3}([1.05 0.02 0.0; 0.0 0.97 0.0; 0.0 0.0 1.03])
-    frac_centers(s) = [ustrip.(Molly.boxmatrix(s.boundary)) \
+    frac_centers(s) = [ustrip.(Molly.box_matrix(s.boundary)) \
                        ustrip.(sum(Molly.unwrap_molecules(s)[i:(i + 2)]) / 3) for i in 1:3:9]
     for rotate in (true, false)
         sys_scale = deepcopy(sys)
         scale_coords!(sys_scale, μ; rotate=rotate)
-        @test Molly.boxmatrix(sys_scale.boundary) ≈ μ * Molly.boxmatrix(sys.boundary)
+        @test Molly.box_matrix(sys_scale.boundary) ≈ μ * Molly.box_matrix(sys.boundary)
         @test frac_centers(sys_scale) ≈ frac_centers(sys)
         @test all(((i, j),) -> norm(vector(sys_scale.coords[i], sys_scale.coords[j],
                     sys_scale.boundary)) ≈ norm(coords_whole[j] - coords_whole[i]), bonds)
