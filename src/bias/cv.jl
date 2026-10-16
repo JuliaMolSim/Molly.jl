@@ -12,7 +12,7 @@ export
     CalcAngle,
     CalcTorsion
 
-@public cv_gradient
+@public cv_gradient, cv_period
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
 function center_of_mass(coords, atoms)
@@ -940,3 +940,16 @@ function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, 
                     r_jk * transpose(f[3]) +
                     r_jl * transpose(f[4])
 end
+
+"""
+    cv_period(cv)
+
+Period of a periodic collective variable, or zero for a non-periodic one.
+
+[`CalcTorsion`](@ref) is periodic with period 2π. All other built-in CVs are not periodic,
+including [`CalcAngle`](@ref), whose values lie in [0, π]. Custom CV types that are
+periodic define a method, which may depend on the instance, e.g.
+`Molly.cv_period(cv::MyCV) = cv.period`.
+"""
+cv_period(cv) = 0
+cv_period(::CalcTorsion) = 2π

@@ -183,12 +183,17 @@ struct PeriodicFlatBottomBias{K, R, T}
     end
 end
 
+# Displacement d wrapped into [-period/2, period/2); a zero period means a non-periodic CV
+function periodic_displacement(d, period)
+    iszero(period) && return d
+    half_period = period / 2
+    return mod(d + half_period, period) - half_period
+end
+
  function periodic_flat_bottom_displacement(cv_sim, cv_target)
     d = cv_sim - cv_target
     FT = typeof(float(ustrip(d)))
-    twopi = FT(2π) * oneunit(d)
-    half_period = twopi / FT(2)
-    return mod(d + half_period, twopi) - half_period
+    return periodic_displacement(d, FT(2π) * oneunit(d))
 end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
@@ -248,6 +253,7 @@ struct BiasPotential{C, B}
 end
 
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
+bias_all_finite(values::Tuple) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
 
  function bias_max_abs_ustrip(values::AbstractArray)
