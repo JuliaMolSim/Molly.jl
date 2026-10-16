@@ -1556,8 +1556,9 @@ end
 The Langevin integrator, based on the Langevin Middle Integrator in OpenMM.
 
 See [Zhang et al. 2019](https://doi.org/10.1021/acs.jpca.9b02771).
-This is a leapfrog-like integrator, so the velocities are offset by half a time step
-behind the positions.
+In the notation of [`LangevinSplitting`](@ref) this is the BAOA splitting rather than the
+leapfrog Verlet integrator, but the velocities are stored as in leapfrog, offset by half a
+time step behind the positions.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -2939,7 +2940,10 @@ const remd_workers_key = Ref{Any}(nothing)
 
 @inline function divide_gpus(n_proc, gpu_devices, k, sys)
     if n_proc != length(gpu_devices)
-        throw(ArgumentError("Number of processes ($n_proc) must be equal to n_gpu ($(length(gpu_devices))) when simulating on GPU"))
+        throw(ArgumentError("simulating a ReplicaSystem on GPU uses one Distributed.jl worker " *
+                "process per GPU, but there are $n_proc workers and $(length(gpu_devices)) GPUs " *
+                "in gpu_devices; add workers with addprocs, load Molly and the GPU package on " *
+                "them with @everywhere, and choose the GPUs with the gpu_devices keyword argument"))
     end
     # Deal the states out in turn, so every state belongs to exactly one worker
     n_blocks = min(n_proc, k)

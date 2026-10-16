@@ -222,8 +222,8 @@ function awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) 
 
     target_press = nothing
     if !isnothing(target_pressure)
-        l_unit = unit(sys.boundary.side_lengths[1])
-        p_unit = e_unit / l_unit^3
+        # The volume is an area in 2D, so 2D pressures have units of force per length
+        p_unit = e_unit / unit(volume(sys.boundary))
         e_val = one(T) * e_unit
         p_val_scaled = target_pressure * (e_val / energy_remove_mol(e_val))
         target_press = T(ustrip(uconvert(p_unit, p_val_scaled)))

@@ -928,21 +928,11 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
             if haskey(entry, "coulomb14scale")
                 w = parse_attr(T, entry, "coulomb14scale", ff_file)
-                if ff_param_array[3] && w != ff_param_array[2]
-                    throw(ForceFieldXMLError("multiple NonbondedForce entries with different " *
-                                             "coulomb14scale"))
-                end
-                ff_param_array[2] = w
-                ff_param_array[3] = true
+                set_scale_14!(ff_param_array, 2, w, "NonbondedForce", "coulomb14scale", ff_file)
             end
             if haskey(entry, "lj14scale")
                 w = parse_attr(T, entry, "lj14scale", ff_file)
-                if ff_param_array[5] && w != ff_param_array[4]
-                    throw(ForceFieldXMLError("multiple NonbondedForce entries with different " *
-                                             "lj14scale"))
-                end
-                ff_param_array[4] = w
-                ff_param_array[5] = true
+                set_scale_14!(ff_param_array, 4, w, "NonbondedForce", "lj14scale", ff_file)
             end
             for atom_or_attr in eachelement(entry)
                 if atom_or_attr.name == "Atom"
@@ -989,12 +979,7 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             end
             if haskey(entry, "lj14scale")
                 w = parse_attr(T, entry, "lj14scale", ff_file)
-                if ff_param_array[7] && w != ff_param_array[6]
-                    throw(ForceFieldXMLError("multiple LennardJonesForce entries with " *
-                                             "different lj14scale"))
-                end
-                ff_param_array[6] = w
-                ff_param_array[7] = true
+                set_scale_14!(ff_param_array, 6, w, "LennardJonesForce", "lj14scale", ff_file)
             end
             for atom_or_nbfix in eachelement(entry)
                 if atom_or_nbfix.name == "Atom"
@@ -1164,6 +1149,25 @@ Behavior with unsupported files is determined by the `strictness` keyword argume
 This can be `:warn` to emit warnings, `:nowarn` to suppress warnings or `:error` to error.
 Failures when reading in force field XML files throw a [`Molly.ForceFieldXMLError`](@ref).
 """
+# 1-4 scaling factors given in different files only have to agree to this tolerance,
+#   since some files write 5/6 as 0.833333
+const scale_14_tol = 1e-5
+
+# Store a 1-4 scaling factor at index i of ff_param_array, with whether it has been
+#   set atindex i + 1
+function set_scale_14!(ff_param_array, i, w, force_name, attr_name, ff_file)
+    if ff_param_array[i + 1]
+        if abs(w - ff_param_array[i]) > scale_14_tol
+            throw(ForceFieldXMLError("multiple $force_name entries with different " *
+                    "$attr_name, $(ff_param_array[i]) was read before $w in $ff_file"))
+        end
+    else
+        ff_param_array[i] = w
+        ff_param_array[i + 1] = true
+    end
+    return ff_param_array
+end
+
 struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}

@@ -1255,6 +1255,38 @@ function find_bond_r0(bond_r0s, i, j)
     return r0
 end
 
+# Give an error in terms of the System arguments for constraint topologies that the
+#   constraint algorithms do not support, rather than from deep in their setup
+function check_constraint_topology(dist_constraints, angle_constraints, constraints_type,
+                                   rigid_water, constraint_algorithm)
+    n_dist = Dict{Int, Int}() # Number of distance constraints each atom is in
+    for dc in dist_constraints
+        n_dist[dc.i] = get(n_dist, dc.i, 0) + 1
+        n_dist[dc.j] = get(n_dist, dc.j, 0) + 1
+    end
+    angle_atoms = Set{Int}()
+    for ac in angle_constraints, a in (ac.i, ac.j, ac.k)
+        if haskey(n_dist, a) || a in angle_atoms
+            throw(ArgumentError("constraints=:$constraints_type and rigid_water=$rigid_water " *
+                "give an angle constraint that shares atom $a with another constraint, which " *
+                "is not supported by the constraint algorithms; constraints=:hangles fails " *
+                "for most molecules other than water, so use :hbonds or :allbonds instead"))
+        end
+        push!(angle_atoms, a)
+    end
+    if constraint_algorithm isa SetupSHAKE_RATTLE
+        for dc in dist_constraints
+            if n_dist[dc.i] > 1 && n_dist[dc.j] > 1
+                throw(ArgumentError("constraints=:$constraints_type gives a chain of " *
+                    "constraints through atoms $(dc.i) and $(dc.j), but SHAKE_RATTLE only " *
+                    "supports clusters of constraints around a central atom, such as with " *
+                    "constraints=:hbonds, so use constraint_algorithm=SetupLINCS() instead"))
+            end
+        end
+    end
+    return nothing
+end
+
 function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_data,
                               constraints_type, rigid_water, units, strictness, masses,
                               constraint_algorithm)
@@ -1305,6 +1337,8 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     end
 
     if length(dist_constraints) > 0 || length(angle_constraints) > 0
+        check_constraint_topology(dist_constraints, angle_constraints, constraints_type,
+                                  rigid_water, constraint_algorithm)
         algo = build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
                                           units, strictness, masses, constraint_algorithm)
         constraints = (algo,)

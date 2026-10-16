@@ -56,6 +56,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
         )
 
         show(devnull, sys)
+        @test unit(scalar_pressure(sys)) == u"bar * nm"
 
         simulate!(sys, simulator, n_steps; n_threads=1)
 

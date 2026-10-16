@@ -1735,11 +1735,9 @@ function ThermoState(sys::System{<:Any, <:Any, <:Any, TH}, integrator;
     p_val = nothing
     if !isnothing(press_source)
         # Handle scalar pressure or tensor (matrix) pressure representations
-        p_raw = press_source isa AbstractArray ? (1/3 * tr(press_source)) : press_source
-        
-        l_unit = unit(sys.boundary.side_lengths[1])
-        v_unit = l_unit^3
-        p_unit = sys.energy_units / v_unit
+        p_raw = press_source isa AbstractArray ? tr(press_source) / size(press_source, 1) :
+                                                 press_source
+        p_unit = sys.energy_units / unit(volume(sys.boundary))
 
         # Convert macroscopic pressure (e.g., bar) to internal molar pressure
         p_molar = p_raw * Unitful.Na

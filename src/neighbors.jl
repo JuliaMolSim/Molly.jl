@@ -2220,6 +2220,9 @@ function find_neighbors(sys::System{<:Any, AT},
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
+    if sys.boundary isa TriclinicBoundary
+        throw(ArgumentError("TreeNeighborFinder cannot be used with a TriclinicBoundary"))
+    end
 
     dist_unit = unit(first(first(sys.coords)))
     bv = ustrip.(dist_unit, sys.boundary)

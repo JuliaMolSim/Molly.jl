@@ -992,6 +992,8 @@ The pressure is defined as
 ```
 where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
 and ``\bf{W}`` is the virial tensor.
+For systems with units the default pressure is in bar in 3D and in bar nm, which
+has dimensions of force per length, in 2D.
 
 To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
@@ -1007,8 +1009,13 @@ function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                     n_threads=n_threads, kwargs...)
 end
 
+# The pressure units of a system with units, bar in 3 dimensions and bar * nm, which has
+#   dimensions of force per length, in 2 dimensions
+pressure_units(sys::System{D}) where {D} = (sys.energy_units == NoUnits ? NoUnits :
+                                            (D == 2 ? u"bar * nm" : u"bar"))
+
 function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
-    if sys.energy_units == NoUnits || D != 3
+    if sys.energy_units == NoUnits
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
@@ -1020,12 +1027,12 @@ function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial,
             end
         end
     else
-        # Sensible unit to return by default for 3 dimensions
+        P_units = pressure_units(sys)
         @inbounds for col in 1:D
             for row in 1:D
                 K = energy_remove_mol(kin_tensor[row, col])
                 W = energy_remove_mol(virial[row, col])
-                pres_tensor[row, col] = uconvert(u"bar", (2 * K + W) / vol) # Σ r⊗f
+                pres_tensor[row, col] = uconvert(P_units, (2 * K + W) / vol) # Σ r⊗f
             end
         end
     end
@@ -1077,7 +1084,7 @@ end
 
 Calculate the pressure of the system as a scalar.
 
-This is the trace of the [`pressure`](@ref) tensor.
+This is the trace of the [`pressure`](@ref) tensor divided by the number of dimensions.
 For constrained systems, the same deterministic preview convention as
 [`pressure`](@ref) applies.
 """

@@ -53,7 +53,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
 - `σ`: the random force strength parameter (must satisfy σ² = 2γkBT).
 - `r_c`: the cutoff distance beyond which all forces are zero.
 - `dt`: the simulation timestep (needed for random force scaling as Δt⁻¹ᐟ²).
-- `use_neighbors::Bool=true`: whether to use the neighbor list.
+- `use_neighbors::Bool=false`: whether to use the neighbor list.
 - `key::UInt64=rand(UInt64)`: the seed for the random forces.
 """
 @kwdef struct DPDInteraction{A, G, S, R, D} <: PairwiseInteraction

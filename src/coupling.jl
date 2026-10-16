@@ -88,6 +88,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     sys.velocities .*= sqrt(thermostat.temperature / temp)
     return false
 end
@@ -250,6 +252,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temp) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
@@ -783,7 +787,9 @@ The barostat assumes that the simulation is being run at a constant temperature 
 does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
-The neighbor list is not updated when making trial moves or after accepted moves.
+By default the neighbor list is not updated when calculating the energy of trial moves,
+which assumes that the volume changes are small; set `trial_find_neighbors` to `true` to
+update it.
 Note that the barostat can change the bounding box of the system.
 Does not work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.

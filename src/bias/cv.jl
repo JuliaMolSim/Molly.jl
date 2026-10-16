@@ -537,8 +537,10 @@ function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces
         r_ji = c1[min_idx[1]] - c2[min_idx[2]]
     end
     
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_ji * transpose(f_sum)
+    # Only the selected pair feels the bias force, and summing over group 1 would cancel
+    #   that force if both atoms of the pair are in group 1, as when the groups overlap
+    f_i = forces[cv.atom_inds_1[min_idx[1]]]
+    virial_buff .+= r_ji * transpose(f_i)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary)
@@ -570,8 +572,10 @@ function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces
         r_ji = c1[max_idx[1]] - c2[max_idx[2]]
     end
     
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_ji * transpose(f_sum)
+    # Only the selected pair feels the bias force, and summing over group 1 would cancel
+    #   that force if both atoms of the pair are in group 1, as when the groups overlap
+    f_i = forces[cv.atom_inds_1[max_idx[1]]]
+    virial_buff .+= r_ji * transpose(f_i)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces, atoms, boundary)
@@ -589,8 +593,26 @@ function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces,
         r_12 = com1 - com2
     end
 
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_12 * transpose(f_sum)
+    # The bias force on atom k is c_k * f_12, where f_12 is the force between the centers
+    #   of mass and c_k sums m_k / M_1 over group 1 and -m_k / M_2 over group 2, so recover
+    #   f_12 by least squares since the sum over group 1 misses part of it when the groups
+    #   overlap
+    m1, m2 = mass.(a1), mass.(a2)
+    M1, M2 = sum(m1), sum(m2)
+    c = zeros(typeof(first(m1) / M1), length(coords))
+    for (idx, i) in enumerate(cv.atom_inds_1)
+        c[i] += m1[idx] / M1
+    end
+    for (idx, j) in enumerate(cv.atom_inds_2)
+        c[j] -= m2[idx] / M2
+    end
+    c_norm2 = sum(abs2, c)
+    # Zero when the groups are the same, in which case there is no bias force
+    if !iszero(c_norm2)
+        f_12 = sum(c .* forces) / c_norm2
+        virial_buff .+= r_12 * transpose(f_12)
+    end
+    return virial_buff
 end
 
 """

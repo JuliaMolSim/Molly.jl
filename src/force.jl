@@ -425,7 +425,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     constr_vir    = zero(vir)
     constr_vir_nu = zero(vir_nounits)
     kin           = zero(vir)
-    pres          = zero(vir_nounits) .* (sys.energy_units == NoUnits ? NoUnits : u"bar")
+    pres          = zero(vir_nounits) .* pressure_units(sys)
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
     fs_chunks         = [zero(fs_nounits)  for _ in 1:n_copies]
@@ -676,7 +676,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     constr_vir   = zero(virial)
     constr_vir_nu = KernelAbstractions.zeros(backend, TH, D, D)
     kin          = zero(virial)
-    pres         = ustrip_vec.(zero(virial)) * (sys.energy_units == NoUnits ? NoUnits : u"bar")
+    pres         = ustrip_vec.(zero(virial)) * pressure_units(sys)
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
     box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D)
     n_tree_nodes = block_tree_n_nodes(n_blocks)
@@ -809,7 +809,7 @@ function forces!(fs,
     end
     invalidate_pressure!(buffers.validity)
     fill!(buffers.kin_tensor,  zero(TH) * sys.energy_units)
-    fill!(buffers.pres_tensor, zero(TH) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
+    fill!(buffers.pres_tensor, zero(TH) * pressure_units(sys))
 
     FT = eltype(buffers.fs_nounits)
     if n_threads == 1
@@ -1348,7 +1348,7 @@ function gpu_forces!(fs,
     end
     invalidate_pressure!(buffers.validity)
     fill!(buffers.kin_tensor, zero(TH) * sys.energy_units)
-    fill!(buffers.pres_tensor, zero(TH) * (sys.energy_units == NoUnits ? NoUnits : u"bar"))
+    fill!(buffers.pres_tensor, zero(TH) * pressure_units(sys))
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.fs_mat_reordered, zero(T))
 

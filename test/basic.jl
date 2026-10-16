@@ -479,6 +479,47 @@ end
     @test tw.filepath == tw_path
     # No warning and no error when the file does not exist
     @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
+
+    # Writing structures requires atoms_data, and no file is left behind without it
+    sys_no_data = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                         boundary=CubicBoundary(2.0u"nm"))
+    for ext in ("pdb", "dcd")
+        fp = tempname() * ".$ext"
+        @test_throws ArgumentError write_structure(fp, sys_no_data)
+        @test !isfile(fp)
+    end
+end
+
+@testset "Time correlation logger" begin
+    n_steps, n_corr = 501, 20
+    xs_a = randn(Xoshiro(1), n_steps)
+    xs_b = 0.5 .* xs_a .+ randn(Xoshiro(2), n_steps)
+    xs_a[1] = 20.0 # An outlying first sample should be weighted like the others
+    vs = [rand(Xoshiro(i), SVector{3, Float64}, 5) for i in 1:n_steps]
+    vs_store = zero(first(vs))
+    obs_a(sys, neighbors, step_n, buffers; kwargs...) = xs_a[step_n + 1]
+    obs_b(sys, neighbors, step_n, buffers; kwargs...) = xs_b[step_n + 1]
+    # Returns the same array each step, as an observable returning sys.velocities does
+    obs_v(sys, neighbors, step_n, buffers; kwargs...) = (vs_store .= vs[step_n + 1])
+    sys = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                 boundary=CubicBoundary(2.0u"nm"))
+
+    for n_threads in n_threads_list
+        auto = AutoCorrelationLogger(obs_a, Float64, 1, n_corr)
+        cross = TimeCorrelationLogger(obs_a, obs_b, Float64, Float64, 1, n_corr)
+        auto_v = AutoCorrelationLogger(obs_v, SVector{3, Float64}, 5, n_corr)
+        for step_n in 0:(n_steps - 1), logger in (auto, cross, auto_v)
+            Molly.log_property!(logger, sys, nothing, step_n; n_threads=n_threads)
+        end
+        for (logger, as, bs) in ((auto, xs_a, xs_a), (cross, xs_a, xs_b), (auto_v, vs, vs))
+            # Each pair of samples less than n_corr steps apart is counted once
+            C_ref = [sum(dot.(as[(1 + k):end], bs[1:(end - k)])) / (n_steps - k)
+                     for k in 0:(n_corr - 1)]
+            C_ref .-= dot(mean(as), mean(bs))
+            C_ref ./= sqrt(sum(a -> dot(a, a), as) * sum(b -> dot(b, b), bs)) / n_steps
+            @test values(logger) ≈ C_ref
+        end
+    end
 end
 
 @testset "Structure file formats" begin
@@ -2360,6 +2401,21 @@ end
     fp = write_ff("no_nb.xml", types_block)
     @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
+    # 1-4 scaling factors given in different files have to agree to within a tolerance,
+    #   and the first one read is used
+    fp_scale_1 = write_ff("scale_1.xml", types_block * """
+     <NonbondedForce coulomb14scale="0.8333333333333334" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>""")
+    fp_scale_2 = write_ff("scale_2.xml", """
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+     </NonbondedForce>""")
+    fp_scale_3 = write_ff("scale_3.xml", """
+     <NonbondedForce coulomb14scale="0.5" lj14scale="0.5">
+     </NonbondedForce>""")
+    @test MolecularForceField(fp_scale_1, fp_scale_2).weight_14_coulomb == 0.8333333333333334
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp_scale_1, fp_scale_3)
+
     # A residue template with a higher override level replaces one with a lower level
     fp = write_ff("override.xml", """
      <AtomTypes>
@@ -2406,6 +2462,16 @@ end
         end
     end
     @test_throws Molly.MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+
+    # Constraint topologies that the constraint algorithms do not support
+    protein_fp = joinpath(data_dir, "6mrr_nowater.pdb")
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:hangles)
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:allbonds,
+                                      constraint_algorithm=SetupSHAKE_RATTLE())
+    sys = System(water_fp, ff; dist_cutoff=0.5u"nm", constraints=:hangles)
+    @test length(sys.constraints) == 1
 end
 
 @testset "AtomsBase conversion" begin

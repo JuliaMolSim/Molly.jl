@@ -24,6 +24,7 @@ mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     # State cache for master energy to prevent redundant calculations
     # across multiple single-state queries
     cached_coords::Any
+    cached_boundary::Any
     cached_master_pe::T
 end
 
@@ -220,6 +221,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         λ_atoms,
         hamiltonians,
         nothing,
+        nothing,
         initial_pe
     )
 end
@@ -293,7 +295,8 @@ end
 function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
                                force_recompute::Bool=false,
                                n_threads::Integer=Threads.nthreads())
-    if force_recompute || isnothing(partition.cached_coords) || partition.cached_coords != coords
+    if force_recompute || isnothing(partition.cached_coords) ||
+            partition.cached_boundary != boundary || partition.cached_coords != coords
         partition.master_sys.coords = coords
         partition.master_sys.boundary = boundary
         partition.cached_master_pe = potential_energy(partition.master_sys;
@@ -301,6 +304,7 @@ function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
         # Forced multi-state calls already know they need a fresh master energy. Only the
         # single-state cached path keeps a coordinate snapshot for repeated same-frame queries.
         partition.cached_coords = force_recompute ? nothing : copy(coords)
+        partition.cached_boundary = boundary
     end
     return partition.cached_master_pe
 end
@@ -317,8 +321,8 @@ end
 #                  force_recompute::Bool=false)
 #
 # Calculates the total potential energy for a specific thermodynamic state.
-# Caches the `master_sys` energy. If `coords` is identical to `cached_coords`,
-# the `master_sys` energy is not recomputed unless `force_recompute` is true.
+# Caches the `master_sys` energy. If `coords` and `boundary` are equal to the cached
+# values, the `master_sys` energy is not recomputed unless `force_recompute` is true.
 function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
                           force_recompute::Bool=false,
                           n_threads::Integer=Threads.nthreads())
