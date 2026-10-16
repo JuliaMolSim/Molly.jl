@@ -193,13 +193,17 @@ it is 0 the interaction is turned off.
 struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C
     use_neighbors::Bool
+    # The scheduler follows `use_neighbors`, as in the other λ interactions, so that their
+    #   Bools fill one word; placed after α and β, Enzyme dropped the gradients of
+    #   `weight_special` and of every later interaction in the tuple once the interaction
+    #   was read back out of a System
+    λ_mixing::LM
+    scheduler::SCH
     α::T
     β::T
     shortcut::SC
     σ_mixing::S
     ϵ_mixing::E
-    λ_mixing::LM
-    scheduler::SCH
     weight_special::W
 end
 
@@ -207,8 +211,8 @@ function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=false, α,
                                    shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
                                    ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                    scheduler=DefaultLambdaScheduler(), weight_special=1)
-    return DoubleExponentialSoftCore(cutoff, use_neighbors, α, β, shortcut, σ_mixing,
-                                     ϵ_mixing, λ_mixing, scheduler, weight_special)
+    return DoubleExponentialSoftCore(cutoff, use_neighbors, λ_mixing, scheduler, α, β, shortcut,
+                                     σ_mixing, ϵ_mixing, weight_special)
 end
 
 use_neighbors(inter::DoubleExponentialSoftCore) = inter.use_neighbors
@@ -221,13 +225,13 @@ function Base.zero(i::DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W}) whe
     return DoubleExponentialSoftCore(
         i.cutoff,
         false,
+        i.λ_mixing,
+        i.scheduler,
         zero(T),
         zero(T),
         i.shortcut,
         i.σ_mixing,
         i.ϵ_mixing,
-        i.λ_mixing,
-        i.scheduler,
         zero(W)
     )
 end
@@ -236,13 +240,13 @@ function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     return DoubleExponentialSoftCore(
         i1.cutoff,
         false,
+        i1.λ_mixing,
+        i1.scheduler,
         i1.α + i2.α,
         i1.β + i2.β,
         i1.shortcut,
         i1.σ_mixing,
         i1.ϵ_mixing,
-        i1.λ_mixing,
-        i1.scheduler,
         i1.weight_special + i2.weight_special
     )
 end

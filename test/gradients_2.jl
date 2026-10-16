@@ -1092,7 +1092,7 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
                                     weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), lost_w),
+                                    use_neighbors=true), ()),
         ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
@@ -1137,6 +1137,19 @@ end
         Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
                              Molly.parameter_keys(inter), Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
+    end
+
+    # A λ interaction followed by another one, as an alchemical system has them; the layout
+    #   of the first must not drop the gradients of the second
+    let inters = Dict(name => inter for (name, inter, _) in pairwise_inters),
+            sys_ref = System(pairwise_sys(inters["DoubleExponentialSC"]);
+                             pairwise_inters=(inters["DoubleExponentialSC"], inters["CoulombScaled"]))
+        params_dic = Dict{String, Float64}()
+        for inter in sys_ref.pairwise_inters
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                                 Molly.parameter_keys(inter), Molly.parameter_values(inter))
+        end
+        test_params("DoubleExponentialSC + CoulombScaled", sys_ref, params_dic)
     end
 
     specific_inters = [
