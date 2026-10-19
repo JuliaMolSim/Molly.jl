@@ -62,22 +62,10 @@ function atom_name_from_index(atom_idx, lookup::AtomResidueLookup)
     return entry[3].atom_names[entry[4]]
 end
 
-function residue_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
-    entry = get(lookup, atom_idx, nothing)
-    isnothing(entry) && return nothing
-    return entry[3]
-end
-
 function resnum_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
     entry = get(lookup, atom_idx, nothing)
     isnothing(entry) && return nothing
     return entry[2]
-end
-
-function chain_from_atom_idx(atom_idx, lookup::AtomResidueLookup)
-    entry = get(lookup, atom_idx, nothing)
-    isnothing(entry) && return nothing
-    return entry[1]
 end
 
 # Fill d with every attribute value of each <Atom> mapping to the canonical name

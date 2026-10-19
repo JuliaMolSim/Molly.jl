@@ -137,10 +137,6 @@ get_res_id(res) = (
 
 atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_types), "/")
 
-atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
-
-const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HIE", "HIP"]
-
 # Versions of Chemfiles functions that don't make a copy
 function chemfiles_residue(top, ai)
     ptr_raw = Chemfiles.lib.chfl_residue_from_topology(Chemfiles.__ptr(top), UInt64(ai))
@@ -153,8 +149,6 @@ function chemfiles_atom(top, ai)
     ptr = Chemfiles.@__check_ptr(ptr_raw)
     return Chemfiles.Atom(Chemfiles.CxxPointer(ptr, is_const=false))
 end
-
-chemfiles_name(top, ai) = Chemfiles.name(chemfiles_atom(top, ai))
 
 # Creates a Dict representation of the system Chains -> Residues -> Graphs
 # It is useful to have all the necessary data in one hashable object

@@ -301,9 +301,3 @@ function pmf(acc::OnlinePMFAccumulator{N, T}; zero::Symbol = :min, kBT = nothing
 
     return PMF(centers, widths, edges, F, F_energy, nothing, nothing, probability, nothing)
 end
-
-function target_coords_for_system(coords, sys::System)
-    target_array_type = array_type(sys)
-    array_type(coords) == target_array_type && return coords
-    return to_device(from_device(coords), target_array_type)
-end

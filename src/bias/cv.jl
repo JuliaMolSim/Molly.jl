@@ -21,8 +21,6 @@ function center_of_mass(coords, atoms)
     return only(com)
 end
 
-function calculate_virial(cv, args...; kwargs...) end
-
 function pairwise_distance_matrix(coords_1::AbstractArray{SVector{D, C}},
                                   coords_2::AbstractArray{SVector{D, C}},
                                   calc_type,

@@ -1908,31 +1908,6 @@ end
 # here: Adapt rebuilds it inside the kernel and its constructor is not GPU-compilable.
 @inline atom_last_batch(A) = A
 
-@inline function spread_charge_inner_batch!(charge_grid, grid_indices, bsplines_θ,
-                              mesh_dims, order, atoms, scheduler, b, i, ::Val{T},
-                              ::Val{atomic}) where {T, atomic}
-    q = effective_charge(scheduler, atoms[i], Val(T), (b-1))
-    nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
-    @inbounds x0index, y0index, z0index = grid_indices[b, 1, i], grid_indices[b, 2, i], grid_indices[b, 3, i]
-    @inbounds for ix in 0:(order-1)
-        xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
-        θx = bsplines_θ[b, ix+1, i]
-        qx = q * θx
-        for iy in 0:(order-1)
-            ybase = xbase + wrap_grid_index(y0index + iy, ny) * nz
-            θy = bsplines_θ[b, order+iy+1, i]
-            qxy = qx * θy
-            for iz in 0:(order-1)
-                zindex = wrap_grid_index(z0index + iz, nz)
-                θz = bsplines_θ[b, 2*order+iz+1, i]
-                cb = qxy * θz
-                add_charge_grid_batch!(charge_grid, b, ybase + zindex + 1, cb, Val(atomic))
-            end
-        end
-    end
-    return charge_grid
-end
-
 # GPU version, one thread per (atom, z slice) pair. `order` threads cooperate on each
 # atom, which gives `order` times the parallelism of one thread per atom and makes the
 # threads of an atom write neighbouring grid points, as in the OpenMM implementation

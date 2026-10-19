@@ -236,11 +236,6 @@ function invalidate_interaction_virial!(v::BufferValidity)
     return v
 end
 
-function invalidate_constraint_virial!(v::BufferValidity)
-    v.constraint_virial_step = INVALID_BUFFER_STEP
-    return v
-end
-
 function invalidate_total_virial!(v::BufferValidity)
     v.total_virial_step = INVALID_BUFFER_STEP
     return v
@@ -248,11 +243,6 @@ end
 
 function invalidate_pressure!(v::BufferValidity)
     v.pressure_step = INVALID_BUFFER_STEP
-    return v
-end
-
-function invalidate_pre_coupling_virial!(v::BufferValidity)
-    v.pre_coupling_virial_step = INVALID_BUFFER_STEP
     return v
 end
 

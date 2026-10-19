@@ -968,9 +968,6 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
     return coords
 end
 
-lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace, boundary) =
-    lincs_apply!(coords, old_coords, data, ws, boundary, default_position_constraint_context())
-
 function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
     context.needs_virial || return context
@@ -1059,10 +1056,6 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     accumulate_lincs_velocity_virial!(data, ws, context)
     return velocities
 end
-
-lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary) =
-    lincs_vel_apply!(velocities, coords, data, ws, boundary,
-                     default_velocity_constraint_context())
 
 function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
