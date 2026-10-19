@@ -8,9 +8,9 @@ export
     InteractionList4Atoms,
     InteractionList5Atoms,
     Atom,
-    mass,
     charge,
     lambda,
+    mass,
     AtomData,
     MolecularTopology,
     NeighborList,
@@ -48,6 +48,28 @@ An alias for NBodyInteraction{2}.
 Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
+
+"""
+    from_device(arr)
+
+Copy an array to the CPU, or return it if it is already on the CPU.
+"""
+from_device(x::Array) = x # Avoid unnecessary Array calls on CPU
+from_device(x::BitArray) = x
+from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
+from_device(t::Tuple) = map(from_device, t)
+
+"""
+    to_device(arr, arr_type)
+
+Copy an array to the GPU, e.g. `to_device(arr, CuArray)`, or return it
+if it is already on the GPU.
+"""
+to_device(x::Nothing, ::Type{AT}) where AT = nothing
+to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
+to_device(x, ::Type{AT}) where AT = AT(x)
+to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
 
 """
     pairwise_uses_velocity(inter)
@@ -784,86 +806,6 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
-    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
-
-The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
-containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
-and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
-entries of `list` are valid.
-
-Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
-the per-atom matrix rather than reading the fields, since the layout is not part of
-the interface. `state` holds the device buffers behind the other fields and is
-internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
-`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
-holding on to a list.
-"""
-struct GPUCellListNeighborList{C,R,L,S}
-    ragged_counts::C
-    ragged_neighbors::R
-    n::Int
-    list::L
-    state::S
-
-    function GPUCellListNeighborList(
-        ragged_counts::C,
-        ragged_neighbors::R,
-        n::Integer,
-        list::L,
-        state::S,
-    ) where {C,R,L,S}
-        # Both are nothing when the per-atom matrix is not stored
-        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
-                !(size(ragged_neighbors, 2) == length(ragged_counts))
-            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
-                                "the number of atoms"))
-        end
-
-        n_int = Int(n)
-
-        if isnothing(list)
-            iszero(n_int) || throw(
-                ArgumentError("n must be zero when list is nothing"),
-            )
-        else
-            0 <= n_int <= length(list) || throw(
-                ArgumentError(
-                    "n must be between zero and the pair-list capacity",
-                ),
-            )
-        end
-
-        return new{C,R,L,S}(
-            ragged_counts,
-            ragged_neighbors,
-            n_int,
-            list,
-            state,
-        )
-    end
-end
-
-# Zero for ragged output, which has no pair list, so that generic code that asks how
-#   many pairs there are works on every output mode
-Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
-
-function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
-    if isnothing(neighbors.list)
-        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
-                            "ragged_neighbors or output=:molly_pairs"))
-    end
-    return neighbors.list[i]
-end
-
-Base.firstindex(::GPUCellListNeighborList) = 1
-
-Base.lastindex(neighbors::GPUCellListNeighborList) =
-    length(neighbors)
-
-Base.eachindex(neighbors::GPUCellListNeighborList) =
-    Base.OneTo(length(neighbors))
-
-"""
     NeighborList(n, list)
     NeighborList()
 
@@ -959,6 +901,82 @@ end
 Base.firstindex(::NoNeighborList) = 1
 Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
+
+"""
+    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
+
+The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
+containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
+and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
+entries of `list` are valid.
+
+Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
+the per-atom matrix rather than reading the fields, since the layout is not part of
+the interface. `state` holds the device buffers behind the other fields and is
+internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
+`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
+holding on to a list.
+"""
+struct GPUCellListNeighborList{C,R,L,S}
+    ragged_counts::C
+    ragged_neighbors::R
+    n::Int
+    list::L
+    state::S
+
+    function GPUCellListNeighborList(
+        ragged_counts::C,
+        ragged_neighbors::R,
+        n::Integer,
+        list::L,
+        state::S,
+    ) where {C,R,L,S}
+        # Both are nothing when the per-atom matrix is not stored
+        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
+                !(size(ragged_neighbors, 2) == length(ragged_counts))
+            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
+                                "the number of atoms"))
+        end
+
+        n_int = Int(n)
+
+        if isnothing(list)
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
+            ragged_counts,
+            ragged_neighbors,
+            n_int,
+            list,
+            state,
+        )
+    end
+end
+
+# Zero for ragged output, which has no pair list, so that generic code that asks how
+#   many pairs there are works on every output mode
+Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
+
+function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
+    if isnothing(neighbors.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "ragged_neighbors or output=:molly_pairs"))
+    end
+    return neighbors.list[i]
+end
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+Base.lastindex(neighbors::GPUCellListNeighborList) = length(neighbors)
+Base.eachindex(neighbors::GPUCellListNeighborList) = Base.OneTo(length(neighbors))
 
 # CUDA launch configuration
 const CUDA_LAUNCH_UNSET = 0
@@ -1944,28 +1962,6 @@ function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
         sys.state_indices, sys.exchange_logger, sys.current_step, sys.initial_log_pending, sys.data,
     )
 end
-
-"""
-    from_device(arr)
-
-Copy an array to the CPU, or return it if it is already on the CPU.
-"""
-from_device(x::Array) = x # Avoid unnecessary Array calls on CPU
-from_device(x::BitArray) = x
-from_device(x) = Array(x)
-from_device(x::StructArray) = replace_storage(Array, x)
-from_device(t::Tuple) = map(from_device, t)
-
-"""
-    to_device(arr, arr_type)
-
-Copy an array to the GPU, e.g. `to_device(arr, CuArray)`, or return it
-if it is already on the GPU.
-"""
-to_device(x::Nothing, ::Type{AT}) where AT = nothing
-to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
-to_device(x, ::Type{AT}) where AT = AT(x)
-to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
 
 # `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
 # a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be

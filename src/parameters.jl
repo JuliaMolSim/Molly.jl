@@ -2,8 +2,8 @@
 
 export
     ParameterPlan,
-    extract_parameters,
-    inject_gradients
+    inject_gradients,
+    extract_parameters
 
 @public parameter_prefix,
     parameter_fields

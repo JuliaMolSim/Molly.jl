@@ -2,9 +2,9 @@
 
 export
     SteepestDescentMinimizer,
+    simulate!,
     FIREMinimizer,
     LBFGSMinimizer,
-    simulate!,
     VelocityVerlet,
     DPDVelocityVerlet,
     Verlet,

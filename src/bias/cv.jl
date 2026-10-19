@@ -7,9 +7,9 @@ export
     CalcSingleDist,
     CalcDist,
     calculate_cv,
+    CalcAngle,
     CalcRg,
     CalcRMSD,
-    CalcAngle,
     CalcTorsion
 
 @public cv_gradient, cv_period
