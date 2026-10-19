@@ -236,6 +236,9 @@ end
 function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT, LJsoftcore_params=(;),
                                 Csoftcore_params=(;))
     return map(sys.pairwise_inters) do inter
+        if inter isa DoubleExponential
+            return to_lambda_function(inter; scheduler=scheduler, λ_mixing=MinimumMixing())
+        end
         lj = inter isa LennardJones
         softcore = softcore_dic[lj ? LJsoftcore : Csoftcore]
         to_lambda_function(inter, softcore; scheduler=scheduler, λ_mixing=MinimumMixing(),
@@ -368,7 +371,8 @@ random velocities are generated at `temp`.
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
-    1-4 parameters (e.g. CHARMM) use the same soft core.
+    1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
+    interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
 - `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
@@ -485,7 +489,8 @@ of A and as a massless copy with the parameters of B. Interactions are replaced 
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
-    1-4 parameters (e.g. CHARMM) use the same soft core.
+    1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
+    interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
 - `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
@@ -603,7 +608,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         cB = coordsB[core_mapAB[i]]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=aA.atom_type, mass=aA.mass, charge=aA.charge, σ=aA.σ, ϵ=aA.ϵ, 
-                                                λ=FT(global_λ), alch_role=CoreDRole))
+                              λ=FT(global_λ), alch_role=CoreDRole))
             if chain!=dA.chain_id
                 chain = dA.chain_id
                 res_n = 0
@@ -614,7 +619,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 res_n = dA.res_number
             end
             push!(Data, AtomData(atom_type=dA.atom_type, atom_name=dA.atom_name, res_number=res_number,
-                                        res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom))
+                                 res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom,
+                                 charge_type=dA.charge_type))
             push!(Coords, cA)
             mapping_A[i] = counter
             push!(unique_groups["sysA"], counter)
@@ -627,14 +633,15 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 push!(Virtual, OneParticleSite(counter, counter-1, weight_cross))
             end
             push!(Data, AtomData(atom_type=dB.atom_type, atom_name=dB.atom_name, res_number=dB.res_number,
-                                        res_name=dB.res_name, chain_id=dB.chain_id, element=dB.element, hetero_atom=dB.hetero_atom))
+                                 res_name=dB.res_name, chain_id=dB.chain_id, element=dB.element, hetero_atom=dB.hetero_atom,
+                                 charge_type=dB.charge_type))
             push!(Coords, zero(cB))
             mapping_B[core_mapAB[i]] = counter
             push!(unique_groups["sysB"], counter)
             counter += 1
         else
             push!(Atoms, Atom(index=counter, atom_type=aA.atom_type, mass=aA.mass, charge=(aA.charge, aB.charge), σ=(aA.σ, aB.σ), ϵ=(aA.ϵ, aB.ϵ),
-                                                λ=FT(global_λ), alch_role=CoreRole))
+                              λ=FT(global_λ), alch_role=CoreRole))
             if chain!=dA.chain_id
                 chain = dA.chain_id
                 res_n = 0
@@ -645,7 +652,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 res_n = dA.res_number
             end
             push!(Data, AtomData(atom_type=dA.atom_type, atom_name=dA.atom_name, res_number=res_number,
-                                        res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom))
+                                 res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom,
+                                 charge_type=dA.charge_type))
             push!(Coords, cA)
             mapping_A[i] = counter
             mapping_B[core_mapAB[i]] = counter
@@ -659,11 +667,11 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsA[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(global_λ), alch_role=DeleteRole))
+                              λ=FT(global_λ), alch_role=DeleteRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(a.charge, zero(a.charge)), 
-                                    σ=(a.σ, a.σ), ϵ=(a.ϵ, zero(a.ϵ)), 
-                                    λ=FT(global_λ), alch_role=DeleteRole))
+                              σ=(a.σ, a.σ), ϵ=(a.ϵ, zero(a.ϵ)), 
+                              λ=FT(global_λ), alch_role=DeleteRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -675,7 +683,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_A[i] = counter
         push!(unique_groups["sysA"], counter)
@@ -687,11 +696,11 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsB[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(global_λ), alch_role=InsertRole))
+                              λ=FT(global_λ), alch_role=InsertRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(zero(a.charge), a.charge), 
-                                    σ=(a.σ, a.σ), ϵ=(zero(a.ϵ),   a.ϵ),
-                                    λ=FT(global_λ), alch_role=InsertRole))
+                              σ=(a.σ, a.σ), ϵ=(zero(a.ϵ),   a.ϵ),
+                              λ=FT(global_λ), alch_role=InsertRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -703,7 +712,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_B[i] = counter
         push!(unique_groups["sysB"], counter)
@@ -715,10 +725,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsA[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(1.0), alch_role=EnvRole))
+                              λ=FT(1.0), alch_role=EnvRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(a.charge, a.charge), σ=(a.σ, a.σ), ϵ=(a.ϵ, a.ϵ),
-                                    λ=FT(1.0), alch_role=EnvRole))
+                              λ=FT(1.0), alch_role=EnvRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -730,7 +740,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_A[i] = counter
         counter += 1

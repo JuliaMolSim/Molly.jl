@@ -457,6 +457,19 @@ function find_excluded_pairs(eligible, special)
     return normalize_pairs(vcat(ineligible, specials))
 end
 
+# The sum of the charges and of their squares, cached by a PME with fixed charges
+function pme_charge_sums(atoms, scheduler, T, TH)
+    partial_charges = [effective_charge(scheduler, atom, Val(T)) for atom in from_device(atoms)]
+    return sum(TH, partial_charges), sum(abs2 ∘ TH, partial_charges)
+end
+
+function update_charges(inter::PME, atoms)
+    isnothing(inter.pc_sum) && return inter
+    pc_sum, pc_abs2_sum = pme_charge_sums(atoms, inter.scheduler, typeof(inter.error_tol),
+                                          typeof(inter.pc_sum))
+    return replace_fields(inter, (pc_sum=pc_sum, pc_abs2_sum=pc_abs2_sum))
+end
+
 function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, order=5,
              ϵr=1.0, fixed_charges=true, mesh_dims=nothing, scheduler=DefaultLambdaScheduler(),
              float_type_high=Float64, grad_safe=false, n_threads::Integer=Threads.nthreads())
@@ -518,10 +531,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
     end
 
     if fixed_charges && !grad_safe
-        atoms_cpu = from_device(atoms)
-        partial_charges = [effective_charge(scheduler, atom, Val(T)) for atom in atoms_cpu]
-        pc_sum = sum(TH, partial_charges)
-        pc_abs2_sum = sum(abs2 ∘ TH, partial_charges)
+        pc_sum, pc_abs2_sum = pme_charge_sums(atoms, scheduler, T, TH)
     else
         pc_sum, pc_abs2_sum = nothing, nothing
     end
