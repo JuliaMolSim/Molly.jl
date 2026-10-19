@@ -371,3 +371,122 @@ end
         @test mixed(Molly.DefaultLambdaScheduler, role, λ, false) ≈ pinned
     end
 end
+
+@testset "Unitless alchemical systems" begin
+    # The soft core parameters with units, such as the σQ of the Gapsys Coulomb soft cores,
+    #   follow the units of the system
+    function benzene_λ(units, nonbonded, Csoftcore)
+        ff = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"])...;
+                                 units=units)
+        sys = System(joinpath(data_dir, "benzene_solv.pdb"), ff; units=units,
+                     nonbonded_method=nonbonded, dist_cutoff=(units ? 1.0u"nm" : 1.0),
+                     center_coords=false)
+        return AbsoluteFESystem(sys, 0.5, collect(1:12); Csoftcore=Csoftcore)
+    end
+    for nonbonded in (SetupPME(), SetupCoulombReactionField()), Csoftcore in softcores
+        E_units = potential_energy(benzene_λ(true, nonbonded, Csoftcore); n_threads=1)
+        E_nounits = potential_energy(benzene_λ(false, nonbonded, Csoftcore); n_threads=1)
+        @test E_nounits ≈ ustrip(u"kJ * mol^-1", E_units) rtol=1e-12
+    end
+end
+
+@testset "Double exponential end states" begin
+    etol, ftol = 1e-6u"kJ * mol^-1", 1e-6u"kJ * mol^-1 * nm^-1"
+    solute = collect(1:9)
+    ff = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml");
+                             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+        sys = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; nonbonded_method=nonbonded,
+                     dist_cutoff=1.0u"nm", strictness=:nowarn)
+        @test any(inter isa DoubleExponential for inter in values(sys.pairwise_inters))
+        E_ref, F_ref = potential_energy(sys), forces(sys)
+        solvent = setdiff(eachindex(sys.atoms), solute)
+        zeroed = [i in solute ? Atom(a.index, a.atom_type, a.mass, zero(a.charge), a.σ, zero(a.ϵ),
+                                     a.λ, a.alch_role) : a for (i, a) in enumerate(sys.atoms)]
+        F_decoupled = forces(System(sys; atoms=zeroed))
+
+        # The double exponential has its own soft core, whichever soft core is chosen for
+        #   Lennard-Jones
+        for S in lambda_schedulers, LJsoftcore in softcores
+            sys_0 = AbsoluteFESystem(sys, 0.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
+            @test any(inter isa DoubleExponentialSoftCore for inter in values(sys_0.pairwise_inters))
+            @test abs(potential_energy(sys_0) - E_ref) < etol
+            @test maximum(norm.(forces(sys_0) .- F_ref)) < ftol
+            sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
+            @test maximum(norm.(forces(sys_1)[solvent] .- F_decoupled[solvent])) < ftol
+        end
+    end
+end
+
+@testset "Double exponential relative end states" begin
+    # State B is the same ethanol with a different charge and double exponential parameters on
+    #   the oxygen; the hydroxyl hydrogen is unique to each state
+    garnet = joinpath(ff_dir, "ethanol_garnet.xml")
+    xml = read(garnet, String)
+    pattern_q = r"(<Atom name=\"O1\" type=\"O1\" charge=\")[^\"]*"
+    pattern_dexp = r"(<Atom type=\"O1\" sigma=\")0\.31561335921287537(\" epsilon=\")[^\"]*"
+    @test occursin(pattern_q, xml) && occursin(pattern_dexp, xml)
+    garnet_B = joinpath(mktempdir(), "ethanol_garnet.xml")
+    write(garnet_B, replace(xml, pattern_q => s"\g<1>-0.7", pattern_dexp => s"\g<1>0.33\g<2>0.8"))
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+
+    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+        build(file) = System(
+            joinpath(data_dir, "ethanol_solv.pdb"),
+            MolecularForceField(file;
+                custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
+            nonbonded_method=nonbonded, dist_cutoff=1.0u"nm", strictness=:nowarn,
+        )
+        sysA, sysB = build(garnet), build(garnet_B)
+        @test abs(potential_energy(sysA) - potential_energy(sysB)) > 1.0u"kJ * mol^-1"
+        for dual in (true, false), (λ, ref, state) in ((0.0, sysA, :A), (1.0, sysB, :B))
+            sys = RelativeFESystem(sysA, sysB, λ, deepcopy(mapping), core_mapAB;
+                                   scheduler=Molly.DefaultLambdaScheduler(dual=dual))
+            @test any(inter isa DoubleExponentialSoftCore for inter in values(sys.pairwise_inters))
+            dE, dF, F_dummy = end_state_diff(sys, ref, end_state_map(mapping, core_mapAB,
+                                                                     length(ref), dual, state)...)
+            @test dE < 1e-6u"kJ * mol^-1"
+            @test dF < 1e-6u"kJ * mol^-1 * nm^-1"
+            @test iszero(F_dummy)
+        end
+    end
+end
+
+@testset "Dual topology parameters" begin
+    # Both end states are ethanol, so a parameter is shared by the A and B copies of an atom
+    garnet = joinpath(ff_dir, "ethanol_garnet.xml")
+    xml = read(garnet, String)
+    pattern = r"(<Atom name=\"C1\" type=\"C1\" charge=\")[^\"]*"
+    @test occursin(pattern, xml)
+    garnet_mod = joinpath(mktempdir(), "ethanol_garnet.xml")
+    write(garnet_mod, replace(xml, pattern => s"\g<1>-0.6"))
+    build(file) = System(
+        joinpath(data_dir, "ethanol_solv.pdb"),
+        MolecularForceField(file;
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
+        nonbonded_method=SetupPME(), dist_cutoff=1.0u"nm", strictness=:nowarn,
+    )
+    sys_ref, sys_ref_mod = build(garnet), build(garnet_mod)
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+    relative(sys, λ; dual=true) = RelativeFESystem(sys, sys, λ, deepcopy(mapping), core_mapAB;
+                                       scheduler=Molly.DefaultLambdaScheduler(dual=dual))
+
+    for λ in (0.0, 0.5, 1.0)
+        sys, sys_rebuilt = relative(sys_ref, λ), relative(sys_ref_mod, λ)
+        params_dic = extract_parameters(sys)
+        # The B copies of the core atoms have zero mass, so their types have no mass key
+        @test !haskey(params_dic, "atom_C1_mass")
+        @test haskey(params_dic, "atom_H7_mass")
+        @test inject_gradients(sys, params_dic).atoms == sys.atoms
+        sys_mod = inject_gradients(sys, merge(params_dic, Dict("atom_C1_charge" => -0.6)))
+        @test sys_mod.atoms == sys_rebuilt.atoms
+        @test count(a -> a.charge == -0.6, sys_mod.atoms) == 2
+        @test ustrip(potential_energy(sys_mod)) ≈ ustrip(potential_energy(sys_rebuilt)) rtol=1e-12
+    end
+
+    sys_single = relative(sys_ref, 0.5; dual=false)
+    @test_throws ArgumentError extract_parameters(sys_single)
+    @test_throws ArgumentError ParameterPlan(sys_single, Dict{String, Float64}())
+end

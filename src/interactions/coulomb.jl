@@ -623,9 +623,15 @@ parameter_fields(::Type{<:CoulombSoftCoreGapsys}) =
      (:coulomb_const, "coulomb_const"))
 
 
+# σQ of the Gapsys soft core, in nm, with units only if the interaction it replaces has them
+function softcore_σQ(σQ, coulomb_const, float_type)
+    σQ_nm = float_type(σQ isa Unitful.Quantity ? ustrip(u"nm", σQ) : σQ)
+    return unit(coulomb_const) == NoUnits ? σQ_nm : σQ_nm * u"nm"
+end
+
 function to_lambda_function(inter::Coulomb, ::GapsysSoftCore; α=0.3, σQ=1.0u"nm", λ_mixing=MinimumMixing(), 
                                 scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
-    return CoulombSoftCoreGapsys(cutoff=inter.cutoff, α=float_type(α), σQ=float_type(ustrip(σQ))u"nm", 
+    return CoulombSoftCoreGapsys(cutoff=inter.cutoff, α=float_type(α), σQ=softcore_σQ(σQ, inter.coulomb_const, float_type), 
                                     use_neighbors=inter.use_neighbors, λ_mixing=λ_mixing, scheduler=scheduler, 
                                     weight_special=inter.weight_special, coulomb_const=inter.coulomb_const)
 end
@@ -1379,7 +1385,7 @@ function to_lambda_function(inter::CoulombReactionField, ::GapsysSoftCore; α=0.
                                 float_type=Float32, args...)
     return CoulombSoftCoreGapsysReactionField(dist_cutoff=inter.dist_cutoff, 
                                                 solvent_dielectric=inter.solvent_dielectric, α=float_type(α), 
-                                                σQ=float_type(ustrip(σQ))u"nm", use_neighbors=inter.use_neighbors, 
+                                                σQ=softcore_σQ(σQ, inter.coulomb_const, float_type), use_neighbors=inter.use_neighbors, 
                                                 λ_mixing=λ_mixing, scheduler=scheduler, 
                                                 weight_special=inter.weight_special, coulomb_const=inter.coulomb_const)
 end
@@ -2127,7 +2133,7 @@ parameter_fields(::Type{<:CoulombSoftCoreGapsysEwald}) =
 function to_lambda_function(inter::CoulombEwald, ::GapsysSoftCore; α=0.3, σQ=1.0u"nm", λ_mixing=MinimumMixing(), 
                                 scheduler=DefaultLambdaScheduler(), float_type=Float32, args...)
     return CoulombSoftCoreGapsysEwald(dist_cutoff=inter.dist_cutoff, error_tol=inter.error_tol, α=float_type(α), 
-                                        σQ=float_type(ustrip(σQ))u"nm", use_neighbors=inter.use_neighbors, 
+                                        σQ=softcore_σQ(σQ, inter.coulomb_const, float_type), use_neighbors=inter.use_neighbors, 
                                         λ_mixing=λ_mixing, scheduler=scheduler, 
                                         weight_special=inter.weight_special, coulomb_const=inter.coulomb_const,
                                         approximate_erfc=inter.approximate_erfc)

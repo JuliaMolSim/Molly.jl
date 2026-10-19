@@ -446,6 +446,28 @@ function Base.showerror(io::IO, e::MissingResidueTemplateError)
     return print(io, "MissingResidueTemplateError: ", e.msg)
 end
 
+# The charge type of each atom from the residue template it matched, see `charge_types` in
+#   `System`
+function charge_type_labels(charge_types, templates, template_of, template_id_of)
+    type_charges = Dict{String, Set{Any}}()
+    template_type_charges = Dict{Tuple{String, String}, Set{Any}}()
+    for t in templates, (type, q) in zip(t.types, t.charges)
+        push!(get!(Set{Any}, type_charges, type), q)
+        push!(get!(Set{Any}, template_type_charges, (t.name, type)), q)
+    end
+    return map(template_of, template_id_of) do t, m
+        type = t.types[m]
+        if charge_types == :atom_type || (charge_types == :auto && length(type_charges[type]) == 1)
+            return type
+        elseif charge_types == :template_type || (charge_types == :auto && length(template_type_charges[(t.name, type)]) == 1)
+            return "$(t.name)/$type"
+        else
+            # The type keeps these labels distinct from the template and type ones
+            return "$(t.name)/$type/$(t.atoms[m])"
+        end
+    end
+end
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
@@ -530,6 +552,10 @@ Each residue is matched to a residue template of the force field, and a
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
+- `charge_types=:auto`: how atoms are grouped into charge parameters for
+    [`extract_parameters`](@ref) and [`inject_gradients`](@ref) when the force field
+    takes charges from the residue templates, options are `:auto`, `:atom_type`,
+    `:template_type` or `:template_atom`. See [High-level gradient interface](@ref).
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -560,8 +586,13 @@ function System(coord_file::AbstractString,
                 n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                force_separate_lj14::Bool=false) where {AT <: AbstractArray}
+                force_separate_lj14::Bool=false,
+                charge_types::Symbol=:auto) where {AT <: AbstractArray}
     check_strictness(strictness)
+    if !(charge_types in (:auto, :atom_type, :template_type, :template_atom))
+        throw(ArgumentError("charge_types is $(repr(charge_types)), use :auto, :atom_type, " *
+                            ":template_type or :template_atom"))
+    end
     if units != force_field.units
         throw(ArgumentError("units argument to System is $units but force field has " *
                             "units $(force_field.units)"))
@@ -721,6 +752,7 @@ function System(coord_file::AbstractString,
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     template_id_of = Vector{Int}(undef, n_atoms)
+    template_of = Vector{ResidueTemplate}(undef, n_atoms)
     resnum_of = Vector{Int}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
@@ -746,6 +778,7 @@ function System(coord_file::AbstractString,
                     charge_of[global_idx] = template.charges[m_i]
                     element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                     template_id_of[global_idx] = m_i
+                    template_of[global_idx] = template
                     resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
                 end
                 add_virtual_sites!(virtual_sites, template, rgraph, matches)
@@ -814,6 +847,12 @@ function System(coord_file::AbstractString,
         end
     end
 
+    if use_charge_from_residue
+        # The matched templates include patched ones, which are not in the force field
+        templates = union(values(force_field.residues), template_of)
+        charge_type_of = charge_type_labels(charge_types, templates, template_of, template_id_of)
+    end
+
     # Atoms
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
@@ -865,6 +904,7 @@ function System(coord_file::AbstractString,
             chain_id=chain_ai,
             element=element_of[ai],
             hetero_atom=hetero_atoms[ai],
+            charge_type=(use_charge_from_residue ? charge_type_of[ai] : atype),
         ))
     end
     atoms = to_device([atoms_abst...], AT)
