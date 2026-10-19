@@ -553,14 +553,9 @@ Each residue is matched to a residue template of the force field, and a
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
 - `charge_types=:auto`: how atoms are grouped into charge parameters for
-    [`extract_parameters`](@ref) and [`inject_gradients`](@ref), stored as the `charge_type`
-    of each [`AtomData`](@ref). Only relevant when the force field takes charges from the
-    residue templates; otherwise the charge type is the atom type. `:atom_type` groups by
-    atom type, `:template_type` by residue template and atom type, e.g. `"ALA/HC"`, and
-    `:template_atom` by residue template and atom name, labelled with the atom type too,
-    e.g. `"ALA/CT/CA"`. `:auto` uses the atom type if every template atom of that type has
-    the same charge, otherwise the template and atom type if that is unique within the
-    template, otherwise the template and atom name.
+    [`extract_parameters`](@ref) and [`inject_gradients`](@ref) when the force field
+    takes charges from the residue templates, options are `:auto`, `:atom_type`,
+    `:template_type` or `:template_atom`. See [High-level gradient interface](@ref).
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;

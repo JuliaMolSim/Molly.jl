@@ -1379,9 +1379,6 @@ end
         sys = inject_gradients(sys_ref, params_dic, plan, coords)
         return potential_energy(sys, neighbors; n_threads=1, general_inters=general_inters)
     end
-    # Fourth-order central difference, a two-point difference with a small step is limited
-    #   by rounding on an energy of this size
-    fd4(f, x, h) = (-f(x + 2h) + 8 * f(x + h) - 8 * f(x - h) + f(x - 2h)) / (12h)
 
     @testset "Gradients $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
         sys = ethanol_solv_sys(garnet_file, nonbonded_method; grad_safe=true)
@@ -1404,7 +1401,7 @@ end
         )
         for key in ("atom_O2_charge", "atom_H7_charge", "atom_O1_charge", "atom_C1_σ",
                     "atom_C1_ϵ")
-            grad_fd = fd4(params_dic[key], 1e-3 * abs(params_dic[key])) do val
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
                 pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
                             copy(sys.coords), neighbors, gis)
             end
@@ -1541,7 +1538,7 @@ end
             Const(neighbors),
             Duplicated(gis, Enzyme.make_zero(gis)),
         )
-        grad_fd = fd4(params_dic[key], 1e-3 * abs(params_dic[key])) do val
+        grad_fd = central_fdm(6, 1)(params_dic[key]) do val
             pe_injected(merge(params_dic, Dict(key => val)), sys, plan, copy(sys.coords),
                         neighbors, gis)
         end

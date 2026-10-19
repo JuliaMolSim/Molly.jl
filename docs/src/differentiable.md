@@ -71,30 +71,16 @@ grads_enzyme # Contains gradients
 ```
 If the system is on GPU, this will run on GPU as well.
 Atom masses, σ and ϵ are keyed by atom type, for example `"atom_N_σ"`, so a value applies to every atom of that type.
-Charges are keyed by the `charge_type` of each [`AtomData`](@ref), for example `"atom_LEU/CT/CA_charge"`, since many force fields assign charges per residue template atom rather than per atom type; see the `charge_types` argument of [`System`](@ref).
+Charges are keyed by the `charge_type` of each [`AtomData`](@ref), for example `"atom_LEU/CT/CA_charge"`, since many force fields assign charges per residue template atom rather than per atom type.
+When the force field takes charges from the residue templates, the `charge_types` argument of [`System`](@ref) sets how atoms are grouped, otherwise the charge type is the atom type:
+
+- `:atom_type` groups by atom type, e.g. `"HC"`.
+- `:template_type` groups by residue template and atom type, e.g. `"ALA/HC"`, so equivalent atoms such as methyl hydrogens share a charge.
+- `:template_atom` groups by residue template and atom name, labelled with the atom type too, e.g. `"ALA/CT/CA"`.
+- `:auto`, the default, uses the atom type if every template atom of that type has the same charge, otherwise the template and atom type if every atom of that type in the template has the same charge, otherwise the template and atom name.
+
 An atom parameter whose atoms have different values, such as the masses of an atom type after hydrogen mass repartitioning, is left out of [`extract_parameters`](@ref), with a warning for charges, σ and ϵ, and is an error in [`ParameterPlan`](@ref).
 To group charges differently, give the atoms other charge types with `System(sys; atoms_data=...)`.
-For example, if one residue of the protein above is given its own charges, its atoms no longer share the charges of the other residues of the same type, and those charge keys are left out. Giving the atoms of that residue their own charge types makes their charges parameters again:
-
-```julia
-# [ ... ]
-# A Protein System has been set up previously
-
-res = 5 # A glutamate
-new_charge(a) = a.charge * 1.1 # Just a placeholder, for example charges from a quantum chemistry calculation
-atoms = [ad.res_number == res ? Atom(a.index, a.atom_type, a.mass, new_charge(a), a.σ, a.ϵ,
-                                     a.λ, a.alch_role) : a
-         for (a, ad) in zip(sys.atoms, sys.atoms_data)]
-extract_parameters(System(sys; atoms=atoms)) # Warns that keys such as "atom_GLU/CT/CA_charge" are left out
-
-atoms_data = [ad.res_number == res ?
-              AtomData(atom_type=ad.atom_type, atom_name=ad.atom_name, res_number=ad.res_number,
-                       res_name=ad.res_name, chain_id=ad.chain_id, element=ad.element,
-                       hetero_atom=ad.hetero_atom, charge_type="res$res/$(ad.atom_name)") : ad
-              for ad in sys.atoms_data]
-sys_new = System(sys; atoms=atoms, atoms_data=atoms_data)
-params_dic = extract_parameters(sys_new) # Includes "atom_res5/CA_charge" and so on
-```
 
 Single topology [`RelativeFESystem`](@ref)s are not supported by these functions.
 A custom interaction becomes compatible with this interface by defining [`Molly.parameter_prefix`](@ref) and [`Molly.parameter_fields`](@ref).
