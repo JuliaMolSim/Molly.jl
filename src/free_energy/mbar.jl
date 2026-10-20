@@ -2,7 +2,8 @@
     iterate_mbar,
     mbar_weights,
     mbar_pmf,
-    pmf_with_uncertainty
+    pmf_with_uncertainty,
+    MBARResult
 
 const LOG_PREVFLOAT0 = log(nextfloat(0.0))    # ≈ -744
 const LOG_FLOATMAX   = log(floatmax(Float64)) # ≈ 709
@@ -1029,4 +1030,75 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
 
     pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
     return pmf
+end
+
+"""
+    MBARResult(u, win_of, N_counts, states; rtol=1e-8, max_iter=10_000)
+    MBARResult(u, win_of, N_counts, kBT; names=nothing, rtol=1e-8, max_iter=10_000)
+    MBARResult(input::MBARInput, states; rtol=1e-8, max_iter=10_000)
+
+Relative free energies of `K` thermodynamic states from MBAR, with their asymptotic
+covariance, see [Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq D6.
+
+It is a leg source for [`ThermodynamicCycle`](@ref): [`free_energy_difference`](@ref)
+and [`free_energy_difference_uncertainty`](@ref) return values in energy units.
+
+# Arguments
+- `u::AbstractMatrix` - `N×K` reduced potentials, as for [`Molly.iterate_mbar`](@ref).
+  Per-frame shifts, as from [`Molly.assemble_mbar_inputs`](@ref), do not change the result.
+- `win_of::AbstractVector` - length-`N` vector giving the generating state index per frame.
+- `N_counts::AbstractVector` - length-`K` sample counts per state.
+- `states::AbstractVector{<:ThermoState}` - the `K` states, which give the thermal
+  energy and the name of each state.
+- `kBT::AbstractVector` - the thermal energy of each state, in energy units, when the
+  states are not given.
+- `input::MBARInput` - the output of [`Molly.assemble_mbar_inputs`](@ref) for `states`.
+
+# Keyword arguments
+- `names=nothing` - state names, used to refer to states by name in a [`Leg`](@ref).
+- `rtol` and `max_iter` - passed to [`Molly.iterate_mbar`](@ref).
+
+# Fields
+- `f::Vector{Float64}` - relative free energies in units of each state's ``k_B T``,
+  with `f[1] = 0`.
+- `covariance::Matrix{Float64}` - asymptotic covariance of `f`.
+- `kBT::Vector` - thermal energy of each state.
+- `names` - state names, or `nothing`.
+"""
+struct MBARResult{E, NM}
+    f::Vector{Float64}
+    covariance::Matrix{Float64}
+    kBT::Vector{E}
+    names::NM
+end
+
+function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::AbstractVector,
+                    states::AbstractVector{<:ThermoState}; kwargs...)
+    kBT = [Float64(inv(state.beta)) * state.system.energy_units for state in states]
+    return MBARResult(u, win_of, N_counts, kBT; names=[state.name for state in states],
+                      kwargs...)
+end
+
+function MBARResult(input::MBARInput, states::AbstractVector{<:ThermoState}; kwargs...)
+    return MBARResult(input.u, input.win_of, input.N, states; kwargs...)
+end
+
+function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::AbstractVector,
+                    kBT::AbstractVector; names=nothing, rtol=1e-8,
+                    max_iter::Integer=10_000)
+    K = size(u, 2)
+    if length(kBT) != K || length(N_counts) != K
+        throw(DimensionMismatch("lengths of kBT ($(length(kBT))) and N_counts " *
+                                "($(length(N_counts))) must equal the number of states ($K)"))
+    end
+    if !isnothing(names) && length(names) != K
+        throw(DimensionMismatch("length of names ($(length(names))) must equal the " *
+                                "number of states ($K)"))
+    end
+    f, logN = iterate_mbar(u, win_of, N_counts; rtol=rtol, max_iter=max_iter)
+    W, _ = mbar_weights_sampled(u, f, logN)
+    W ./= W * Float64.(N_counts) # Enforce exact normalization, ∑k N_k W[n,k] = 1
+    # Θ = [(WᵀW)⁺ − N]⁺, the form used by `pmf_with_uncertainty`
+    covariance = pinv(pinv(W' * W) - Diagonal(Float64.(N_counts)))
+    return MBARResult(f, covariance, collect(kBT), names)
 end
