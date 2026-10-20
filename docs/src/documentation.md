@@ -391,6 +391,8 @@ Certain quantities such as the [`potential_energy`](@ref) and the [`virial`](@re
 This can be set with `float_type_high` but should generally be left as the default `Float64`.
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method), [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref) (Ewald summation, slow), or a cutoff like [`DistanceCutoff`](@ref) (short range only).
+The reaction field takes the relative permittivity beyond the cutoff as `solvent_dielectric` and within the cutoff as `solute_dielectric`, which correspond to `epsilon-rf` and `epsilon-r` in GROMACS.
+The default `solute_dielectric=1` matches OpenMM.
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 Note that `rigid_water` defaults to `false`, whereas OpenMM makes water rigid by default, so set `rigid_water=true` to reproduce OpenMM behavior.
 Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
