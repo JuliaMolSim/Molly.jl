@@ -6,11 +6,11 @@
 # flooded the well, broader still than the well-tempered run.
 #
 # The biased histograms can't be compared with the unbiased distribution directly. The
-# second figure reweights the well-tempered samples from the second half of the run, where
-# the bias changes slowly, by exp(V_final(r) / kT) with the final bias V_final, which
-# recovers the unbiased distribution r^2 exp(-U(r) / kT).
+# second figure reweights the deposit frames of the well-tempered run with the weights of a
+# MetadynamicsLogger, exp((V(s,t) - c(t)) / kT) (Tiwary & Parrinello, 2015), which recovers
+# the unbiased distribution r^2 exp(-U(r) / kT).
 #
-# Runs the same setup as the "MetaDynamics simulation" test in test/bias.jl, once with
+# Runs the same setup as the "Metadynamics simulation" test in test/bias.jl, once with
 # each tempering scheme.
 
 using Molly
@@ -35,11 +35,11 @@ kT = kB * temp
 
 # Grid spans r0 ± 0.7 nm, generous relative to the thermal spread sqrt(kT/k_bond) = ~0.07
 # nm here, with bin_width finer than sigma so deposited hills are well resolved
-grid_min, grid_max, n_bins = 0.3, 1.7, 701
+grid_min, grid_max, n_points = 0.3, 1.7, 701
 
 bias_factor = 10.0 # gamma: well-tempered "temperature boost", must be > 1
-n_steps = 500_000
-deposit_interval = 100
+n_steps_run = 500_000
+deposit_interval = 100 # Passed as n_steps to Metadynamics
 record_every = 10 # how often to log the sampled distance, for the histogram
 
 ##
@@ -48,13 +48,15 @@ function run_metadynamics(tempering; label="")
     coords = [SVector(4.5, 5.0, 5.0), SVector(4.5 + r0, 5.0, 5.0)]
     velocities = [random_velocity(mass, temp) for i in 1:2]
 
-    memory = GridHills((calc_dist,), 0.2, 0.02, grid_min, grid_max, n_bins)
-    # deposit_interval paces deposits by simulation step from within forces! (called every step regardless of
+    memory = GridHills((calc_dist,), 0.2, 0.02, grid_min, grid_max, n_points)
+    # n_steps paces deposits by simulation step from within forces! (called every step regardless of
     # simulator), so no external logger is needed to drive hill deposition
-    bias = MetaDynamics(memory; deposit_interval=deposit_interval, tempering=tempering)
+    # The temperature is given since the untempered run has none of its own
+    bias = Metadynamics(memory; n_steps=deposit_interval, tempering=tempering,
+                        logger=MetadynamicsLogger(temperature=temp))
 
     # This logger is purely for recording the sampled distance for the histogram below --
-    # unrelated to hill deposition, which bias paces itself via deposit_interval
+    # unrelated to hill deposition, which bias paces itself via n_steps
     dist_wrapper(sys, args...; kwargs...) = calculate_cv(calc_dist, sys.coords, sys.atoms, sys.boundary)
 
     # With only 2 atoms, removing the centre of mass velocity after each Andersen collision
@@ -76,15 +78,15 @@ function run_metadynamics(tempering; label="")
     )
 
     print("$(label): ")
-    @time simulate!(sys, simulator, n_steps)
-    n_deposits = bias.n_deposits[]
-    println("  $(n_deposits) hills deposited onto a $(n_bins)-point grid over [$(grid_min), $(grid_max)]")
+    @time simulate!(sys, simulator, n_steps_run)
+    n_deposits = bias.n_deposits
+    println("  $(n_deposits) hills deposited onto a $(n_points)-point grid over [$(grid_min), $(grid_max)]")
 
     return bias, values(sys.loggers.dist)
 end
 
 bias_untempered, dist_untempered = run_metadynamics(NoTempering(); label="Untempered")
-bias_tempered, dist_tempered = run_metadynamics(WellTemperedTempering(bias_factor, kT); label="Well-tempered")
+bias_tempered, dist_tempered = run_metadynamics(WellTempered(bias_factor, temp); label="Well-tempered")
 
 ##
 σ_thermal = sqrt(kT / k_bond)
@@ -134,14 +136,15 @@ display(fig)
 savefig(fig, "./metadynamics_bond_recovery_plots.png")
 
 ##
-# Reweight the well-tempered samples from the second half of the run, where the bias is
-# close to converged, by exp(β V_final(r)) to undo the bias
-dist_late = in_window(dist_tempered[(end ÷ 2 + 1):end])
-weights_late = [exp(β * potential_energy(bias_tempered.memory, r)) for r in dist_late]
+# Reweight the deposit frames of the well-tempered run by their bias at sampling time
+r_frames = values(bias_tempered.logger)
+w_frames = metadynamics_weights(bias_tempered.logger)
+keep = xlims_plot[1] .<= r_frames .<= xlims_plot[2]
+dist_rw, weights_rw = r_frames[keep], w_frames[keep]
 
 fig_rw = histogram(
-    dist_late;
-    weights = weights_late,
+    dist_rw;
+    weights = weights_rw,
     label = "Well-tempered, reweighted",
     color = :firebrick,
     alpha = 0.6,

@@ -263,11 +263,14 @@ end
 
 bias_max_abs_ustrip(value) = abs(ustrip(value))
 
- function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
-                            cv_sim=nothing, max_abs_component=nothing)
+bias_description(bias::BiasPotential) =
+    "BiasPotential with CV $(typeof(bias.cv_type)) and bias $(typeof(bias.bias_type))"
+
+# Errors on non-finite values of a bias, which must never be applied as forces
+function check_bias_finite(value, label::AbstractString, bias;
+                           cv_sim=nothing, max_abs_component=nothing)
     bias_all_finite(value) && return value
-    msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
-          "$(typeof(bias.bias_type)) produced non-finite $(label)"
+    msg = "$(bias_description(bias)) produced non-finite $(label)"
     if !isnothing(cv_sim)
         msg *= ", cv_sim=$(cv_sim)"
     end

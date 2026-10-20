@@ -11,12 +11,12 @@ end
 Molly.calculate_cv(::CVNaN, coords, args...; kwargs...) = NaN * u"nm"
 
 # A custom memory implementing only the documented contract: a constant bias
-struct ConstMemory{C} <: AbstractMetaDynamicsMemory
+struct ConstMemory{C} <: AbstractMetadynamicsMemory
     cvs::C
-    k::Float64
+    height::Float64
 end
 
-Molly.potential_energy(m::ConstMemory, cv) = m.k
+Molly.potential_energy(m::ConstMemory, cv) = m.height
 Molly.bias_gradient(::ConstMemory, cv) = 0.0
 Molly.add_hill!(::ConstMemory, cv, height) = nothing
 Molly.cv_gradient(::CVNaN, coords, args...; kwargs...) = (zero(coords) ./ oneunit(eltype(eltype(coords))), NaN * u"nm")
@@ -723,7 +723,7 @@ end
     end
 end
 
-@testset "MetaDynamics memory" begin
+@testset "Metadynamics memory" begin
     # Non-periodic distance CVs, one or two
     dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
     one_cv, two_cvs = (dist,), (dist, dist)
@@ -756,17 +756,32 @@ end
     gh = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5)
     @test length(gh.values) == 5
     @test isapprox(only(gh.bin_width), 0.5; atol=1e-9)
+    @test gh.cutoff == 6
+    @test GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; cutoff=3).cutoff == 3
+    # A bare CV is wrapped in a tuple; a tuple with wrong arguments isn't wrapped again
+    @test GridHills(only(one_cv), 1.0, 0.2, 0.0, 2.0, 5; cutoff=3).cvs === one_cv
+    @test ListHills(only(one_cv), 1.0, 0.2).cvs === one_cv
+    @test_throws MethodError ListHills(one_cv, 1.0, 0.2, Float64[], Float64[], 1)
+    @test_throws MethodError GridHills(one_cv, 1.0, 0.2, 0.0)
+    # A vector of CVs is taken as a tuple
+    @test ListHills([only(one_cv), only(one_cv)], 1.0, (0.1, 0.1)).cvs == (only(one_cv), only(one_cv))
+    @test GridHills([only(one_cv)], 1.0, 0.2, 0.0, 2.0, 5).cvs === one_cv
+
+    # The scalar form builds the same grid as per-dimension tuples
+    gh_t = GridHills(one_cv, 1.0, (0.2,), (0.0,), (2.0,), (5,))
+    @test gh_t.bin_width == gh.bin_width && gh_t.period == gh.period
+    @test size(gh_t.values) == size(gh.values)
 
     add_hill!(gh, 1.0)
     @test isapprox(potential_energy(gh, 1.0), 1.0; atol=1e-9) # Exactly on a grid point
     @test isapprox(potential_energy(gh, 0.75), 0.52196847; atol=1e-3) # Interpolated
     @test isapprox(Molly.bias_gradient(gh, 0.75), 1.91212614; atol=1e-3)
 
-    @test_throws ArgumentError GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 1)
+    @test_throws ArgumentError GridHills(one_cv, 1.0,  0.2, 0.0, 2.0, 1)
     @test_throws ArgumentError GridHills(one_cv, 1.0, -0.2, 0.0, 2.0, 5)
-    @test_throws ArgumentError GridHills(one_cv, 1.0, 0.2, 2.0, 0.0, 5)
+    @test_throws ArgumentError GridHills(one_cv, 1.0,  0.2, 2.0, 0.0, 5)
 
-    # GridHills: multiple CVs at once, sigma/grid_min/grid_max/n_bins become tuples (one
+    # GridHills: multiple CVs at once, sigma/grid_min/grid_max/n_points become tuples (one
     # entry per dimension) and hills are deposited/evaluated via N-linear interpolation
     gh2d = GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9) # bin_width (0.25, 0.25)
     @test size(gh2d.values) == (9, 9)
@@ -792,7 +807,7 @@ end
     @test_throws ArgumentError GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0, 0.0), (2.0, 2.0), 9)
     @test_throws ArgumentError GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), (5, 5, 5))
 
-    # n_bins can also be given per-dimension instead of a single shared Integer
+    # n_points can also be given per-dimension instead of a single shared Integer
     gh2d_uneven = GridHills(two_cvs, 1.0, (0.1, 0.2), (0.0, 0.0), (1.0, 2.0), (3, 5))
     @test size(gh2d_uneven.values) == (3, 5)
     @test all(isapprox.(gh2d_uneven.bin_width, (0.5, 0.5); atol=1e-9))
@@ -829,11 +844,11 @@ end
     @test isapprox(grad_out[1], grad_edge[1]; atol=1e-9)
 end
 
-@testset "MetaDynamics default centers" begin
+@testset "Metadynamics default centers" begin
     # Without explicit centers, deposits keep the units and precision of sigma
     # One distance CV per sigma entry
     dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
-    bias_with(k, sigma; kwargs...) = MetaDynamics(
+    bias_with(k, sigma; kwargs...) = Metadynamics(
         ListHills(sigma isa Tuple ? (dist, dist) : (dist,), k, sigma); kwargs...)
     md_units = bias_with(2.0u"kJ * mol^-1", 0.5u"nm")
     add_hill!(md_units, 1.0u"nm")
@@ -862,7 +877,7 @@ end
 
     # Integer k still stores fractional, e.g. tempered, heights
     @test eltype(ListHills((dist,), 1, 0.5).heights) == Float64
-    md_int_k = bias_with(1, 0.5; tempering=WellTemperedTempering(10.0, 2.5))
+    md_int_k = bias_with(1, 0.5; tempering=WellTempered(10.0, 2.5))
     add_hill!(md_int_k, 0.1)
     add_hill!(md_int_k, 0.1)
     @test eltype(md_int_k.memory.heights) == Float64
@@ -872,7 +887,7 @@ end
     @test eltype(gh_int_k.values) == Float64
 end
 
-@testset "MetaDynamics with units" begin
+@testset "Metadynamics with units" begin
     # A single distance CV, with units
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
@@ -888,7 +903,7 @@ end
     )
 
     calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
-    md = MetaDynamics(ListHills((calc_dist,), 2.0u"kJ * mol^-1", 0.5u"nm",
+    md = Metadynamics(ListHills((calc_dist,), 2.0u"kJ * mol^-1", 0.5u"nm",
                                 typeof(1.0u"nm")[]))
     @test isapprox(
         AtomsCalculators.potential_energy(sys, md),
@@ -932,24 +947,24 @@ end
     @test isempty(mem_units.centers) && isempty(mem_units.heights)
 
     # A non-finite CV value throws before any hill is deposited
-    md_nan = MetaDynamics(ListHills((calc_dist,), 2.0u"kJ * mol^-1", 0.5u"nm"))
+    md_nan = Metadynamics(ListHills((calc_dist,), 2.0u"kJ * mol^-1", 0.5u"nm"))
     @test_throws ArgumentError add_hill!(md_nan, NaN * u"nm")
-    @test md_nan.call_count[] == 0
-    @test md_nan.n_deposits[] == 0
+    @test md_nan.call_count == 0
+    @test md_nan.n_deposits == 0
     @test isempty(md_nan.memory.centers)
 
-    md_nan_cvs = MetaDynamics(ListHills((CVNaN(:wrap, false),), 2.0u"kJ * mol^-1", 0.5u"nm"))
+    md_nan_cvs = Metadynamics(ListHills((CVNaN(:wrap, false),), 2.0u"kJ * mol^-1", 0.5u"nm"))
     @test_throws ErrorException AtomsCalculators.forces!(Molly.zero_forces(sys), sys, md_nan_cvs)
     @test_throws ErrorException AtomsCalculators.forces!(Molly.zero_forces(sys), sys, md_nan_cvs;
                                                          step_n=0)
     @test_throws ErrorException AtomsCalculators.potential_energy(sys, md_nan_cvs)
     @test_throws ErrorException add_hill!(md_nan_cvs, sys)
-    @test md_nan_cvs.call_count[] == 0
-    @test md_nan_cvs.n_deposits[] == 0
+    @test md_nan_cvs.call_count == 0
+    @test md_nan_cvs.n_deposits == 0
     @test isempty(md_nan_cvs.memory.centers)
 end
 
-@testset "MetaDynamics multi-CV calculator" begin
+@testset "Metadynamics multi-CV calculator" begin
     # CVs stored in the memory make the bias a self-contained AtomsCalculators calculator
     # usable directly as a general_inters entry, evaluating several CVs at once
     atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:3]
@@ -961,23 +976,22 @@ end
     cv2 = CalcDist([1], [3], CalcSingleDist(), :wrap) # Distance 1-3 is 0.4
     cvs = (cv1, cv2)
 
-    # The memory needs one dimension per CV: a tuple sigma for several CVs, a scalar one
-    #   for a single CV
+    # The memory needs one sigma entry per CV
     @test_throws ArgumentError GridHills(cvs, 1.0, 0.1, 0.0, 1.0, 5)
     @test_throws ArgumentError ListHills((cv1,), 5.0, (0.1, 0.1))
     @test_throws ArgumentError ListHills(cvs, 2.0, 0.5)
     @test_throws ArgumentError ListHills((cv1,), 5.0, 0.1, Tuple{Float64, Float64}[])
-    @test_throws ArgumentError ListHills((cv1,), 1.0, (0.1,))
+    @test ListHills((cv1,), 1.0, (0.1,)).sigma == (0.1,)
     @test_throws ArgumentError ListHills((cv1,), 1.0, 0.1, Tuple{Float64}[])
     @test_throws ArgumentError ListHills(cvs, 1.0, (0.1, 0.1), Tuple[])
-    @test MetaDynamics(ListHills((cv1,), 5.0, 0.1); deposit_interval=7).deposit_interval == 7
-    @test MetaDynamics(ListHills((cv1,), 5.0, 0.1)).memory.cvs === (cv1,)
+    @test Metadynamics(ListHills((cv1,), 5.0, 0.1); n_steps=7).n_steps == 7
+    @test Metadynamics(ListHills((cv1,), 5.0, 0.1)).memory.cvs === (cv1,)
     # The empty check of the constructor guards custom memories
-    @test_throws ArgumentError MetaDynamics(ConstMemory((), 2.0))
+    @test_throws ArgumentError Metadynamics(ConstMemory((), 2.0))
 
     # Each CV is evaluated on the coordinates its own correction asks for, so :wrap and
     #   :pbc CVs can be mixed
-    md_mixed = MetaDynamics(ListHills((cv1, CalcDist([1], [3], CalcSingleDist(), :pbc)),
+    md_mixed = Metadynamics(ListHills((cv1, CalcDist([1], [3], CalcSingleDist(), :pbc)),
                                       5.0, (0.1, 0.1)))
     sys_mixed = System(atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
                        force_units=NoUnits, energy_units=NoUnits)
@@ -985,7 +999,7 @@ end
     @test all(isapprox.(only(md_mixed.memory.centers), (0.3, 0.4); atol=1e-9))
 
     # A custom memory with only the documented contract works through the System
-    md_const = MetaDynamics(ConstMemory((cv1,), 2.0))
+    md_const = Metadynamics(ConstMemory((cv1,), 2.0))
     sys_const = System(atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
                        general_inters=(md_const,), force_units=NoUnits, energy_units=NoUnits)
     @test potential_energy(sys_const) ≈ 2.0
@@ -993,13 +1007,13 @@ end
 
     # Biases built from one memory are walkers sharing their hills
     walkers_mem = ListHills(cvs, 5.0, (0.1, 0.1))
-    walker_1, walker_2 = MetaDynamics(walkers_mem), MetaDynamics(walkers_mem)
+    walker_1, walker_2 = Metadynamics(walkers_mem), Metadynamics(walkers_mem)
     add_hill!(walker_1, (0.3, 0.4))
     @test walker_2.memory === walkers_mem
     @test length(walker_2.memory.centers) == 1
 
     # A GridHills built with one grid dimension per CV works directly as a multi-CV memory
-    bias_grid = MetaDynamics(GridHills(cvs, 5.0, (0.1, 0.1), (0.0, 0.0), (1.0, 1.0), 11))
+    bias_grid = Metadynamics(GridHills(cvs, 5.0, (0.1, 0.1), (0.0, 0.0), (1.0, 1.0), 11))
     sys_grid = System(
         atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
         general_inters=(bias_grid,), force_units=NoUnits, energy_units=NoUnits,
@@ -1008,7 +1022,7 @@ end
     AtomsCalculators.forces!(fs_grid, sys_grid, bias_grid) # Deposits a hill at (0.3, 0.4)
     @test isapprox(AtomsCalculators.potential_energy(sys_grid, bias_grid), 5.0; atol=1e-6)
 
-    bias = MetaDynamics(ListHills(cvs, 5.0, (0.1, 0.1), Tuple{Float64, Float64}[]))
+    bias = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1), Tuple{Float64, Float64}[]))
 
     sys = System(
         atoms=atoms,
@@ -1022,7 +1036,7 @@ end
 
     @test isapprox(AtomsCalculators.potential_energy(sys, bias), 0.0; atol=1e-9)
 
-    # forces! is self-updating: with the default deposit_interval=1, every call both
+    # forces! is self-updating: with the default n_steps=1, every call both
     # computes forces and deposits a hill, with no external logger needed. This first call
     # starts from an empty memory, so the resulting forces are trivially zero.
     fs = Molly.zero_forces(sys)
@@ -1049,7 +1063,7 @@ end
 
     # Away from the hill, the force is the sum of the forces of both CVs: atom 1 is pulled
     # by both distances, atoms 2 and 3 only by their own
-    md_off = MetaDynamics(ListHills(cvs, 5.0, (0.1, 0.1), [(0.25, 0.45)]))
+    md_off = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1), [(0.25, 0.45)]))
     fs_off = Molly.zero_forces(sys)
     AtomsCalculators.forces!(fs_off, sys, md_off)
     d_bias = Molly.bias_gradient(md_off.memory, (0.3, 0.4))
@@ -1057,10 +1071,10 @@ end
     @test isapprox(fs_off[3], SVector(-d_bias[2], 0.0, 0.0); atol=1e-9)
     @test isapprox(fs_off[1], -(fs_off[2] + fs_off[3]); atol=1e-9)
 
-    # deposit_interval paces the automatic deposits: only every 3rd force evaluation
+    # n_steps paces the automatic deposits: only every 3rd force evaluation
     # should actually add a hill
-    md3 = MetaDynamics(ListHills(cvs, 5.0, (0.1, 0.1), Tuple{Float64, Float64}[]);
-                       deposit_interval=3)
+    md3 = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1), Tuple{Float64, Float64}[]);
+                       n_steps=3)
     sys3 = System(
         atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
         general_inters=(md3,), force_units=NoUnits, energy_units=NoUnits,
@@ -1070,31 +1084,31 @@ end
         AtomsCalculators.forces!(fs3, sys3, md3)
     end
     @test length(md3.memory.centers) == 2
-    @test md3.n_deposits[] == 2
+    @test md3.n_deposits == 2
 
     # One hill per window of 3 steps (at steps 1, 3 and 6), none for recomputed forces
-    md_step = MetaDynamics(ListHills(cvs, 5.0, (0.1, 0.1)); deposit_interval=3)
+    md_step = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1)); n_steps=3)
     for step_n in 1:6, _ in 1:2
         AtomsCalculators.forces!(fs3, sys3, md_step; step_n=step_n)
     end
-    @test md_step.n_deposits[] == 3
-    @test md_step.last_deposit_step[] == 6
+    @test md_step.n_deposits == 3
+    @test md_step.last_deposit_step == 6
 
-    # As for loggers, chunks continue the schedule only with continuing step numbers
-    #   (init_step), otherwise each chunk starts again at step 0
+    # Chunks deposit as one continuous run, with or without continuing step numbers
     function run_chunks!(md, chunks)
         for chunk in chunks, step_n in chunk
             AtomsCalculators.forces!(fs3, sys3, md; step_n=step_n)
         end
-        return md.n_deposits[]
+        return md.n_deposits
     end
-    new_bias(interval) = MetaDynamics(ListHills(cvs, 5.0, (0.1, 0.1)); deposit_interval=interval)
+    new_bias(interval) = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1)); n_steps=interval)
     # Continued: hills at 0, 50, ..., 200 like one continuous run
     @test run_chunks!(new_bias(50), (0:100, 100:200)) == 5
-    # Restarted: hills at 0, 50, 100 in each chunk
+    # Restarted: the second chunk's step 0 is the first one's last step, hills at 150 and 200
     restarted = new_bias(50)
-    @test run_chunks!(restarted, (0:100, 0:100)) == 6
-    @test restarted.last_deposit_step[] == 100
+    @test run_chunks!(restarted, (0:100, 0:100)) == 5
+    @test restarted.last_deposit_step == 100
+    @test run_chunks!(new_bias(100), fill(0:250, 4)) == 11
     # Runs of a single step deposit every step when continued, but repeat the same step
     #   number otherwise
     @test run_chunks!(new_bias(1), [i:i for i in 1:10]) == 10
@@ -1106,19 +1120,311 @@ end
     AtomsCalculators.forces!(fs3, sys3, mixed)
     AtomsCalculators.forces!(fs3, sys3, mixed)
     add_hill!(mixed, sys3) # 3rd manual call, deposits
-    @test mixed.n_deposits[] == 2
+    @test mixed.n_deposits == 2
     run_chunks!(mixed, (3:6,))
-    @test mixed.last_deposit_step[] == 6
-    @test mixed.n_deposits[] == 4
+    @test mixed.last_deposit_step == 6
+    @test mixed.n_deposits == 4
 end
 
-@testset "MetaDynamics step pacing in simulation" begin
+@testset "Metadynamics free energy" begin
+    dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    γ = 10.0
+
+    # The prefactor comes from the tempering: -1 untempered, -γ/(γ-1) well-tempered
+    lh = ListHills((dist,), 1.0, 0.1)
+    add_hill!(lh, 0.5, 0.8)
+    @test free_energy(Metadynamics(lh), 0.55) ≈ -potential_energy(lh, 0.55)
+    md_wt = Metadynamics(lh; tempering=WellTempered(γ, 2.5))
+    @test free_energy(md_wt, 0.55) ≈ -potential_energy(lh, 0.55) * γ / (γ - 1)
+
+    # Broadcasts over CV values, for any memory
+    gh = GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 101)
+    add_hill!(gh, 0.5, 0.8)
+    rs = [0.4, 0.5, 0.6]
+    @test free_energy.(Metadynamics(gh), rs) ≈ [-potential_energy(gh, r) for r in rs]
+
+    # Several CVs take a tuple
+    lh2 = ListHills((dist, dist), 1.0, (0.1, 0.2))
+    add_hill!(lh2, (0.5, 0.5), 0.8)
+    @test free_energy(Metadynamics(lh2), (0.5, 0.6)) ≈ -potential_energy(lh2, (0.5, 0.6))
+
+    # Keeps the energy units
+    lh_u = ListHills((dist,), 1.0u"kJ * mol^-1", 0.1u"nm")
+    add_hill!(lh_u, 0.5u"nm", 1.0u"kJ * mol^-1")
+    @test unit(free_energy(Metadynamics(lh_u), 0.5u"nm")) == u"kJ * mol^-1"
+end
+
+@testset "Metadynamics AtomsCalculators interface" begin
+    # forces, energy_forces and energy_forces! match forces! and potential_energy. A large
+    #   n_steps keeps the manual call counter from depositing between the calls.
+    dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    mem = GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 101)
+    add_hill!(mem, 0.45, 1.0)
+    md = Metadynamics(mem; n_steps=1000)
+    sys = System(
+        atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(1.5, 1.0, 1.0)],
+        boundary=CubicBoundary(3.0), general_inters=(md,),
+        force_units=NoUnits, energy_units=NoUnits,
+    )
+    fs = AtomsCalculators.forces!(Molly.zero_forces(sys), sys, md)
+    @test any(!iszero, fs)
+    @test AtomsCalculators.forces(sys, md) ≈ fs
+    ef = AtomsCalculators.energy_forces(sys, md)
+    @test ef.forces ≈ fs
+    @test ef.energy ≈ AtomsCalculators.potential_energy(sys, md)
+    ef_inplace = AtomsCalculators.energy_forces!(Molly.zero_forces(sys), sys, md)
+    @test ef_inplace.forces ≈ fs && ef_inplace.energy ≈ ef.energy
+    @test md.n_deposits == 0
+
+    # Without a step number they count towards the manual deposits, as forces! does
+    md_1 = Metadynamics(ListHills((dist,), 1.0, 0.1))
+    AtomsCalculators.forces(sys, md_1)
+    AtomsCalculators.energy_forces(sys, md_1)
+    @test md_1.n_deposits == 2
+end
+
+@testset "Metadynamics logger" begin
+    dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    γ, kT = 10.0, 2.5
+    T = kT / Molly.default_k(NoUnits) # The temperature giving this kT
+    pts = range(0.0, 1.0; length=101)
+
+    # Each deposit records the bias before its hill and the offset c(t) over cv_points
+    md = Metadynamics(ListHills((dist,), 1.0, 0.1); tempering=WellTempered(γ, T),
+                      logger=MetadynamicsLogger(cv_points=pts))
+    test_values = [0.5, 0.52, 0.3]
+    for s in test_values
+        add_hill!(md, s)
+    end
+    lg = md.logger
+    @test lg.steps == [-1, -1, -1]
+    @test values(lg) == test_values
+    mem_2 = ListHills((dist,), 1.0, 0.1, md.memory.centers[1:2], md.memory.heights[1:2])
+    v_2 = [potential_energy(mem_2, s) for s in pts]
+    a = γ / (γ - 1)
+    @test lg.bias_energies[3] ≈ potential_energy(mem_2, 0.3)
+    @test lg.offsets[3] ≈ kT * log(sum(exp.(a .* v_2 ./ kT)) / sum(exp.((a - 1) .* v_2 ./ kT)))
+    @test lg.points.values ≈ v_2
+    @test sum(metadynamics_weights(lg)) ≈ 1
+    @test metadynamics_log_weights(lg) ≈ (lg.bias_energies .- lg.offsets) ./ kT
+
+    # The buffer also catches hills of other walkers sharing the memory
+    walker = Metadynamics(md.memory; tempering=WellTempered(γ, T))
+    add_hill!(walker, 0.7)
+    add_hill!(md, 0.6)
+    @test lg.points.values ≈ [potential_energy(md.memory, s) for s in pts] .-
+                        [Molly.hill_value(md.memory, s, 0.6, md.memory.heights[end]) for s in pts]
+
+    # GridHills integrates over its grid, with units
+    gh = GridHills((dist,), 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 1.0u"nm", 101)
+    md_g = Metadynamics(gh; tempering=WellTempered(γ, T * u"K"),
+                        logger=MetadynamicsLogger())
+    add_hill!(md_g, 0.5u"nm")
+    add_hill!(md_g, 0.55u"nm")
+    @test unit(md_g.logger.offsets[2]) == u"kJ * mol^-1"
+    @test sum(metadynamics_weights(md_g.logger)) ≈ 1
+
+    # Records go to the file in batches of write_interval, flush writes the rest
+    path = tempname()
+    md_f = Metadynamics(ListHills((dist,), 1.0, 0.1); tempering=WellTempered(γ, T),
+                        logger=MetadynamicsLogger(cv_points=pts, filepath=path, write_interval=2))
+    for s in (0.5, 0.52, 0.3)
+        add_hill!(md_f, s)
+    end
+    @test length(readlines(path)) == 4
+    flush(md_f.logger)
+    lines = readlines(path)
+    @test lines[1] == "# kT 2.5"
+    @test lines[2] == "# step cv_1 bias offset height log_weight"
+    rows = [parse.(Float64, split(l)) for l in lines[3:end]]
+    @test length(rows) == 3
+    @test [r[2] for r in rows] == [0.5, 0.52, 0.3]
+    @test [r[end] for r in rows] ≈ metadynamics_log_weights(md_f.logger)
+    @test read_metadynamics_logger(path).heights == md_f.memory.heights # Unitless, scalar CVs
+    md_o = Metadynamics(ListHills((dist,), 1.0, 0.1); tempering=WellTempered(γ, T),
+                        logger=MetadynamicsLogger(cv_points=pts, filepath=path, overwrite=true))
+    add_hill!(md_o, 0.5)
+    flush(md_o.logger)
+    @test length(readlines(path)) == 3
+    @test flush(lg) === lg
+
+    # Read back: the records, the weights, and units with several CVs
+    gh2 = GridHills((dist, dist), 1.0u"kJ * mol^-1", (0.1u"nm", 0.1u"nm"), (0.0u"nm", 0.0u"nm"),
+                    (1.0u"nm", 1.0u"nm"), 51)
+    md_r = Metadynamics(gh2; tempering=WellTempered(γ, T * u"K"),
+                        logger=MetadynamicsLogger(filepath=path, overwrite=true))
+    for s in ((0.5, 0.4), (0.52, 0.4), (0.3, 0.6))
+        add_hill!(md_r, s .* u"nm")
+    end
+    flush(md_r.logger)
+    lg_r = read_metadynamics_logger(path)
+    @test values(lg_r) == values(md_r.logger)
+    @test lg_r.steps == md_r.logger.steps && lg_r.kT == md_r.logger.kT
+    @test lg_r.bias_energies == md_r.logger.bias_energies && lg_r.offsets == md_r.logger.offsets
+    @test lg_r.heights == md_r.logger.heights
+    @test metadynamics_weights(lg_r) ≈ metadynamics_weights(md_r.logger)
+
+    # A failed deposit records nothing, so the records keep one length
+    md_e = Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11); logger=MetadynamicsLogger(temperature=T))
+    add_hill!(md_e, 0.5)
+    @test_throws ArgumentError add_hill!(md_e, 2.0)
+    @test length.((md_e.logger.steps, md_e.logger.offsets, md_e.logger.heights)) == (1, 1, 1)
+
+    # Errors at construction: temperature units of the logger or the tempering, cv_points for
+    #   GridHills, a bad path, the spec in use
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                    logger=MetadynamicsLogger(temperature=T * u"K", cv_points=pts))
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                                            tempering=WellTempered(γ, T * u"K"))
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                    tempering=WellTempered(γ, T), logger=MetadynamicsLogger(temperature=T * u"K",
+                                                                           cv_points=pts))
+    @test_throws ArgumentError Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11);
+                                            logger=MetadynamicsLogger(temperature=T, cv_points=pts))
+    @test_throws SystemError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                    logger=MetadynamicsLogger(temperature=T, cv_points=pts, filepath="/nonexistent_dir/x.txt"))
+    spec = MetadynamicsLogger(temperature=T, cv_points=pts)
+    Metadynamics(ListHills((dist,), 1.0, 0.1); logger=spec)
+    @test_throws ArgumentError metadynamics_weights(spec)
+
+    # An existing empty file gets a header, without a warning
+    rm(path)
+    touch(path)
+    md_1 = @test_logs Metadynamics(ListHills((dist,), 1.0, 0.1);
+                        logger=MetadynamicsLogger(temperature=T, cv_points=pts, filepath=path))
+    add_hill!(md_1, 0.5)
+    flush(md_1.logger)
+    @test count(startswith("# step"), readlines(path)) == 1
+
+    # Another writer on the file throws at the next flush: a shared path, or one replaced
+    md_2 = @test_logs (:warn,) Metadynamics(ListHills((dist,), 1.0, 0.1);
+                        logger=MetadynamicsLogger(temperature=T, cv_points=pts, filepath=path))
+    add_hill!(md_1, 0.6)
+    flush(md_1.logger)
+    add_hill!(md_2, 0.6)
+    @test_throws ArgumentError flush(md_2.logger)
+    Metadynamics(ListHills((dist,), 1.0, 0.1);
+                 logger=MetadynamicsLogger(temperature=T, cv_points=pts, filepath=path, overwrite=true))
+    add_hill!(md_1, 0.7)
+    @test_throws ArgumentError flush(md_1.logger)
+    rm(path)
+
+    # By default a run is appended with its own header; the reader keeps runs apart
+    md_a = Metadynamics(ListHills((dist,), 1.0, 0.1);
+                        logger=MetadynamicsLogger(temperature=T, cv_points=pts, filepath=path))
+    add_hill!(md_a, 0.5)
+    flush(md_a.logger)
+    md_b = @test_logs (:warn,) Metadynamics(ListHills((dist, dist), 1.0, (0.1, 0.1));
+                        logger=MetadynamicsLogger(temperature=2T, filepath=path,
+                                                  cv_points=Iterators.product(pts, pts)))
+    add_hill!(md_b, (0.5, 0.6))
+    add_hill!(md_b, (0.6, 0.6))
+    flush(md_b.logger)
+    @test_throws ArgumentError read_metadynamics_logger(path)
+    @test values(read_metadynamics_logger(path; run=1)) == [0.5]
+    lg_b = read_metadynamics_logger(path; run=2)
+    @test values(lg_b) == [(0.5, 0.6), (0.6, 0.6)] && lg_b.kT == md_b.logger.kT
+    @test_throws ArgumentError read_metadynamics_logger(path; run=3)
+    # Rows before the first header, e.g. of a lost header, throw instead of being dropped
+    write(path, "1 0.5 0.0 0.0 1.0 0.0\n" * read(path, String))
+    @test_throws ArgumentError read_metadynamics_logger(path; run=1)
+    rm(path)
+
+    # bias.logger is not a spec: each bias needs its own MetadynamicsLogger
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1); logger=md_a.logger)
+    @test_throws ArgumentError Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11);
+                                            logger=md_a.logger)
+    # Nor can one spec serve two walkers
+    spec_w = MetadynamicsLogger(temperature=T, cv_points=pts)
+    Metadynamics(ListHills((dist,), 1.0, 0.1); logger=spec_w)
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1); logger=spec_w)
+
+    # An affine temperature (°C) gets the same clear error
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0u"kJ * mol^-1", 0.1u"nm");
+                                            tempering=WellTempered(γ, 25u"°C"))
+
+    # 2-CV cv_points from Iterators.product
+    lh_2d = ListHills((dist, dist), 1.0, (0.1, 0.1))
+    md_2d = Metadynamics(lh_2d; tempering=WellTempered(γ, T),
+                         logger=MetadynamicsLogger(cv_points=Iterators.product(pts, pts)))
+    add_hill!(md_2d, (0.5, 0.5))
+    add_hill!(md_2d, (0.6, 0.5))
+    pts_2d = vec(collect(Iterators.product(pts, pts)))
+    @test md_2d.logger.points.values ≈ [potential_energy(lh_2d, s) for s in pts_2d] .-
+                                  [Molly.hill_value(lh_2d, s, (0.6, 0.5), lh_2d.heights[end])
+                                   for s in pts_2d]
+
+    # A 1-tuple or SVector CV into GridHills records like a scalar
+    md_s = Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11); logger=MetadynamicsLogger(temperature=T))
+    add_hill!(md_s, (0.5,))
+    add_hill!(md_s, SVector(0.6))
+    @test values(md_s.logger) == [0.5, 0.6]
+
+    # cv_points are checked at construction: empty, wrong shape, missing units
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                                            logger=MetadynamicsLogger(temperature=T, cv_points=Float64[]))
+    @test_throws MethodError Metadynamics(ListHills((dist, dist), 1.0, (0.1, 0.1));
+                                          logger=MetadynamicsLogger(temperature=T, cv_points=pts))
+    @test_throws Unitful.DimensionError Metadynamics(ListHills((dist,), 1.0u"kJ * mol^-1", 0.1u"nm");
+                    logger=MetadynamicsLogger(temperature=T * u"K", cv_points=pts))
+
+    # Unit labels use plain exponents, which uparse reads back
+    @test Molly.unit_label(1.0u"kJ * mol^-1") == " [kJ mol^-1]"
+
+    # A large bias factor gives a → 1, the NoTempering offset
+    md_big = Metadynamics(ListHills((dist,), 1.0, 0.1); tempering=WellTempered(1e6, T),
+                          logger=MetadynamicsLogger(cv_points=pts))
+    foreach(s -> add_hill!(md_big, s), (0.5, 0.52, 0.3))
+    v_b = [potential_energy(ListHills((dist,), 1.0, 0.1, md_big.memory.centers[1:2],
+                                      md_big.memory.heights[1:2]), s) for s in pts]
+    @test md_big.logger.offsets[3] ≈ kT * log(mean(exp.(v_b ./ kT))) rtol=1e-4
+
+    # NoTempering: c = kT ln⟨exp(V/kT)⟩ over cv_points
+    md_n = Metadynamics(ListHills((dist,), 1.0, 0.1); logger=MetadynamicsLogger(temperature=T, cv_points=pts))
+    foreach(s -> add_hill!(md_n, s), (0.5, 0.52, 0.3))
+    v_n = [potential_energy(ListHills((dist,), 1.0, 0.1, md_n.memory.centers[1:2]), s) for s in pts]
+    @test md_n.logger.offsets[3] ≈ kT * log(mean(exp.(v_n ./ kT)))
+
+    # Tempering and logger take kT from the Boltzmann constant of the System
+    md_k = Metadynamics(ListHills((dist,), 1.0, 0.1); tempering=WellTempered(γ, T),
+                        logger=MetadynamicsLogger(cv_points=pts))
+    sys_k = System(
+        atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(1.5, 1.0, 1.0)],
+        boundary=CubicBoundary(3.0), general_inters=(md_k,),
+        force_units=NoUnits, energy_units=NoUnits, k=2.0,
+    )
+    forces(sys_k, find_neighbors(sys_k), 0)
+    forces(sys_k, find_neighbors(sys_k), 1)
+    @test md_k.logger.kT == 2.0 * T
+    v_1 = potential_energy(ListHills((dist,), 1.0, 0.1, md_k.memory.centers[1:1]), 0.5)
+    @test md_k.memory.heights[2] ≈ exp(-v_1 / (2.0 * T * (γ - 1)))
+    # kT is fixed by the first deposit: a manual deposit with the default k throws
+    @test_throws ArgumentError add_hill!(md_k, 0.5)
+    @test md_k.logger.kT == 2.0 * T && md_k.n_deposits == 2 && length(md_k.logger.steps) == 2
+    @test md_k.call_count == 0 # Checked before the pacing
+    sys_d = System(atoms=sys_k.atoms, coords=sys_k.coords, boundary=sys_k.boundary,
+                   general_inters=(md_k,), force_units=NoUnits, energy_units=NoUnits)
+    pacing = (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step)
+    @test_throws ArgumentError forces(sys_d, find_neighbors(sys_d), 2)
+    @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
+
+    # NoTempering needs kT and ListHills needs cv_points; no logger by default
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                                            logger=MetadynamicsLogger(cv_points=pts))
+    @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
+                                            logger=MetadynamicsLogger(temperature=T))
+    @test isnothing(Metadynamics(ListHills((dist,), 1.0, 0.1)).logger)
+end
+
+@testset "Metadynamics step pacing in simulation" begin
     # A ForcesLogger recomputes forces at logged steps, which must not add hills
     atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2]
     coords = [SVector(1.0, 1.0, 1.0), SVector(1.3, 1.0, 1.0)]
     boundary = CubicBoundary(3.0)
     cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
-    bias = MetaDynamics(ListHills((cv,), 0.1, 0.05); deposit_interval=5)
+    bias = Metadynamics(ListHills((cv,), 0.1, 0.05); n_steps=5)
     n_steps = 20
     sys = System(
         atoms=atoms, coords=coords, boundary=boundary,
@@ -1129,33 +1435,33 @@ end
     simulator = VelocityVerlet(dt=0.002)
     simulate!(sys, simulator, n_steps)
     # Hills at steps 0, 5, 10, 15 and 20
-    @test bias.n_deposits[] == n_steps ÷ 5 + 1
-    @test length(bias.memory.centers) == bias.n_deposits[]
+    @test bias.n_deposits == n_steps ÷ 5 + 1
+    @test length(bias.memory.centers) == bias.n_deposits
 
-    # As for loggers, a second simulate! call restarts its step numbers, hills at steps 0, 5,
-    #   10, 15 and 20 again
+    # A second simulate! call continues the schedule without init_step, hills at counted
+    #   steps 25, 30, 35 and 40
     simulate!(sys, simulator, n_steps)
-    @test bias.n_deposits[] == 2 * (n_steps ÷ 5 + 1)
-    @test bias.last_deposit_step[] == n_steps
-    # With init_step it continues the schedule, hills at steps 25, 30, 35 and 40
+    @test bias.n_deposits == n_steps ÷ 5 + 1 + n_steps ÷ 5
+    @test bias.last_deposit_step == n_steps
+    # And with init_step, hills at counted steps 45, 50, 55 and 60
     simulate!(sys, simulator, n_steps; init_step=n_steps)
-    @test bias.n_deposits[] == 2 * (n_steps ÷ 5 + 1) + n_steps ÷ 5
-    @test bias.last_deposit_step[] == 2 * n_steps
+    @test bias.n_deposits == n_steps ÷ 5 + 1 + 2 * (n_steps ÷ 5)
+    @test bias.last_deposit_step == 2 * n_steps
 
-    # A run shorter than deposit_interval deposits at step 0
-    bias_long = MetaDynamics(ListHills((cv,), 0.1, 0.05); deposit_interval=1000)
+    # A run shorter than n_steps deposits at step 0
+    bias_long = Metadynamics(ListHills((cv,), 0.1, 0.05); n_steps=1000)
     sys_long = System(
         atoms=atoms, coords=coords, boundary=boundary,
         velocities=[SVector(0.0, 0.0, 0.0) for _ in 1:2],
         general_inters=(bias_long,), force_units=NoUnits, energy_units=NoUnits,
     )
     simulate!(sys_long, simulator, 500)
-    @test bias_long.n_deposits[] == 1
-    @test bias_long.last_deposit_step[] == 0
+    @test bias_long.n_deposits == 1
+    @test bias_long.last_deposit_step == 0
 
     # Langevin deposits the start configuration at step 1, with or without a logger at step 0
-    function langevin_deposits(chunks, interval; loggers=())
-        bias_l = MetaDynamics(ListHills((cv,), 0.1, 0.05); deposit_interval=interval)
+    function langevin_deposits(chunks, interval; loggers=(), continue_steps=true)
+        bias_l = Metadynamics(ListHills((cv,), 0.1, 0.05); n_steps=interval)
         sys_l = System(
             atoms=atoms, coords=coords, boundary=boundary,
             velocities=[SVector(0.0, 0.0, 0.0) for _ in 1:2],
@@ -1165,12 +1471,14 @@ end
         sim_l = Langevin(dt=0.002, temperature=300.0, friction=1.0)
         step_n = 0
         for n in chunks
-            simulate!(sys_l, sim_l, n; init_step=step_n)
+            simulate!(sys_l, sim_l, n; init_step=(continue_steps ? step_n : 0))
             step_n += n
         end
-        return bias_l.n_deposits[]
+        return bias_l.n_deposits
     end
     @test langevin_deposits((n_steps, n_steps), 5) == langevin_deposits((2 * n_steps,), 5)
+    @test langevin_deposits((n_steps, n_steps), 5; continue_steps=false) ==
+          langevin_deposits((2 * n_steps,), 5)
     @test langevin_deposits((n_steps, n_steps), 5) == 2 * n_steps ÷ 5 + 1
     @test langevin_deposits(fill(1, 10), 1) == 10
     @test langevin_deposits((n_steps,), 5) == n_steps ÷ 5 + 1
@@ -1178,7 +1486,7 @@ end
           n_steps ÷ 5 + 1
 end
 
-@testset "MetaDynamics periodic CVs" begin
+@testset "Metadynamics periodic CVs" begin
     # Hills on a periodic CV, such as a torsion in (-π, π], wrap around ±π. The memory takes
     #   the periods of its CVs (cv_period) when it is built.
     tor = CalcTorsion([1, 2, 3, 4])
@@ -1212,14 +1520,14 @@ end
 
     # The periods are fixed when the memory is built, one per CV
     @test ListHills((tor, dist), 1.0, (0.1, 0.1)).period == (2π, 0.0)
-    @test iszero(ListHills((dist,), 1.0, 0.1).period)
+    @test ListHills((dist,), 1.0, 0.1).period == (0.0,)
     @test GridHills((tor, dist), 1.0, (0.1, 0.1), (-π, 0.0), (π, 1.0), 10).period == (2π, 0.0)
     # The grid of a periodic CV must span one period
     @test_throws ArgumentError GridHills((tor,), 1.0, 0.1, 0.0, 1.0, 10)
     # Walkers sharing a memory share its CVs and periods
     walkers_mem = ListHills((tor,), 1.0, 0.1)
-    @test MetaDynamics(walkers_mem).memory.period == 2π
-    @test MetaDynamics(walkers_mem).memory.cvs === (tor,)
+    @test Metadynamics(walkers_mem).memory.period == (2π,)
+    @test Metadynamics(walkers_mem).memory.cvs === (tor,)
 
     # One periodic and one open dimension
     gh2 = GridHills((tor, dist), 1.0, (0.1, 0.1), (-π, 0.0), (π, 1.0), (360, 101))
@@ -1238,7 +1546,7 @@ end
     @test all(v -> exp(-0.5 * 0.25^2) - 1e-12 <= v <= 1.0, gh_wide.values)
 end
 
-@testset "MetaDynamics Float32" begin
+@testset "Metadynamics Float32" begin
     # Float32 parameters and CV values give Float32 energies, gradients and deposits
     # The torsion makes the memories periodic, with the 2π period in Float32
     tor = CalcTorsion([1, 2, 3, 4])
@@ -1251,7 +1559,7 @@ end
         @test (@inferred Molly.bias_gradient(lh, 0.35f0)) isa Float32
         @test (@inferred potential_energy(lh, -3.1f0)) isa Float32
     end
-    @test ListHills((tor,), 1f0, 0.1f0).period isa Float32
+    @test ListHills((tor,), 1f0, 0.1f0).period isa Tuple{Float32}
     @test ListHills((tor, dist), 1f0, (0.1f0, 0.2f0)).period === (2f0π, 0f0)
 
     lh2 = ListHills((dist, dist), 1f0, (0.1f0, 0.2f0))
@@ -1263,7 +1571,7 @@ end
     lh_int = ListHills((dist,), 1, 0.5, [1], [1])
     @test eltype(lh_int.heights) == Float64
     @test eltype(lh_int.centers) == Float64
-    md_int_h = MetaDynamics(lh_int; tempering=WellTemperedTempering(10.0, 2.5))
+    md_int_h = Metadynamics(lh_int; tempering=WellTempered(10.0, 2.5))
     add_hill!(md_int_h, 0.1)
     @test length(md_int_h.memory.heights) == 2
 
@@ -1280,7 +1588,7 @@ end
     end
 end
 
-@testset "MetaDynamics simulation" begin
+@testset "Metadynamics simulation" begin
     # Two atoms connected by a HarmonicBond, with well-tempered Metadynamics on their
     # distance r. The converged bias V estimates the free energy along r as
     # F = -V * γ / (γ - 1), which for a distance in 3D is F(r) = U(r) - 2kT ln(r) up to a
@@ -1302,10 +1610,11 @@ end
     specific_inter_lists = (InteractionList2Atoms([1], [2], [bond]),)
 
     calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
-    # deposit_interval paces deposits directly off forces! (called every step regardless
+    # n_steps paces deposits directly off forces! (called every step regardless
     # of simulator), so no external logger is needed to drive hill deposition
-    bias = MetaDynamics(GridHills((calc_dist,), 0.2, 0.02, 0.3, 1.7, 701);
-                        deposit_interval=100, tempering=WellTemperedTempering(γ, kT))
+    bias = Metadynamics(GridHills((calc_dist,), 0.2, 0.02, 0.3, 1.7, 701);
+                        n_steps=100, tempering=WellTempered(γ, temp),
+                        logger=MetadynamicsLogger())
 
     # remove_CM_motion=false: with 2 atoms, removing the centre of mass velocity after each
     #   Andersen collision cools the bond to about 2/3 of temp
@@ -1326,7 +1635,7 @@ end
     n_steps = 500_000
     simulate!(sys, simulator, n_steps; rng=rng)
 
-    @test bias.n_deposits[] == n_steps ÷ 100 + 1
+    @test bias.n_deposits == n_steps ÷ 100 + 1
     @test all(isfinite, bias.memory.values)
     # Far outside anything ever visited, at the grid edges, no bias has accumulated
     @test potential_energy(bias.memory, 0.3) < 1e-12
@@ -1338,11 +1647,27 @@ end
     σ_thermal = sqrt(kT / k_bond)
     rs = range(r0 - 3σ_thermal, r0 + 3σ_thermal; length=61)
     bond_pe(r) = potential_energy(bond, SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0), boundary)
-    F_est = [-potential_energy(bias.memory, r) * γ / (γ - 1) for r in rs]
+    F_est = free_energy.(bias, rs)
     F_ref = @. bond_pe(rs) - 2kT * log(rs)
     dev = (F_est .- mean(F_est)) .- (F_ref .- mean(F_ref))
     @test sqrt(mean(abs2, dev)) < 0.17kT
     @test maximum(abs, dev) < 0.5kT
+
+    # Reweighted deposit frames recover the unbiased distribution P(r) ∝ r² exp(-U(r)/kT)
+    @test length(values(bias.logger)) == bias.n_deposits
+    @test bias.logger.steps[1:2] == [0, 100]
+    w = metadynamics_weights(bias.logger)
+    r_s = values(bias.logger)
+    r_fine = range(r0 - 6σ_thermal, r0 + 6σ_thermal; length=2001)
+    p = @. r_fine^2 * exp(-bond_pe(r_fine) / kT)
+    p ./= sum(p)
+    mean_ref, mean_rw = sum(p .* r_fine), sum(w .* r_s)
+    std_ref = sqrt(sum(p .* (r_fine .- mean_ref).^2))
+    std_rw = sqrt(sum(w .* (r_s .- mean_rw).^2))
+    @test abs(mean_rw - mean_ref) < 0.1σ_thermal
+    @test abs(std_rw / std_ref - 1) < 0.1
+    # c(t) balances early against late frames; with c = 0 the ratio is about 0.01
+    @test 0.5 < sum(w[1:end÷2]) / sum(w[end÷2+1:end]) < 2
 end
 
 
