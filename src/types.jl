@@ -2604,7 +2604,7 @@ struct EnsembleSystem{S, TR}
 end
 
 function EnsembleSystem(coord_file::AbstractString, traj_file::AbstractString,
-                        force_field::MolecularForceField; kwargs...)
+                        force_field; kwargs...)
     sys = System(coord_file, force_field; kwargs...)
     traj = Chemfiles.Trajectory(traj_file)
     return EnsembleSystem(sys, traj)

@@ -1586,3 +1586,59 @@ end
         @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
     end
 end
+
+@testset "Gradients of a converted system" begin
+    sys_vac = System(joinpath(data_dir, "ethanol_vac.pdb"), ff_dexp; float_type=Float32,
+                     nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
+                     strictness=:nowarn)
+    sys_ref = System(sys_vac; float_type=Float64, units=false, grad_safe=true)
+    params_dic = extract_parameters(sys_ref)
+    plan = ParameterPlan(sys_ref, params_dic)
+    neighbors = find_neighbors(sys_ref; n_threads=1)
+    function pe_injected(params_dic, sys_ref, plan, coords, neighbors)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
+        return potential_energy(sys, neighbors; n_threads=1)
+    end
+    grads = Dict(k => zero(v) for (k, v) in params_dic)
+    autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_injected),
+        Active,
+        Duplicated(params_dic, grads),
+        Const(sys_ref),
+        Const(plan),
+        Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
+        Const(neighbors),
+    )
+    keys_checked = filter(k -> occursin("DEXP", k) || endswith(k, "_σ"),
+                          collect(keys(params_dic)))
+    @test !isempty(keys_checked)
+    for key in keys_checked
+        grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+            dic = copy(params_dic)
+            dic[key] = val
+            pe_injected(dic, sys_ref, plan, copy(sys_ref.coords), neighbors)
+        end
+        @test isapprox(grads[key], grad_fd; rtol=1e-6, atol=1e-8)
+    end
+
+    # The PME of a gradient safe converted system can be differentiated
+    sys = System(builders[1][2](Float32, Array); float_type=Float64, units=false,
+                    grad_safe=true)
+    pme = sys.general_inters[1]
+    @test pme.grad_safe
+    fs = zero(sys.coords)
+    Molly.ewald_pe_forces!(fs, nothing, sys, pme, Val(false))
+    d_sys = zero(sys)
+    autodiff(
+        Reverse,
+        Molly.ewald_pe_forces!,
+        Active,
+        Const(zero(sys.coords)),
+        Const(nothing),
+        Duplicated(sys, d_sys),
+        Duplicated(pme, zero(pme)),
+        Const(Val(false)),
+    )
+    @test maximum(norm.(-d_sys.coords .- fs)) < 1e-8 * maximum(norm.(fs))
+end
