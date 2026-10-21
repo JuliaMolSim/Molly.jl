@@ -66,6 +66,16 @@ function harmonic_umbrella_samples(rng; n=2_000)
     return (; x, u, win_of, N_k, exact_f)
 end
 
+# Five umbrella windows with poor overlap and unequal sample counts, where the MBAR covariance
+#   is sensitive to the gauge direction
+function unequal_umbrella_samples(rng; κ=20.0, N_k=[200, 3000, 500, 100, 2000])
+    μs = range(-2.0, 2.0; length=5)
+    x = [κ * μ / (1 + κ) + randn(rng) / sqrt(1 + κ) for (μ, n) in zip(μs, N_k) for _ in 1:n]
+    win_of = reduce(vcat, [fill(k, n) for (k, n) in enumerate(N_k)])
+    u = [0.5 * xi^2 + 0.5 * κ * (xi - μ)^2 for xi in x, μ in μs]
+    return (; u, win_of, N_k)
+end
+
 @testset "Thermodynamic cycles" begin
     @testset "cycle arithmetic" begin
         src_a = ToyFreeEnergies([0.0, 2.0, 5.0]u"kJ/mol", [0.0, 0.3, 0.4]u"kJ/mol")
@@ -97,6 +107,7 @@ end
         @test_throws ArgumentError ThermodynamicCycle()
         @test_throws ArgumentError Leg(src_a, 1.0 => 2)
         @test_throws ArgumentError Leg(src_a, 1 => :b)
+        @test_throws ArgumentError Leg(src_a, true => 2)
         src_nm = ToyFreeEnergies([0.0, 1.0]u"nm", [0.0, 0.1]u"nm")
         @test_throws ArgumentError free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2),
                                                                   Leg(src_nm, 1 => 2)))
@@ -216,6 +227,28 @@ end
         @test std(ΔF) ≈ mean(σ) rtol=0.3
         @test mean(ΔF) ≈ samples.exact_f[9] * 2.5 atol=3 * mean(σ) / sqrt(30)
 
+        # Unequal sample counts and poor overlap: the covariance equals the direct form
+        #   Θ = Wᵀ(I − WNWᵀ)⁺W (Shirts and Chodera 2008, Eq D6), and its standard error matches the
+        #   spread over independent data sets
+        small = unequal_umbrella_samples(rng; N_k=[40, 600, 100, 20, 400])
+        r_small = Molly.MBARResult(small.u, small.win_of, small.N_k, fill(1.0, 5))
+        W, _ = Molly.mbar_weights_sampled(small.u, r_small.f, log.(Float64.(small.N_k)))
+        W ./= W * Float64.(small.N_k)
+        Θ = W' * pinv(I - W * Diagonal(Float64.(small.N_k)) * W') * W
+        @test free_energy_difference_uncertainty(r_small, 1, 5) ≈
+              sqrt(Θ[1, 1] + Θ[5, 5] - 2 * Θ[1, 5]) rtol=1e-4
+        ΔF_unequal = Float64[]
+        σ_unequal = Float64[]
+        for _ in 1:50
+            s = unequal_umbrella_samples(rng)
+            r = Molly.MBARResult(s.u, s.win_of, s.N_k, fill(1.0, 5))
+            push!(ΔF_unequal, free_energy_difference(r, 1, 5))
+            push!(σ_unequal, free_energy_difference_uncertainty(r, 1, 5))
+        end
+        @test std(ΔF_unequal) ≈ mean(σ_unequal) rtol=0.3
+
+        @test_throws ArgumentError Molly.MBARResult(samples.u, samples.win_of, samples.N_k, kBT;
+                                                    names=[Symbol("w", k) for k in 1:9])
         @test_throws ArgumentError free_energy_difference(
                     Molly.MBARResult(samples.u, samples.win_of, samples.N_k, kBT), "w1", 2)
         mixed_T = Molly.MBARResult(samples.u, samples.win_of, samples.N_k,

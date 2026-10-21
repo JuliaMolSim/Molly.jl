@@ -760,6 +760,18 @@ function mbar_pmf(u::AbstractMatrix,
     return pmf(accumulator; kwargs...)
 end
 
+# Asymptotic covariance Θ = [(WᵀW)⁺ − N]⁺ of MBAR free energies, from the Gram matrix `WᵀW` of
+#   the normalized weights and the sample count of each state (zero for target states),
+#   see Shirts and Chodera 2008 Eq D6. The inner matrix is singular along the gauge direction
+#   (all free energies shifted together), but rounding leaves a tiny eigenvalue there that
+#   `pinv` would invert into a huge one, so the gauge direction is projected out first. Only
+#   differences of free energies are meaningful, e.g. Θ[i,i] + Θ[j,j] - 2Θ[i,j].
+function mbar_covariance(gram::AbstractMatrix, N_counts::AbstractVector)
+    K = length(N_counts)
+    P = I - fill(1 / K, K, K)
+    return pinv(P * (pinv(gram) - Diagonal(Float64.(N_counts))) * P)
+end
+
 struct PMF{C, W, E, F, FE, SF, SFE, P, VP}
     centers::C
     widths::W
@@ -913,8 +925,8 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     var_p   = zeros(Float64, nb) # Asymptotic variance of p_i
     sigma_F = fill(NaN, nb)      # Standard deviation of PMF in kBT
 
-    # Diagonal N (augmented with zeros for {A,a})
-    N_aug = Diagonal(vcat(Float64.(N_counts), 0.0, 0.0))
+    # N augmented with zero counts for {A,a}
+    N_aug = vcat(Float64.(N_counts), 0.0, 0.0)
 
     # Precompute bin assignments for each frame
     bin_idx = searchsortedlast.(Ref(edges), R_flat)
@@ -952,10 +964,7 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
             @views W_aug[K + 1, :] .= W_nA
             @views W_aug[K + 2, :] .= W_na
 
-            G = W_aug * W_aug'
-            Ginv = pinv(G)
-            H = Ginv - Matrix(N_aug)
-            Σ = pinv(H)
+            Σ = mbar_covariance(W_aug * W_aug', N_aug)
 
             idx_A = K + 1
             idx_a = K + 2
@@ -1061,7 +1070,8 @@ and [`free_energy_difference_uncertainty`](@ref) return values in energy units.
 # Fields
 - `f::Vector{Float64}` - relative free energies in units of each state's ``k_B T``,
   with `f[1] = 0`.
-- `covariance::Matrix{Float64}` - asymptotic covariance of `f`.
+- `covariance::Matrix{Float64}` - asymptotic covariance of `f`, with the gauge direction
+  projected out; the variance of `f[j] - f[i]` is `Θ[i,i] + Θ[j,j] - 2Θ[i,j]`.
 - `kBT::Vector` - thermal energy of each state.
 - `names` - state names, or `nothing`.
 """
@@ -1091,6 +1101,9 @@ function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::Abstrac
         throw(DimensionMismatch("lengths of kBT ($(length(kBT))) and N_counts " *
                                 "($(length(N_counts))) must equal the number of states ($K)"))
     end
+    if !isnothing(names) && !(names isa AbstractVector{<:AbstractString})
+        throw(ArgumentError("names must be a vector of strings, got $(typeof(names))"))
+    end
     if !isnothing(names) && length(names) != K
         throw(DimensionMismatch("length of names ($(length(names))) must equal the " *
                                 "number of states ($K)"))
@@ -1098,7 +1111,6 @@ function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::Abstrac
     f, logN = iterate_mbar(u, win_of, N_counts; rtol=rtol, max_iter=max_iter)
     W, _ = mbar_weights_sampled(u, f, logN)
     W ./= W * Float64.(N_counts) # Enforce exact normalization, ∑k N_k W[n,k] = 1
-    # Θ = [(WᵀW)⁺ − N]⁺, the form used by `pmf_with_uncertainty`
-    covariance = pinv(pinv(W' * W) - Diagonal(Float64.(N_counts)))
+    covariance = mbar_covariance(W' * W, N_counts)
     return MBARResult(f, covariance, collect(kBT), names)
 end

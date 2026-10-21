@@ -720,7 +720,7 @@ A leg source implements [`free_energy_difference`](@ref)`(source, i, j)`, which 
 - [`TSSState`](@ref): the free energies of [`Molly.tss_free_energies`](@ref), with the jackknife standard errors of [`Molly.tss_free_energy_uncertainties`](@ref);
 - [`AWHState`](@ref): the free energies `f`. AWH has no uncertainty estimate, so [`free_energy_uncertainty`](@ref) raises an error for a cycle with an AWH leg;
 - [`Molly.MBARResult`](@ref): MBAR free energies with their asymptotic standard errors, for umbrella sampling, REMD or any other set of samples, e.g. `Molly.MBARResult(Molly.assemble_mbar_inputs(coords_k, boundaries_k, thermo_states), thermo_states)`;
-- a PMF from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), computed with `kBT`, between two bins given by index. The uncertainty treats the two bins as independent.
+- a PMF from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), computed with `kBT`, between two bins given by index. The uncertainty treats the two bins as independent, an approximation that can be too large or too small since the bins share the normalisation.
 
 The dimensionless free energies of these sources are converted with $k_B T$ of the leg's states. The two states of a leg must therefore have the same temperature, otherwise an error is raised; legs at different temperatures can be combined in one cycle. Any other object can be a leg source by adding methods to the two functions:
 

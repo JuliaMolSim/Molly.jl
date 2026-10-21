@@ -137,6 +137,23 @@ end
     F_diff = pmf_res.F .- 0.5 .* κ0 .* pmf_res.centers .^ 2
     @test all(abs.(F_diff .- mean(F_diff)) .< 4 .* pmf_res.sigma_F)
     @test Molly.mbar_pmf(u, u_target, f, N_k, logN, x, (-1.5, 1.5, 12)).F ≈ pmf_res.F
+
+    # With unequal sample counts and poor overlap the uncertainty of each bin still matches
+    #   the spread over independent data sets
+    μs_poor, N_poor = range(-2.0, 2.0; length=5), [200, 3000, 500, 100, 2000]
+    neg_log_p, σ_poor = Vector{Float64}[], Vector{Float64}[]
+    for _ in 1:60
+        x_p = [20 * μ / 21 + randn(rng) / sqrt(21) for (μ, n) in zip(μs_poor, N_poor) for _ in 1:n]
+        win_p = reduce(vcat, [fill(k, n) for (k, n) in enumerate(N_poor)])
+        u_p = [0.5 * xi^2 + 10 * (xi - μ)^2 for xi in x_p, μ in μs_poor]
+        f_p, logN_p = Molly.iterate_mbar(u_p, win_p, N_poor)
+        res = Molly.pmf_with_uncertainty(u_p, 0.5 .* x_p .^ 2, f_p, N_poor, logN_p,
+                                         [x_p[win_p .== k] for k in 1:5]; edges=-1.5:0.5:1.5)
+        push!(neg_log_p, -log.(res.p))
+        push!(σ_poor, res.sigma_F)
+    end
+    @test all(isapprox.(vec(std(reduce(hcat, neg_log_p); dims=2)),
+                        vec(mean(reduce(hcat, σ_poor); dims=2)); rtol=0.3))
 end
 
 @testset "Statistical inefficiency" begin

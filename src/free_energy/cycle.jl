@@ -24,7 +24,8 @@ States are given by index or by [`ThermoState`](@ref) name. This is the interfac
   other set of samples, with its asymptotic standard error;
 - a `PMF` from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), between two
   bins given by linear index. The PMF must have been computed with `kBT`. The
-  uncertainty, when the PMF has one, treats the two bins as independent.
+  uncertainty, when the PMF has one, treats the two bins as independent, an approximation
+  that can be too large or too small since the bins share the normalisation.
 
 States of a [`TSSState`](@ref), an [`AWHState`](@ref) or an [`Molly.MBARResult`](@ref)
 built from [`ThermoState`](@ref)s are converted with ``k_B T`` of the states; both must
@@ -62,7 +63,7 @@ end
 function Leg(source, states::Pair; coefficient::Real=1.0, name::Symbol=Symbol(""))
     from, to = states
     for state in (from, to)
-        if !(state isa Union{Integer, AbstractString})
+        if !(state isa Union{Integer, AbstractString}) || state isa Bool
             throw(ArgumentError("leg states must be indices or ThermoState names, " *
                                 "got $(repr(state))"))
         end
@@ -245,7 +246,8 @@ function free_energy_difference(pmf::PMF, i, j)
     return pmf.F_energy[j] - pmf.F_energy[i]
 end
 
-# Treats the two bins as independent, the covariance between bins is not available
+# Treats the two bins as independent, the covariance between bins is not available; the
+#   shared normalisation makes this an approximation in either direction
 function free_energy_difference_uncertainty(pmf::PMF, i, j)
     i, j = pmf_bin_indices(pmf, i, j, :sigma_F_energy)
     return sqrt(pmf.sigma_F_energy[i]^2 + pmf.sigma_F_energy[j]^2)
