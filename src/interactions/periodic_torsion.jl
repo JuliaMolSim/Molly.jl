@@ -190,6 +190,28 @@ end
 
 is_torsion(::PeriodicTorsionλ) = true
 
+parameter_prefix(inter::PeriodicTorsionλ, inter_type) =
+    (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
+
+n_parameters(::Type{<:PeriodicTorsionλ{N}}) where {N} = 2 * N
+
+parameter_keys(::Type{<:PeriodicTorsionλ{N}}) where {N} =
+    (ntuple(torsion_phase_key, N)..., ntuple(torsion_k_key, N)...)
+
+parameter_values(inter::PeriodicTorsionλ) = (inter.phases..., inter.ks...)
+
+@inline function inject_parameters(inter::PeriodicTorsionλ{N, T, E, LM, SCH},
+                                   vals::Tuple) where {N, T, E, LM, SCH}
+    return PeriodicTorsionλ{N, T, E, LM, SCH}(
+        inter.periodicities,
+        ntuple(i -> convert_parameter(T, vals[i]    ), N),
+        ntuple(i -> convert_parameter(E, vals[N + i]), N),
+        inter.proper,
+        copied_field(inter.λ_mixing),
+        copied_field(inter.scheduler),
+    )
+end
+
 function Base.zero(d::PeriodicTorsionλ{N, T, E}) where {N, T, E}
     return PeriodicTorsionλ(
         ntuple(_ -> 0      , N),

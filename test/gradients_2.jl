@@ -1190,6 +1190,47 @@ end
         end
         test_params(name, sys_ref, params_dic)
     end
+
+    # The λ versions that alchemical systems use have the keys of the interactions they
+    #   replace. Dual topology keeps the bonded terms of deleted atoms at full strength, so
+    #   the A copies of core atoms are used, whose bonded terms are scaled by 1 - λ
+    atoms_λ = [Atom(index=i, mass=T(10.0), charge=T(0.1), σ=T(0.3), ϵ=T(0.4), λ=T(0.6),
+                    alch_role=(i <= 2 ? Molly.CoreDRole : Molly.EnvRole))
+               for i in eachindex(coords_spec)]
+    scheduler = Molly.DefaultLambdaScheduler(dual=true)
+    to_λ(inter) = Molly.to_lambda_function(inter; scheduler=scheduler)
+    to_λ(inter::Molly.LennardJones14) = Molly.to_lambda_function(inter, Molly.GapsysSoftCore();
+                                                                 scheduler=scheduler, float_type=T)
+    to_λ(inter::Molly.LennardJones14, softcore) =
+        Molly.to_lambda_function(inter, softcore; scheduler=scheduler, float_type=T)
+    λ_inters = Any[(name, il, to_λ) for (name, il) in specific_inters if name != "FENEBond" &&
+                                                     name != "HarmonicPositionRestraint"]
+    for softcore in (Molly.BeutlerSoftCore(), Molly.ScaledSoftCore())
+        lj14 = specific_inters[findfirst(x -> first(x) == "LennardJones14", specific_inters)][2]
+        push!(λ_inters, ("LennardJones14 $(nameof(typeof(softcore)))", lj14,
+                         inter -> to_λ(inter, softcore)))
+    end
+    for (name, inter_list, convert) in λ_inters
+        il_λ = typeof(inter_list).name.wrapper(
+            (getfield(inter_list, f) for f in fieldnames(typeof(inter_list))[1:(end - 3)])...,
+            convert.(inter_list.inters), ["t"], inter_list.data)
+        sys_ref = System(specific_sys(il_λ); atoms=atoms_λ)
+        # The coupling must change the energy, or the λ part would go untested
+        @test !(potential_energy(sys_ref) ≈ potential_energy(specific_sys(inter_list)))
+        params_dic = extract_parameters(sys_ref)
+        keys_base = [Molly.parameter_prefix(inter_list.inters[1], "t") * k
+                     for k in Molly.parameter_keys(inter_list.inters[1])]
+        @test all(k -> haskey(params_dic, k), keys_base)
+        inter_params = Dict(k => params_dic[k] for k in keys_base)
+        test_params("$(name)λ", sys_ref, inter_params)
+    end
+
+    # Single topology λ interactions store the parameters of both end states
+    hb_single = Molly.to_lambda_function_single(HarmonicBond(k=T(100.0), r0=T(0.5)), nothing;
+                    scheduler=Molly.DefaultLambdaScheduler(dual=false))
+    sys_single = specific_sys(InteractionList2Atoms(is, js, [hb_single], ["t"]))
+    @test_throws "single topology" extract_parameters(sys_single)
+    @test_throws "single topology" ParameterPlan(sys_single, Dict("inter_HB_t_k" => T(100.0)))
 end
 
 @testset "Parameters with units" begin

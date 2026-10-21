@@ -106,6 +106,9 @@ or unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+parameter_prefix(::UreyBradleyλ, inter_type) = "inter_UB_$(inter_type)_"
+parameter_fields(::Type{<:UreyBradleyλ}) = parameter_fields(UreyBradley)
+
 function Base.zero(a::UreyBradleyλ)
     return UreyBradleyλ(kangle=zero.(a.kangle), θ0=zero.(a.θ0), kbond=zero.(a.kbond), r0=zero.(a.r0),
                         λ_mixing=a.λ_mixing, scheduler=a.scheduler)

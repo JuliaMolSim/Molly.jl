@@ -21,6 +21,8 @@ const DeleteRole::AlchemicalRole = Int32(5)
 # λ versions of bonded interactions, see `virial_lambda_factor`
 abstract type AlchemicalBondedInteraction end
 
+single_topology(inter::AlchemicalBondedInteraction) = !inter.scheduler.dual
+
 struct BeutlerSoftCore end
 struct GapsysSoftCore end
 struct ScaledSoftCore end
@@ -82,6 +84,9 @@ struct LambdaScheduler{S}
     intraLJ::Bool
     Tscaled::Bool
 end
+
+@inline copied_field(s::LambdaScheduler) = LambdaScheduler(s.schedule, s.dual, s.LJindividual,
+        s.LJspecial, s.Cindividual, s.Cspecial, s.intraLJ, s.Tscaled)
 
 # OpenFE uses single topology with individually scaled Coulomb parameters and does not scale the
 #   torsions that span core and unique atoms

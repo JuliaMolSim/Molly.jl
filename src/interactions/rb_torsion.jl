@@ -108,6 +108,9 @@ Only compatible with 3D systems.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+parameter_prefix(::RBTorsionλ, inter_type) = "inter_RB_$(inter_type)_"
+parameter_fields(::Type{<:RBTorsionλ}) = parameter_fields(RBTorsion)
+
 function Base.zero(t::RBTorsionλ)
     return RBTorsionλ(c0=zero.(t.c0), c1=zero.(t.c1), c2=zero.(t.c2), c3=zero.(t.c3),
                       c4=zero.(t.c4), c5=zero.(t.c5), λ_mixing=t.λ_mixing, scheduler=t.scheduler)

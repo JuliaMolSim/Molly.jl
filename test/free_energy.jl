@@ -490,3 +490,113 @@ end
     @test_throws ArgumentError extract_parameters(sys_single)
     @test_throws ArgumentError ParameterPlan(sys_single, Dict{String, Float64}())
 end
+
+@testset "Alchemical parameter keys" begin
+    # A key of the original system whose interactions include one between alchemical atoms,
+    #   with a nonzero value
+    function alchemical_key(sys, prefix, alchemical)
+        for il in sys.specific_inter_lists
+            idx = [getfield(il, f) for f in fieldnames(typeof(il))[1:(end - 3)]]
+            inters = Array(il.inters)
+            for n in eachindex(inters)
+                all(is -> is[n] in alchemical, idx) || continue
+                p = Molly.parameter_prefix(inters[n], il.types[n])
+                (isnothing(p) || !startswith(p, prefix)) && continue
+                for (suffix, v) in zip(Molly.parameter_keys(inters[n]),
+                                       Molly.parameter_values(inters[n]))
+                    iszero(ustrip(v)) || return p * suffix
+                end
+            end
+        end
+        error("no $prefix key on the alchemical atoms")
+    end
+
+    pe(s) = potential_energy(s; n_threads=1)
+    fs(s) = forces(s; n_threads=1)
+
+    # `build(sys)` makes the alchemical system from an original system; `ref` is the original
+    #   system whose keys must all be kept
+    function check_keys(ref, build, alchemical, prefixes)
+        sys = build(ref)
+        params_ref = extract_parameters(ref; strictness=:nowarn)
+        params = extract_parameters(sys; strictness=:nowarn)
+        # The B copies of the core atoms of a dual topology system have zero mass
+        @test all(k -> haskey(params, k) || endswith(k, "_mass"), keys(params_ref))
+        @test all(k -> params[k] == params_ref[k], intersect(keys(params), keys(params_ref)))
+
+        sys_rt = inject_gradients(sys, params)
+        @test sys_rt.atoms == sys.atoms
+        @test pe(sys_rt) == pe(sys)
+        @test fs(sys_rt) == fs(sys)
+
+        # Changing a bonded, torsion or 1-4 key equals building the alchemical system from the
+        #   changed original system
+        changed = Dict(k => 1.1 * params_ref[k]
+                       for k in (alchemical_key(ref, p, alchemical) for p in prefixes))
+        sys_mod = inject_gradients(sys, merge(params, changed))
+        sys_rebuilt = build(inject_gradients(ref, merge(params_ref, changed)))
+        @test ustrip(pe(sys_mod)) ≈ ustrip(pe(sys_rebuilt)) rtol=1e-12
+        @test ustrip.(fs(sys_mod)) ≈ ustrip.(fs(sys_rebuilt)) rtol=1e-12
+        @test pe(sys_mod) != pe(sys)
+    end
+
+    ff = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml");
+                             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+    ethanol = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; nonbonded_method=SetupPME(),
+                     dist_cutoff=1.0u"nm", strictness=:nowarn)
+    solute = collect(1:9)
+    garnet_prefixes = ("inter_HB_", "inter_HA_", "inter_PT_")
+    for λ in (0.0, 0.5, 1.0)
+        check_keys(ethanol, s -> AbsoluteFESystem(s, λ, solute), solute, garnet_prefixes)
+    end
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+    check_keys(ethanol, s -> RelativeFESystem(s, s, 0.5, deepcopy(mapping), core_mapAB),
+               solute, garnet_prefixes)
+
+    # End states that parametrise a bond type differently: its keys are left out, and refused
+    #   by the plan, so that injecting a dictionary does not overwrite the B bonds with A values
+    garnet = joinpath(ff_dir, "ethanol_garnet.xml")
+    xml = read(garnet, String)
+    pattern = r"(<Bond type1=\"C1\" type2=\"C2\" length=\"[^\"]*\" k=\")[^\"]*"
+    @test occursin(pattern, xml)
+    garnet_B = joinpath(mktempdir(), "ethanol_garnet.xml")
+    write(garnet_B, replace(xml, pattern => s"\g<1>150000.0"))
+    ethanol_B = System(joinpath(data_dir, "ethanol_solv.pdb"),
+                       MolecularForceField(garnet_B; custom_residue_templates=joinpath(ff_dir,
+                                                         "ethanol_garnet_residues.xml"));
+                       nonbonded_method=SetupPME(), dist_cutoff=1.0u"nm", strictness=:nowarn)
+    sys_AB = RelativeFESystem(ethanol, ethanol_B, 0.5, deepcopy(mapping), core_mapAB)
+    k_key = only(k for k in keys(extract_parameters(ethanol)) if
+                     occursin(r"^inter_HB_(C1/C2|C2/C1)_k$", k))
+    params_AB = @test_logs (:warn, Regex(k_key)) extract_parameters(sys_AB)
+    @test !haskey(params_AB, k_key)
+    @test haskey(params_AB, replace(k_key, r"_k$" => "_r0"))
+    @test_throws ErrorException extract_parameters(sys_AB; strictness=:error)
+    @test_throws ArgumentError ParameterPlan(sys_AB, Dict(k_key => 1.0))
+    @test pe(inject_gradients(sys_AB, params_AB)) == pe(sys_AB)
+
+    # CHARMM36 protein with a CGenFF ligand: separate 1-4 Lennard-Jones, harmonic (improper)
+    #   torsions and CMAP terms, with every 1-4 soft core
+    build_tyk2(lig) = System(
+        joinpath(tyk2_dir, "tyk2_charmm_$(lig)_conect.pdb"),
+        MolecularForceField(
+            joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...,
+            joinpath(tyk2_dir, "$(lig)_charmm.xml");
+            units=true,
+            strictness=:nowarn,
+        );
+        nonbonded_method=SetupPME(approximate_erfc=false), center_coords=false,
+        dist_cutoff=0.9u"nm",
+    )
+    sysA = build_tyk2("ejm31")
+    ligand = [i for i in eachindex(sysA) if sysA.atoms_data[i].res_name in ("LIG", "UNK")]
+    charmm_prefixes = ("inter_HB_", "inter_HA_", "inter_PT_", "inter_LJ14_")
+    for (λ, LJsoftcore) in ((0.0, :gapsys), (0.5, :beutler), (1.0, :scaled))
+        check_keys(sysA, s -> AbsoluteFESystem(s, λ, ligand; LJsoftcore=LJsoftcore), ligand,
+                   charmm_prefixes)
+    end
+    check_keys(sysA, s -> RelativeFESystem(s, s, 0.5,
+                   Dict("core" => ligand, "unique_A" => Int[], "unique_B" => Int[]),
+                   Dict(i => i for i in ligand)), ligand, charmm_prefixes)
+end

@@ -805,6 +805,8 @@ The torsions take their role the other way round: a torsion of inserted, deleted
 
 The schedulers scale the sterics and electrostatics of each role differently (see the plot above). In dual topology the bonded terms of inserted and deleted atoms stay at full strength at every $\lambda$, only their non-bonded interactions are scaled, so these atoms keep their geometry when decoupled; the bonded terms of the core copies are scaled by $\lambda$ and $1-\lambda$. In single topology the bonded parameters are interpolated.
 
+An alchemical system keeps the parameter keys of the system it was built from (see [`extract_parameters`](@ref)), so force field parameters can be differentiated through an [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) like through the original system. Single topology systems, which store two values per parameter, are not supported by the parameter functions.
+
 ### Matching OpenFE default settings
 
 Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
