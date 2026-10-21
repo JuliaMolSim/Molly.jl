@@ -2599,11 +2599,11 @@ Once the bias has grown to compensate the underlying free energy landscape, $V_{
 
 In Molly this is implemented by [`Metadynamics`](@ref), usable directly as a `general_inters` entry. Hills on periodic CVs such as [`CalcTorsion`](@ref) wrap around automatically; custom CV types opt in by defining [`Molly.cv_period`](@ref). The CVs and the resulting force or potential are evaluated each step and the rate at which new gaussians are added is controlled via `n_steps`. Two aspects are controlled by Julia type dispatch:
 
-- **Hill memory**, an [`AbstractMetadynamicsMemory`](@ref): 
+- **Hill memory**, an [`Molly.AbstractMetadynamicsMemory`](@ref): 
     - [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills), no knowledge of CV range needed)
     - [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
-- **Hill height scaling**, an [`AbstractTempering`](@ref):
-    - the default [`NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
+- **Hill height scaling**, an [`Molly.AbstractTempering`](@ref):
+    - the default [`Molly.NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
     - [`WellTempered`](@ref) (Barducci, Bussi & Parrinello, 2008) instead shrinks each new hill according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
 
 Standard metadynamics is prone to over-filling: if the total deposited height grows much larger than $k_B T$, the bias floods the well and the system random-walks broadly for the rest of the run, widening the reconstructed profile well beyond the true surface. Well-tempered metadynamics avoids this at the cost of one extra parameter, `bias_factor`.
@@ -2646,7 +2646,7 @@ bias = Metadynamics(memory; n_steps=100, tempering=tempering,
                     logger=MetadynamicsLogger(filepath="metadynamics.txt", overwrite=true))
 ```
 
-`n_steps=100` deposits a hill at steps 0, 100, 200, ...; recomputing forces within a step (e.g. by a logger or coupler) does not change this schedule, and a run split over several `simulate!` calls deposits as one continuous run. The well-tempered kT uses the Boltzmann constant of the System. The CV must stay within `[grid_min, grid_max]`: by default leaving the grid throws an error, while `GridHills(...; out_of_grid_error=false)` instead warns once and holds the bias constant (no force) outside the grid. No external logger is needed to deposit hills, since `bias` deposits them from `forces!`; we just add it to `general_inters` and simulate as normal:
+`n_steps=100` deposits a hill at steps 0, 100, 200, ...; recomputing forces within a step (e.g. by a logger or coupler) does not change this schedule, and a run split over several `simulate!` calls deposits as one continuous run. The well-tempered kT uses the Boltzmann constant of the System. The CV should stay within `[grid_min, grid_max]`: outside the grid the bias exerts no force and deposits no hills. By default leaving the grid warns once, following Molly's strictness; `GridHills(...; out_of_grid=:error)` throws instead. No external logger is needed to deposit hills, since `bias` deposits them from `forces!`; we just add it to `general_inters` and simulate as normal:
 
 ```julia
 # dt in ps, coupling const in ps. With only 2 atoms, removing the centre of mass velocity
@@ -2668,11 +2668,11 @@ simulate!(sys, simulator, 500_000)
 flush(bias.logger) # Writes the last batch of records to metadynamics.txt
 ```
 
-After the run, [`free_energy`](@ref) estimates the free energy from the bias. The prefactor comes from the tempering (`-γ/(γ-1)` for well-tempered, `-1` without), so we can compare it against the analytical free energy $F(r)$:
+After the run, [`Molly.free_energy`](@ref) estimates the free energy from the bias. The prefactor comes from the tempering (`-γ/(γ-1)` for well-tempered, `-1` without), so we can compare it against the analytical free energy $F(r)$:
 
 ```julia
 grid_s = range(grid_min, grid_max; length=n_points) # Matches the GridHills grid above
-F_estimate = free_energy.(bias, grid_s)
+F_estimate = Molly.free_energy.(bias, grid_s)
 
 bond_pe(r) = potential_energy(bond, SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0), boundary)
 F_analytical = @. bond_pe(grid_s) - 2kT * log(grid_s) # r^2 Jacobian of a 3D distance
@@ -2732,6 +2732,10 @@ r_s = values(logger)
 mean_r = sum(w .* r_s) # Unbiased average distance
 ```
 
-The file has the columns step, CV values, bias, offset, hill height and log weight, and is written in batches, so call `flush(bias.logger)` after the run to write the last one. The frames are the deposit steps, so a smaller `n_steps` gives more of them. [`metadynamics_log_weights`](@ref) gives the unnormalised log weights. The memory must be a [`GridHills`](@ref), or `cv_points` (a uniform grid of CV values) must be passed to integrate $c(t)$ over.
+The file has the columns step, CV values, bias, offset, hill height and log weight, and is written in batches, so call `flush(bias.logger)` after the run to write the last one. The frames are the deposit steps, so a smaller `n_steps` gives more of them. [`Molly.metadynamics_log_weights`](@ref) gives the unnormalised log weights. The memory must be a [`GridHills`](@ref), or `cv_points` (a uniform grid of CV values) must be passed to integrate $c(t)$ over.
+
+```@docs
+Base.flush(::MetadynamicsLogger)
+```
 
 For full worked examples with plots -- comparing tempered against untempered sampling, and the histogram of the well-tempered run reweighted with these weights against the analytical equilibrium distribution -- see `scripts/metadynamics_bond_recovery_plots.jl`.

@@ -2543,9 +2543,15 @@ function check_strictness(strictness)
     end
 end
 
-function report_issue(err_str, strictness; error_type=ErrorException, maxlog=nothing)
+# An optional id gives the warning its own maxlog count, separate from other callers
+function report_issue(err_str, strictness; error_type=ErrorException, maxlog=nothing,
+                      id=nothing)
     if strictness == :warn
-        @warn err_str maxlog=maxlog
+        if isnothing(id)
+            @warn err_str maxlog=maxlog
+        else
+            @warn err_str maxlog=maxlog _id=id
+        end
     elseif strictness == :error
         throw(error_type(err_str))
     end

@@ -85,7 +85,7 @@ function run_metadynamics(tempering; label="")
     return bias, values(sys.loggers.dist)
 end
 
-bias_untempered, dist_untempered = run_metadynamics(NoTempering(); label="Untempered")
+bias_untempered, dist_untempered = run_metadynamics(Molly.NoTempering(); label="Untempered")
 bias_tempered, dist_tempered = run_metadynamics(WellTempered(bias_factor, temp); label="Well-tempered")
 
 ##

@@ -259,6 +259,7 @@ threads.
                            strictness=default_strictness()) where T
     # @inline needed to avoid Enzyme error
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_minimizer_inters(sys, strictness)
     sis = minimizer_specific_inter_lists(sys, sim.constraint_bond_constant, strictness)
 
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -395,6 +396,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_minimizer_inters(sys, strictness)
     if !(0 < sim.alpha_start < 1)
         throw(ArgumentError("alpha_start must be between 0 and 1, found " *
                             "$(sim.alpha_start)"))
@@ -594,6 +596,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_minimizer_inters(sys, strictness)
     if sim.n_history < 1
         throw(ArgumentError("n_history must be positive, found $(sim.n_history)"))
     end
@@ -3005,6 +3008,20 @@ function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
     return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
+# History-dependent general interactions (e.g. Metadynamics) change during a run
+is_history_dependent(inter) = false
+
+# Minimizers would change history-dependent interactions, e.g. deposit Metadynamics hills
+function check_minimizer_inters(sys, strictness)
+    if any(is_history_dependent, values(sys.general_inters))
+        report_issue("a history-dependent general interaction (e.g. Metadynamics) changes " *
+                     "during minimization; minimize without it", strictness)
+    end
+end
+
+# Updates an interaction at the accepted configuration of a Monte Carlo step; true if it changed
+update_after_step!(inter, sys, step_n; kwargs...) = false
+
 @inline function simulate!(sys::System,
                            sim::MetropolisMonteCarlo,
                            n_steps::Integer;
@@ -3032,6 +3049,8 @@ end
     coords_old = zero(sys.coords)
     check_nan_labels = ("coordinates",)
     check_nans && check_array_nans((sys.coords,), check_nan_labels, init_step)
+    # The interactions don't change during the run, so this is checked once
+    has_history = any(is_history_dependent, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -3055,6 +3074,17 @@ end
             apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
                            strictness=strictness, current_potential_energy=E_old, success=false,
                            energy_rate=(E_old / (sys.k * sim.temperature)))
+        end
+        # History-dependent interactions update at the chain's current configuration
+        if has_history
+            changed = map(inter -> update_after_step!(inter, sys, step_n; strictness),
+                          values(sys.general_inters))
+            if any(changed)
+                # A rejected move left the neighbors of the trial configuration
+                neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+                E_old = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                                         strictness=strictness)
+            end
         end
         check_nans && check_array_nans((sys.coords,), check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)

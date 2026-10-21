@@ -1,3 +1,6 @@
+using Molly: NoTempering, AbstractMetadynamicsMemory, add_hill!, free_energy,
+             metadynamics_log_weights
+
 struct BiasNaNGradient end
 
 Molly.bias_gradient(::BiasNaNGradient, cv_sim) = NaN * u"kJ * mol^-1 * nm^-1"
@@ -16,8 +19,8 @@ struct ConstMemory{C} <: AbstractMetadynamicsMemory
     height::Float64
 end
 
-Molly.potential_energy(m::ConstMemory, cv) = m.height
-Molly.bias_gradient(::ConstMemory, cv) = 0.0
+Molly.potential_energy(m::ConstMemory, cv; kwargs...) = m.height
+Molly.bias_gradient(::ConstMemory, cv; kwargs...) = 0.0
 Molly.add_hill!(::ConstMemory, cv, height) = nothing
 Molly.cv_gradient(::CVNaN, coords, args...; kwargs...) = (zero(coords) ./ oneunit(eltype(eltype(coords))), NaN * u"nm")
 
@@ -817,31 +820,55 @@ end
     @test only(gh_int.bin_width) isa AbstractFloat
     @test isapprox(only(gh_int.bin_width), 0.1; atol=1e-9)
 
-    # Leaving the grid throws an error by default
-    @test_throws ArgumentError potential_energy(gh, 2.5)
-    @test_throws ArgumentError Molly.bias_gradient(gh, -0.5)
-    @test_throws ArgumentError add_hill!(gh, 2.5)
+    # By default leaving the grid follows the strictness passed by the simulation
+    @test gh.out_of_grid == :global_strictness
+    @test_throws ArgumentError potential_energy(gh, 2.5; strictness=:error)
+    @test_throws ArgumentError Molly.bias_gradient(gh, -0.5; strictness=:error)
+    @test_logs potential_energy(gh, 2.5; strictness=:nowarn)
+    @test_throws ArgumentError GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:maybe)
+    # A strictness set on the grid overrides the simulation's
+    gh_err = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:error)
+    @test_throws ArgumentError potential_energy(gh_err, 2.5; strictness=:nowarn)
+    @test_throws ArgumentError add_hill!(gh_err, 2.5)
 
-    # With out_of_grid_error=false the bias warns and is held constant outside the grid,
-    #   so it exerts no force there
-    gh_soft = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid_error=false)
+    # With :warn the bias warns once and is held constant outside the grid, so it exerts
+    #   no force there
+    gh_soft = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:warn)
     add_hill!(gh_soft, 2.0)
-    @test_logs (:warn,) potential_energy(gh_soft, 2.5)
-    # The warning is given once per grid
-    @test_logs potential_energy(gh_soft, 2.6)
-    @test_logs (:warn,) potential_energy(GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5;
-                                                   out_of_grid_error=false), 2.5)
-    @test isapprox(potential_energy(gh_soft, 2.5), potential_energy(gh_soft, 2.0); atol=1e-9)
-    @test Molly.bias_gradient(gh_soft, 2.5) == 0.0
-    @test !iszero(Molly.bias_gradient(gh_soft, 1.9))
+    @test_logs (:warn,) begin
+        potential_energy(gh_soft, 2.5; strictness=:error)
+        potential_energy(gh_soft, 2.6)
+    end
+    # Its own report_issue id, so another warning with maxlog=1 doesn't suppress it
+    @test_logs (:warn, "other") (:warn, r"outside the grid") begin
+        Molly.report_issue("other", :warn; maxlog=1)
+        potential_energy(gh_soft, 2.5)
+    end
+    # Held constant outside the grid; :nowarn on the grid silences it
+    gh_quiet = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:nowarn)
+    add_hill!(gh_quiet, 2.0)
+    @test_logs potential_energy(gh_quiet, 2.5; strictness=:warn)
+    @test isapprox(potential_energy(gh_quiet, 2.5), potential_energy(gh_quiet, 2.0); atol=1e-9)
+    @test Molly.bias_gradient(gh_quiet, 2.5) == 0.0
+    @test !iszero(Molly.bias_gradient(gh_quiet, 1.9))
 
-    gh2d_soft = GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9;
-                          out_of_grid_error=false)
+    gh2d_soft = GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9; out_of_grid=:warn)
     add_hill!(gh2d_soft, (1.0, 1.9))
     grad_out = @test_logs (:warn,) Molly.bias_gradient(gh2d_soft, (1.1, 2.5))
     grad_edge = Molly.bias_gradient(gh2d_soft, (1.1, 2.0))
     @test grad_out[2] == 0.0
     @test isapprox(grad_out[1], grad_edge[1]; atol=1e-9)
+
+    # A bias deposits no hill and records nothing while the CV is outside the grid
+    md_soft = Metadynamics(GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:warn);
+                           logger=MetadynamicsLogger(temperature=300.0))
+    @test_logs (:warn,) add_hill!(md_soft, 2.5)
+    @test all(iszero, md_soft.memory.values)
+    @test md_soft.n_deposits == 0
+    @test isempty(md_soft.logger.steps)
+    add_hill!(md_soft, 1.0)
+    @test md_soft.n_deposits == 1
+    @test length(md_soft.logger.steps) == 1
 end
 
 @testset "Metadynamics default centers" begin
@@ -1266,7 +1293,8 @@ end
     @test metadynamics_weights(lg_r) ≈ metadynamics_weights(md_r.logger)
 
     # A failed deposit records nothing, so the records keep one length
-    md_e = Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11); logger=MetadynamicsLogger(temperature=T))
+    md_e = Metadynamics(GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 11; out_of_grid=:error);
+                        logger=MetadynamicsLogger(temperature=T))
     add_hill!(md_e, 0.5)
     @test_throws ArgumentError add_hill!(md_e, 2.0)
     @test length.((md_e.logger.steps, md_e.logger.offsets, md_e.logger.heights)) == (1, 1, 1)
@@ -1418,6 +1446,28 @@ end
     @test isnothing(Metadynamics(ListHills((dist,), 1.0, 0.1)).logger)
 end
 
+@testset "Metadynamics Monte Carlo" begin
+    # Monte Carlo deposits on the configuration after each accept/reject step
+    cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    bias = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=5)
+    sys = System(
+        atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(1.3, 1.0, 1.0)],
+        boundary=CubicBoundary(3.0),
+        specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=0.3)]),),
+        general_inters=(bias,), force_units=NoUnits, energy_units=NoUnits,
+    )
+    simulator = MetropolisMonteCarlo(temperature=300.0,
+                                     trial_moves=Molly.random_uniform_translation!,
+                                     trial_args=Dict(:shift_size => 0.02))
+    simulate!(sys, simulator, 50; rng=MersenneTwister(1))
+    # Windows open at steps 1, 5, 10, ..., 50
+    @test bias.n_deposits == 11
+    @test bias.last_deposit_step == 50
+    # The last hill is on the final configuration of the chain
+    @test bias.memory.centers[end] ≈ calculate_cv(cv, sys.coords, sys.atoms, sys.boundary)
+end
+
 @testset "Metadynamics step pacing in simulation" begin
     # A ForcesLogger recomputes forces at logged steps, which must not add hills
     atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2]
@@ -1484,6 +1534,19 @@ end
     @test langevin_deposits((n_steps,), 5) == n_steps ÷ 5 + 1
     @test langevin_deposits((n_steps,), 5; loggers=(forces=ForcesLogger(Float64, 1),)) ==
           n_steps ÷ 5 + 1
+
+    # Minimizers report a history-dependent interaction, which they would change
+    minimizer_sys(inters) = System(
+        atoms=atoms, coords=coords, boundary=boundary,
+        specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=0.3)]),),
+        general_inters=inters, force_units=NoUnits, energy_units=NoUnits,
+    )
+    minimizer = SteepestDescentMinimizer(tol=1000.0)
+    @test_logs (:warn, r"minimization") match_mode=:any simulate!(
+        minimizer_sys((Metadynamics(ListHills(cv, 0.1, 0.05)),)), minimizer; strictness=:warn)
+    @test_throws ErrorException simulate!(
+        minimizer_sys((Metadynamics(ListHills(cv, 0.1, 0.05)),)), minimizer; strictness=:error)
+    @test_logs simulate!(minimizer_sys(()), minimizer; strictness=:warn)
 end
 
 @testset "Metadynamics periodic CVs" begin
@@ -1538,7 +1601,7 @@ end
     # Periodic CV values outside the grid are wrapped, open ones still throw
     @test isapprox(potential_energy(gh2, (hill + 2π, 0.5)), potential_energy(gh2, (hill, 0.5));
                    atol=1e-12)
-    @test_throws ArgumentError potential_energy(gh2, (hill, 1.5))
+    @test_throws ArgumentError potential_energy(gh2, (hill, 1.5); strictness=:error)
 
     # A hill wider than the period adds to every grid point exactly once
     gh_wide = GridHills((tor,), 1.0, 4π, -π, π, 10)
