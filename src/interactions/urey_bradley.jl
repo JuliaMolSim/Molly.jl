@@ -106,7 +106,6 @@ or unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of UreyBradley, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::UreyBradleyλ, inter_type) = "inter_UB_$(inter_type)_"
 parameter_fields(::Type{<:UreyBradleyλ}) = parameter_fields(UreyBradley)
 

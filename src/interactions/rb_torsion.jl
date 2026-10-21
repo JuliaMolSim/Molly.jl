@@ -108,7 +108,6 @@ Only compatible with 3D systems.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of RBTorsion, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::RBTorsionλ, inter_type) = "inter_RB_$(inter_type)_"
 parameter_fields(::Type{<:RBTorsionλ}) = parameter_fields(RBTorsion)
 

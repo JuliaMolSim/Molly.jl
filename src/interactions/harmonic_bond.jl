@@ -71,7 +71,6 @@ unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of HarmonicBond, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::HarmonicBondλ, inter_type) = "inter_HB_$(inter_type)_"
 parameter_fields(::Type{<:HarmonicBondλ}) = parameter_fields(HarmonicBond)
 

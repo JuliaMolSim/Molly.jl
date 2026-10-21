@@ -190,7 +190,6 @@ end
 
 is_torsion(::PeriodicTorsionλ) = true
 
-# The keys of PeriodicTorsion, so that a parameter keeps its key in an alchemical system
 parameter_prefix(inter::PeriodicTorsionλ, inter_type) =
     (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
 

@@ -85,7 +85,6 @@ unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of HarmonicAngle, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::HarmonicAngleλ, inter_type) = "inter_HA_$(inter_type)_"
 parameter_fields(::Type{<:HarmonicAngleλ}) = parameter_fields(HarmonicAngle)
 

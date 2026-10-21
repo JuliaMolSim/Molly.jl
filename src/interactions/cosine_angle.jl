@@ -85,7 +85,6 @@ unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of CosineAngle, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::CosineAngleλ, inter_type) = "inter_CA_$(inter_type)_"
 parameter_fields(::Type{<:CosineAngleλ}) = parameter_fields(CosineAngle)
 

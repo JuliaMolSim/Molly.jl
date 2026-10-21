@@ -74,7 +74,6 @@ an error if the scheduler has `dual=false`.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of MorseBond, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::MorseBondλ, inter_type) = "inter_MB_$(inter_type)_"
 parameter_fields(::Type{<:MorseBondλ}) = parameter_fields(MorseBond)
 

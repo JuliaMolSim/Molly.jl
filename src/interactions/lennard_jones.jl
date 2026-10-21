@@ -1403,7 +1403,6 @@ and the pair is coupled like any other Lennard-Jones pair of the alchemical syst
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::LennardJones14Scaled, inter_type) = "inter_LJ14_$(inter_type)_"
 parameter_fields(::Type{<:LennardJones14Scaled}) = parameter_fields(LennardJones14)
 
@@ -1499,7 +1498,6 @@ are those of [`LennardJonesSoftCoreBeutler`](@ref) with the σ and ϵ of the pai
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::LennardJones14SoftCoreBeutler, inter_type) = "inter_LJ14_$(inter_type)_"
 parameter_fields(::Type{<:LennardJones14SoftCoreBeutler}) = parameter_fields(LennardJones14)
 
@@ -1623,7 +1621,6 @@ are those of [`LennardJonesSoftCoreGapsys`](@ref) with the σ and ϵ of the pair
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
-# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
 parameter_prefix(::LennardJones14SoftCoreGapsys, inter_type) = "inter_LJ14_$(inter_type)_"
 parameter_fields(::Type{<:LennardJones14SoftCoreGapsys}) = parameter_fields(LennardJones14)
 
