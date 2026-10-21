@@ -32,7 +32,8 @@ and implement
 and `add_hill!(memory, cv_value, height)`, where `cv_value` is a scalar for one CV and a tuple
 for several. The keyword arguments include the `strictness` of the simulation.
 Subtypes that support periodic CVs take the periods from [`cv_period`](@ref) in their
-constructor. Optionally, they implement [`bias_points_cache`](@ref) and
+constructor. Optionally, they implement [`can_deposit`](@ref)`(memory, cv_value; kwargs...)`
+to skip hills (e.g. outside a grid), and [`bias_points_cache`](@ref) with
 [`bias_at_points`](@ref) for a cheaper offset of a [`MetadynamicsLogger`](@ref).
 Built-in subtypes are [`ListHills`](@ref) and [`GridHills`](@ref).
 """
@@ -211,9 +212,10 @@ practical for a handful of CVs (2-3); use [`ListHills`](@ref) for more.
     per dimension.
 - `cutoff=6`: Standard deviations beyond which a deposited hill's contribution is ignored.
 - `out_of_grid::Symbol=:global_strictness`: What a CV value outside `[grid_min, grid_max]`
-    does: `:error` throws, `:warn` warns once and `:nowarn` is silent. Without an error, the
-    bias is held constant at its edge value outside the grid: it exerts no force there, and
-    no hills are deposited. `:global_strictness` follows the `strictness` of the simulation.
+    does: `:error` throws, `:warn` warns once per grid and CV and `:nowarn` is silent. Without an
+    error, the bias is held at its edge value along a CV outside the grid, so it exerts no
+    force along that CV, and no hills are deposited. With several CVs, the others still feel
+    the bias at the edge. `:global_strictness` follows the `strictness` of the simulation.
 - `derivatives::Symbol=:stored`: Source of the derivatives at the grid points used by the
     interpolation. `:stored` accumulates the exact derivatives of every deposited hill, which
     needs `2^N` times the memory of the grid values and makes deposits slower. `:estimated`
@@ -334,21 +336,24 @@ function check_in_grid(mem::GridHills, cv_sim; strictness=default_strictness())
     for d in eachindex(mem.grid_min)
         in_grid(mem, d, cv_sim[d]) && continue
         msg = "GridHills CV value $(cv_sim[d]) in dimension $d is outside the grid " *
-              "[$(mem.grid_min[d]), $(mem.grid_max[d])]; no force and no hills while " *
-              "outside it. Widen the grid or add walls to confine the CV"
-        report_issue(msg, level; error_type=ArgumentError, maxlog=1, id=:metadynamics_out_of_grid)
+              "[$(mem.grid_min[d]), $(mem.grid_max[d])]; no force along this CV and no hills " *
+              "while outside the grid. Widen the grid or add walls to confine the CV"
+        # Per grid and CV; a deepcopy has a new array and warns on its own
+        report_issue(msg, level; error_type=ArgumentError, maxlog=1,
+                     id=(:metadynamics_out_of_grid, objectid(mem.values), d))
     end
     return nothing
 end
 
 """
-    can_deposit(memory, cv_value; strictness=Molly.default_strictness())
+    can_deposit(memory, cv_value; kwargs...)
 
 Whether a hill may be deposited into `memory` at `cv_value`. `true` by default;
-a [`GridHills`](@ref) deposits nothing outside its grid. Custom memories can add a method.
+a [`GridHills`](@ref) deposits nothing outside its grid. Custom memories can add a method,
+which must accept keyword arguments (e.g. `strictness`).
 """
 can_deposit(mem, cv_value; kwargs...) = true
-function can_deposit(mem::GridHills, cv_value; strictness=default_strictness())
+function can_deposit(mem::GridHills, cv_value; strictness=default_strictness(), kwargs...)
     check_in_grid(mem, cv_value; strictness) # Errors or warns as for the force
     return all(d -> in_grid(mem, d, to_dims(cv_value)[d]), eachindex(mem.grid_min))
 end
@@ -443,7 +448,7 @@ end
 # Partial derivative of the interpolant along each dimension (chain rule through
 # frac_d = (cv_sim[d] - grid_min[d]) / bin_width[d]). Collapses to a scalar for a 1D grid.
 # Zero along dimensions where cv_sim is outside the grid, matching the clamped energy.
-function bias_gradient(mem::GridHills, cv_sim; strictness=default_strictness())
+function bias_gradient(mem::GridHills, cv_sim; strictness=default_strictness(), kwargs...)
     check_in_grid(mem, cv_sim; strictness)
     grad = last(grid_value_gradient(mem, cv_sim))
     return from_dims(ntuple(length(grad)) do d
@@ -472,7 +477,7 @@ end
 
 function add_hill!(mem::GridHills{<:Any, <:Any, <:Any, <:NTuple{N, Any}}, cv_value,
                    height=mem.height) where N
-    check_in_grid(mem, cv_value)
+    can_deposit(mem, cv_value) || return nothing # No hills outside a non-periodic grid
     ranges = ntuple(d -> hill_index_range(mem, d, cv_value), Val(N))
     # The Gaussian and its derivative factors (scaled by bin width) separate by dimension, so
     #   they are computed once per grid line
@@ -505,8 +510,8 @@ Controls how the height of each newly deposited hill is scaled before being adde
 
 Subtypes must implement [`Molly.tempering_height`](@ref), the height to actually deposit,
 and [`Molly.free_energy_scale`](@ref), the prefactor of the free energy estimate.
-Temperings with a temperature can add a method to `Molly.default_temperature(tempering)`,
-so its units are checked when the bias is built and loggers default to it.
+A [`MetadynamicsLogger`](@ref) takes its temperature from [`WellTempered`](@ref), or from
+its `temperature` keyword for other temperings.
 
 Built-in subtypes are [`NoTempering`](@ref) (the default) and
 [`WellTempered`](@ref).
@@ -613,8 +618,8 @@ continuous run, with or without `init_step`, as long as a bias uses one of the t
 throughout: mixing them, or calling `forces(sys)` between runs and then continuing with
 `init_step`, shifts the schedule. Energy minimizers also count as
 steps and warn, so minimize without the bias. The number of hills deposited so far is
-`bias.n_deposits` and the step of the last automatic deposit is
-`bias.last_deposit_step`.
+`bias.n_deposits` and the step of the last deposit window is `bias.last_deposit_step`
+(outside a [`GridHills`](@ref) grid that window adds no hill).
 
 [`add_hill!`](@ref) deposits a hill manually. Force evaluations outside a simulator, e.g.
 `AtomsCalculators.forces(sys, bias)` or `energy_forces`, have no step number and count
@@ -667,7 +672,8 @@ end
     add_hill!(md::Metadynamics, cv_value; k=Molly.default_k(unit(md.memory.height)))
     add_hill!(md::Metadynamics, sys)
 
-Deposit a new Gaussian hill.
+Deposit a new Gaussian hill. A [`GridHills`](@ref) deposits nothing while a CV is outside
+its grid.
 
 Called automatically from `forces!` during a simulation -- there is usually no need to call
 this directly.
@@ -703,11 +709,12 @@ end
 
 is_history_dependent(::Metadynamics) = true
 
-# Monte Carlo deposits on the configuration after the accept/reject step
+# Monte Carlo deposits on the configuration after the accept/reject step. Only the kT check
+#   precedes the pacing; the CVs are evaluated on deposit steps only.
 function update_after_step!(md::Metadynamics, sys, step_n; strictness=default_strictness())
-    cv_sim = check_bias_finite(evaluate_metadynamics_cvs(md, sys), "collective variable", md)
     check_logger_kT(md.logger, md, sys.k)
     should_deposit_hill!(md, step_n) || return false
+    cv_sim = check_bias_finite(evaluate_metadynamics_cvs(md, sys), "collective variable", md)
     return deposit_hill!(md, cv_sim, step_n, sys.k; strictness)
 end
 

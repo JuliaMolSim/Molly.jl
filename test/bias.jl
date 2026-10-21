@@ -831,8 +831,7 @@ end
     @test_throws ArgumentError potential_energy(gh_err, 2.5; strictness=:nowarn)
     @test_throws ArgumentError add_hill!(gh_err, 2.5)
 
-    # With :warn the bias warns once and is held constant outside the grid, so it exerts
-    #   no force there
+    # With :warn each grid warns once; the bias is held at its edge value, so no force along the CV
     gh_soft = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:warn)
     add_hill!(gh_soft, 2.0)
     @test_logs (:warn,) begin
@@ -851,13 +850,35 @@ end
     @test isapprox(potential_energy(gh_quiet, 2.5), potential_energy(gh_quiet, 2.0); atol=1e-9)
     @test Molly.bias_gradient(gh_quiet, 2.5) == 0.0
     @test !iszero(Molly.bias_gradient(gh_quiet, 1.9))
+    # A hill outside the grid isn't deposited, not even its tails at the edge
+    hermite_before = copy.(gh_quiet.hermite)
+    add_hill!(gh_quiet, 2.5)
+    @test all(gh_quiet.hermite .== hermite_before)
+    # Each grid warns once, a deepcopy too
+    gh_soft_2 = GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:warn)
+    gh_soft_3 = deepcopy(gh_soft_2)
+    @test gh_soft_3.values === gh_soft_3.hermite[1]
+    @test_logs (:warn, r"outside the grid") (:warn, r"outside the grid") (:warn, r"outside the grid") begin
+        for gh_w in (gh_soft, gh_soft_2, gh_soft_3)
+            potential_energy(gh_w, 2.5)
+            potential_energy(gh_w, 2.6)
+        end
+    end
 
+    # With several CVs only the CV outside the grid feels no force; the others feel the
+    #   bias at the edge
     gh2d_soft = GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9; out_of_grid=:warn)
     add_hill!(gh2d_soft, (1.0, 1.9))
     grad_out = @test_logs (:warn,) Molly.bias_gradient(gh2d_soft, (1.1, 2.5))
     grad_edge = Molly.bias_gradient(gh2d_soft, (1.1, 2.0))
     @test grad_out[2] == 0.0
     @test isapprox(grad_out[1], grad_edge[1]; atol=1e-9)
+    # Each CV leaving the grid warns once
+    @test_logs (:warn, r"dimension 1") (:warn, r"dimension 2") begin
+        potential_energy(gh2d_soft, (2.5, 1.0))
+        potential_energy(gh2d_soft, (2.6, 1.0))
+        potential_energy(gh2d_soft, (1.0, 2.5))
+    end
 
     # A bias deposits no hill and records nothing while the CV is outside the grid
     md_soft = Metadynamics(GridHills(one_cv, 1.0, 0.2, 0.0, 2.0, 5; out_of_grid=:warn);
@@ -1535,6 +1556,9 @@ end
     pacing = (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step)
     @test_throws ArgumentError forces(sys_d, find_neighbors(sys_d), 2)
     @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
+    # Monte Carlo also checks kT before the pacing
+    @test_throws ArgumentError Molly.update_after_step!(md_k, sys_d, 3)
+    @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
 
     # NoTempering needs kT and ListHills needs cv_points; no logger by default
     @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
@@ -1564,6 +1588,26 @@ end
     @test bias.last_deposit_step == 50
     # The last hill is on the final configuration of the chain
     @test bias.memory.centers[end] ≈ calculate_cv(cv, sys.coords, sys.atoms, sys.boundary)
+
+    # The energy of the current configuration is recomputed after a deposit: with moves that
+    #   change nothing, the energy difference stays zero and every move is accepted, while a
+    #   stale energy would reject moves after each 10 kT hill
+    bias_high = Metadynamics(ListHills(cv, 10 * Molly.default_k(NoUnits) * 300.0, 0.05); n_steps=5)
+    sys_fixed = System(sys; general_inters=(bias_high,), loggers=(mc=MonteCarloLogger(),))
+    simulator_fixed = MetropolisMonteCarlo(temperature=300.0, trial_moves=(sys; kwargs...) -> nothing,
+                                           trial_args=Dict())
+    simulate!(sys_fixed, simulator_fixed, 20; n_threads=1, rng=MersenneTwister(1))
+    @test bias_high.n_deposits == 5
+    @test all(sys_fixed.loggers.mc.state_changed)
+
+    # A forces logger runs after the history update, so it never deposits
+    bias_log = Metadynamics(ListHills(cv, 10 * Molly.default_k(NoUnits) * 300.0, 0.05); n_steps=5)
+    sys_log = System(sys; general_inters=(bias_log,),
+                     loggers=(mc=MonteCarloLogger(), f=ForcesLogger(Float64, 5)))
+    simulate!(sys_log, simulator_fixed, 20; n_threads=1, rng=MersenneTwister(1))
+    @test bias_log.n_deposits == 5
+    @test all(sys_log.loggers.mc.state_changed)
+    @test length(values(sys_log.loggers.f)) == 4
 end
 
 @testset "Metadynamics REMD" begin

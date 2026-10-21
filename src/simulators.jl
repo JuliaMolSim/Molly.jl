@@ -3079,28 +3079,27 @@ update_after_step!(inter, sys, step_n; kwargs...) = false
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)
-        if δ < 0 || (rand(rng) < exp(-δ))
-            apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
-                           strictness=strictness, current_potential_energy=E_new, success=true,
-                           energy_rate=(E_new / (sys.k * sim.temperature)))
+        accepted = δ < 0 || (rand(rng) < exp(-δ))
+        if accepted
             E_old = E_new
         else
             sys.coords .= coords_old
-            apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
-                           strictness=strictness, current_potential_energy=E_old, success=false,
-                           energy_rate=(E_old / (sys.k * sim.temperature)))
         end
-        # History-dependent interactions update at the chain's current configuration
+        # History updates run before the loggers, so a logger's force call never deposits
         if has_history
             changed = map(inter -> update_after_step!(inter, sys, step_n; strictness),
                           values(sys.general_inters))
             if any(changed)
-                # A rejected move left the neighbors of the trial configuration
-                neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+                if !accepted # A rejected move left the neighbors of the trial configuration
+                    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+                end
                 E_old = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                          strictness=strictness)
             end
         end
+        apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
+                       strictness=strictness, current_potential_energy=E_old, success=accepted,
+                       energy_rate=(E_old / (sys.k * sim.temperature)))
         check_nans && check_array_nans((sys.coords,), check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)
             break
