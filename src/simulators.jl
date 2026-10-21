@@ -2651,6 +2651,19 @@ function remd_unshared(items)
     end
 end
 
+# remd_unshared would copy a history-dependent interaction used in several states, losing its updates
+function check_remd_history_inters(sys::ReplicaSystem)
+    seen = Base.IdSet{Any}()
+    for inters in sys.state_general_inters, inter in values(inters)
+        is_history_dependent(inter) || continue
+        if inter in seen
+            throw(ArgumentError("the same history-dependent general interaction (e.g. Metadynamics) " *
+                                "is used in more than one REMD state; give each state its own"))
+        end
+        push!(seen, inter)
+    end
+end
+
 # Attempt exchanges between neighbouring states, alternating which pairs are tried every cycle
 function remd_exchange_sweep!(sys::ReplicaSystem, remd_sim::ReplicaExchangeMD, cycle::Integer,
                               step_n::Integer, run_loggers, n_threads::Integer, rng)
@@ -2733,6 +2746,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         rng=Random.default_rng(),
                         strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_remd_history_inters(sys)
     if rng != Random.default_rng()
         throw(ArgumentError("rng for simulate_remd! must be Random.default_rng() " *
                             "to avoid race conditions"))
@@ -2817,6 +2831,7 @@ function simulate_remd!(sys::ReplicaSystem{<:Any, <:AbstractGPUArray},
                         strictness=default_strictness(),
                         gpu_devices=get_gpu_devices(Val(true)))
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_remd_history_inters(sys)
     if rng != Random.default_rng()
         throw(ArgumentError("rng for simulate_remd! must be Random.default_rng() " *
                             "to avoid race conditions"))

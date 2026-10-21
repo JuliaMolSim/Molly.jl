@@ -2738,4 +2738,6 @@ The file has the columns step, CV values, bias, offset, hill height and log weig
 Base.flush(::MetadynamicsLogger)
 ```
 
+With [`ReplicaExchangeMD`](@ref), give each [`ThermoState`](@ref) its own `Metadynamics`. Each state then builds its own bias, and exchanges are evaluated with the current bias of each state. Sharing hills between replicas (multiple walkers) is not supported yet, so using the same `Metadynamics` object in more than one state throws an error.
+
 For full worked examples with plots -- comparing tempered against untempered sampling, and the histogram of the well-tempered run reweighted with these weights against the analytical equilibrium distribution -- see `scripts/metadynamics_bond_recovery_plots.jl`.

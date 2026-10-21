@@ -1468,6 +1468,43 @@ end
     @test bias.memory.centers[end] ≈ calculate_cv(cv, sys.coords, sys.atoms, sys.boundary)
 end
 
+@testset "Metadynamics REMD" begin
+    # Each state has its own bias, deposited into the user's objects
+    atoms = [Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:2]
+    coords = [SVector(4.5, 5.0, 5.0)u"nm", SVector(5.5, 5.0, 5.0)u"nm"]
+    boundary = CubicBoundary(10.0u"nm")
+    sils = (InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0u"kJ * mol^-1 * nm^-2",
+                                                          r0=1.0u"nm")]),)
+    cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    function remd_system(mds)
+        states = map(zip(mds, [250.0u"K", 350.0u"K"])) do (md, temp)
+            sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                         specific_inter_lists=sils, general_inters=(md,))
+            intg = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
+            ThermoState(sys, intg; temperature=temp)
+        end
+        return ReplicaSystem(states, [copy(coords) for _ in 1:2])
+    end
+    simulator = ReplicaExchangeMD(dt=0.002u"ps", exchange_time=0.2u"ps")
+
+    mds = [Metadynamics(ListHills(cv, 0.5u"kJ * mol^-1", 0.05u"nm"); n_steps=10) for _ in 1:2]
+    repsys = remd_system(mds)
+    simulate!(repsys, simulator, 500; assign_velocities=true, n_threads=1)
+    @test all(md -> md.n_deposits == 51, mds)
+    # Pacing continues across calls
+    simulate!(repsys, simulator, 500; n_threads=1)
+    @test all(md -> md.n_deposits == 101, mds)
+    @test all(md -> length(md.memory.heights) == md.n_deposits, mds)
+    @test repsys.exchange_logger.n_attempts > 0
+    s = (1.0u"nm",)
+    @test Molly.potential_energy(mds[1].memory, s) != Molly.potential_energy(mds[2].memory, s)
+
+    # A bias shared between states would lose the hills of all but one state
+    md_shared = Metadynamics(ListHills(cv, 0.5u"kJ * mol^-1", 0.05u"nm"); n_steps=10)
+    @test_throws ArgumentError simulate!(remd_system([md_shared, md_shared]), simulator, 10;
+                                         n_threads=1)
+end
+
 @testset "Metadynamics step pacing in simulation" begin
     # A ForcesLogger recomputes forces at logged steps, which must not add hills
     atoms = [Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2]
