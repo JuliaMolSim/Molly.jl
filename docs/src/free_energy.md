@@ -693,7 +693,7 @@ $$\Delta\Delta G = \Delta G_{bind}(B) - \Delta G_{bind}(A) = \Delta G_{bound}(A 
 
 ## Thermodynamic cycles
 
-A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`Leg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`Molly.free_energy`](@ref) returns
+A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`ThermodynamicCycleLeg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`Molly.free_energy`](@ref) returns
 
 $$\Delta G = \sum_i c_i \Delta F_i + \Delta G_\text{correction}$$
 
@@ -703,8 +703,8 @@ For the benzene hydration free energy of the TSS example below, where state 1 is
 
 ```julia
 ΔG_hyd = ThermodynamicCycle(
-    Leg(tss_state_vac,  N_LAMBDA_STATES => 1; coefficient=+1, name=:vacuum),
-    Leg(tss_state_solv, N_LAMBDA_STATES => 1; coefficient=-1, name=:solvated),
+    ThermodynamicCycleLeg(tss_state_vac,  N_LAMBDA_STATES => 1; coefficient=+1, name=:vacuum),
+    ThermodynamicCycleLeg(tss_state_solv, N_LAMBDA_STATES => 1; coefficient=-1, name=:solvated),
 )
 Molly.free_energy(ΔG_hyd)             # kJ mol^-1
 Molly.free_energy_uncertainty(ΔG_hyd) # Jackknife standard errors of the legs, combined

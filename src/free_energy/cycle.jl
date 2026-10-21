@@ -1,5 +1,5 @@
 export
-    Leg,
+    ThermodynamicCycleLeg,
     ThermodynamicCycle
 
 @public free_energy,
@@ -9,40 +9,7 @@ export
     standard_state_correction
 
 """
-    free_energy_difference(source, i, j)
-
-Free-energy difference ``F_j - F_i`` between states `i` and `j` of a leg source, in
-energy units.
-
-States are given by index or by [`ThermoState`](@ref) name. This is the interface a
-[`Leg`](@ref) source implements, together with
-[`Molly.free_energy_difference_uncertainty`](@ref). Molly implements it for:
-- [`TSSState`](@ref), from [`Molly.tss_free_energies`](@ref), with the jackknife
-  standard error of [`Molly.tss_free_energy_uncertainties`](@ref);
-- [`AWHState`](@ref), from its current free energies `f`. AWH has no uncertainty
-  estimate, so `Molly.free_energy_difference_uncertainty` raises an error;
-- [`Molly.MBARResult`](@ref), the MBAR estimate for umbrella sampling, REMD or any
-  other set of samples, with its asymptotic standard error;
-- a `PMF` from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), between two
-  bins given by linear index. The PMF must have been computed with `kBT`. The
-  uncertainty, when the PMF has one, treats the two bins as independent, an approximation
-  that can be too large or too small since the bins share the normalisation.
-
-States of a [`TSSState`](@ref), an [`AWHState`](@ref) or an [`Molly.MBARResult`](@ref)
-built from [`ThermoState`](@ref)s are converted with ``k_B T`` of the states; both must
-have the same temperature.
-"""
-function free_energy_difference end
-
-"""
-    free_energy_difference_uncertainty(source, i, j)
-
-Standard error of [`Molly.free_energy_difference`](@ref)`(source, i, j)`, in energy units.
-"""
-function free_energy_difference_uncertainty end
-
-"""
-    Leg(source, from => to; coefficient=1.0, name=Symbol(""))
+    ThermodynamicCycleLeg(source, from => to; coefficient=1.0, name=Symbol(""))
 
 One leg of a [`ThermodynamicCycle`](@ref): the free-energy difference
 ``F_\\text{to} - F_\\text{from}`` reported by `source`, multiplied by `coefficient`
@@ -53,7 +20,7 @@ object that implements [`Molly.free_energy_difference`](@ref) and
 [`Molly.free_energy_difference_uncertainty`](@ref), such as a [`TSSState`](@ref), an
 [`AWHState`](@ref), a [`Molly.MBARResult`](@ref) or a PMF.
 """
-struct Leg{S, I, J}
+struct ThermodynamicCycleLeg{S, I, J}
     source::S
     from::I
     to::J
@@ -61,7 +28,7 @@ struct Leg{S, I, J}
     name::Symbol
 end
 
-function Leg(source, states::Pair; coefficient::Real=1.0, name::Symbol=Symbol(""))
+function ThermodynamicCycleLeg(source, states::Pair; coefficient::Real=1.0, name::Symbol=Symbol(""))
     from, to = states
     for state in (from, to)
         if !(state isa Union{Integer, AbstractString}) || state isa Bool
@@ -69,11 +36,11 @@ function Leg(source, states::Pair; coefficient::Real=1.0, name::Symbol=Symbol(""
                                 "got $(repr(state))"))
         end
     end
-    return Leg(source, from, to, Float64(coefficient), name)
+    return ThermodynamicCycleLeg(source, from, to, Float64(coefficient), name)
 end
 
 """
-    ThermodynamicCycle(legs::Leg...; correction=nothing)
+    ThermodynamicCycle(legs::ThermodynamicCycleLeg...; correction=nothing)
 
 A free energy composed from the free-energy differences of several legs.
 
@@ -94,12 +61,12 @@ struct ThermodynamicCycle{L <: Tuple, C}
     correction::C
 end
 
-function ThermodynamicCycle(legs::Leg...; correction=nothing)
+function ThermodynamicCycle(legs::ThermodynamicCycleLeg...; correction=nothing)
     isempty(legs) && throw(ArgumentError("a ThermodynamicCycle needs at least one leg"))
     return ThermodynamicCycle(legs, correction)
 end
 
-leg_label(leg::Leg, i) = (leg.name == Symbol("") ? "leg $i" : "leg $i ($(leg.name))")
+leg_label(leg::ThermodynamicCycleLeg, i) = (leg.name == Symbol("") ? "leg $i" : "leg $i ($(leg.name))")
 
 # Every leg value and the correction must have the same dimension
 function check_cycle_units(cycle::ThermodynamicCycle, values, what)
@@ -187,13 +154,40 @@ function state_space_pair_kBT(space::ExtendedStateSpace, i, j)
     return i, j, check_same_temperature(kBT(i), kBT(j), i, j)
 end
 
-# The current estimate, from Molly.tss_free_energies
+"""
+    free_energy_difference(source, i, j)
+
+Free-energy difference ``F_j - F_i`` between states `i` and `j` of a leg source, in
+energy units.
+
+States are given by index or by [`ThermoState`](@ref) name. This is the interface a
+[`ThermodynamicCycleLeg`](@ref) source implements, together with
+[`Molly.free_energy_difference_uncertainty`](@ref). Molly implements it for:
+- [`TSSState`](@ref), from [`Molly.tss_free_energies`](@ref), with the jackknife
+  standard error of [`Molly.tss_free_energy_uncertainties`](@ref);
+- [`AWHState`](@ref), from its current free energies `f`. AWH has no uncertainty
+  estimate, so `Molly.free_energy_difference_uncertainty` raises an error;
+- [`Molly.MBARResult`](@ref), the MBAR estimate for umbrella sampling, REMD or any
+  other set of samples, with its asymptotic standard error;
+- a `PMF` from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), between two
+  bins given by linear index. The PMF must have been computed with `kBT`. The
+  uncertainty, when the PMF has one, treats the two bins as independent, an approximation
+  that can be too large or too small since the bins share the normalisation.
+
+States of a [`TSSState`](@ref), an [`AWHState`](@ref) or an [`Molly.MBARResult`](@ref)
+built from [`ThermoState`](@ref)s are converted with ``k_B T`` of the states; both must
+have the same temperature.
+"""
 function free_energy_difference(state::TSSState, i, j)
     i, j, kBT = state_space_pair_kBT(state.state_space, i, j)
     return tss_free_energies(state; reference_state=i)[j] * kBT
 end
 
-# The jackknife standard error, from Molly.tss_free_energy_uncertainties
+"""
+    free_energy_difference_uncertainty(source, i, j)
+
+Standard error of [`Molly.free_energy_difference`](@ref)`(source, i, j)`, in energy units.
+"""
 function free_energy_difference_uncertainty(state::TSSState, i, j)
     i, j, kBT = state_space_pair_kBT(state.state_space, i, j)
     return tss_free_energy_uncertainties(state; reference_state=i).standard_errors[j] * kBT

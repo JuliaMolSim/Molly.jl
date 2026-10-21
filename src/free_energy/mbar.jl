@@ -1064,7 +1064,7 @@ and [`Molly.free_energy_difference_uncertainty`](@ref) return values in energy u
 - `input::MBARInput` - the output of [`Molly.assemble_mbar_inputs`](@ref) for `states`.
 
 # Keyword arguments
-- `names=nothing` - state names, used to refer to states by name in a [`Leg`](@ref).
+- `names=nothing` - state names, used to refer to states by name in a [`ThermodynamicCycleLeg`](@ref).
 - `rtol` and `max_iter` - passed to [`Molly.iterate_mbar`](@ref).
 
 # Fields

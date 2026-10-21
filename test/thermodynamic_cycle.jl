@@ -81,8 +81,8 @@ end
         src_a = ToyFreeEnergies([0.0, 2.0, 5.0]u"kJ/mol", [0.0, 0.3, 0.4]u"kJ/mol")
         src_b = ToyFreeEnergies([1.0, -3.0]u"kJ/mol", [0.1, 0.2]u"kJ/mol")
         cycle = ThermodynamicCycle(
-            Leg(src_a, 1 => 3; name=:a),
-            Leg(src_b, 2 => 1; coefficient=-2, name=:b);
+            ThermodynamicCycleLeg(src_a, 1 => 3; name=:a),
+            ThermodynamicCycleLeg(src_b, 2 => 1; coefficient=-2, name=:b);
             correction=1.5u"kJ/mol",
         )
         @test length(cycle.legs) == 2
@@ -93,31 +93,32 @@ end
 
         # Compatible units are converted to the units of the first leg
         src_kcal = ToyFreeEnergies([0.0, 1.0]u"kcal/mol", [0.0, 0.5]u"kcal/mol")
-        mixed = ThermodynamicCycle(Leg(src_a, 1 => 2), Leg(src_kcal, 1 => 2);
+        mixed = ThermodynamicCycle(ThermodynamicCycleLeg(src_a, 1 => 2),
+                                   ThermodynamicCycleLeg(src_kcal, 1 => 2);
                                    correction=1.0u"kcal/mol")
         @test unit(Molly.free_energy(mixed)) == u"kJ/mol"
         @test Molly.free_energy(mixed) ≈ (2.0 + 2 * 4.184)u"kJ/mol"
         @test Molly.free_energy_uncertainty(mixed) ≈ hypot(0.3, 0.5 * 4.184)u"kJ/mol"
 
         # Without a correction, unitless sources work too
-        unitless = ThermodynamicCycle(Leg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 2 => 1))
+        unitless = ThermodynamicCycle(ThermodynamicCycleLeg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 2 => 1))
         @test Molly.free_energy(unitless) ≈ -3.0
         @test Molly.free_energy_uncertainty(unitless) ≈ 0.4
 
         @test_throws ArgumentError ThermodynamicCycle()
-        @test_throws ArgumentError Leg(src_a, 1.0 => 2)
-        @test_throws ArgumentError Leg(src_a, 1 => :b)
-        @test_throws ArgumentError Leg(src_a, true => 2)
+        @test_throws ArgumentError ThermodynamicCycleLeg(src_a, 1.0 => 2)
+        @test_throws ArgumentError ThermodynamicCycleLeg(src_a, 1 => :b)
+        @test_throws ArgumentError ThermodynamicCycleLeg(src_a, true => 2)
         src_nm = ToyFreeEnergies([0.0, 1.0]u"nm", [0.0, 0.1]u"nm")
-        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2),
-                                                                        Leg(src_nm, 1 => 2)))
-        @test_throws ArgumentError Molly.free_energy_uncertainty(
-                                        ThermodynamicCycle(Leg(src_a, 1 => 2),
-                                                           Leg(src_nm, 1 => 2)))
-        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2);
-                                                                        correction=1.0u"K"))
         @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(
-                        Leg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 1 => 2);
+            ThermodynamicCycleLeg(src_a, 1 => 2), ThermodynamicCycleLeg(src_nm, 1 => 2)))
+        @test_throws ArgumentError Molly.free_energy_uncertainty(
+                                        ThermodynamicCycle(ThermodynamicCycleLeg(src_a, 1 => 2),
+                                                           ThermodynamicCycleLeg(src_nm, 1 => 2)))
+        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(
+            ThermodynamicCycleLeg(src_a, 1 => 2); correction=1.0u"K"))
+        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(
+                        ThermodynamicCycleLeg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 1 => 2);
                         correction=1.0u"kJ/mol"))
     end
 
@@ -142,8 +143,8 @@ end
         @test Molly.free_energy_difference(vac, "coupled", "s2") ≈ -5.0 * kBT
 
         cycle = ThermodynamicCycle(
-            Leg(vac, "coupled" => "decoupled"; name=:vacuum),
-            Leg(solv, 4 => 1; coefficient=-1, name=:solvated);
+            ThermodynamicCycleLeg(vac, "coupled" => "decoupled"; name=:vacuum),
+            ThermodynamicCycleLeg(solv, 4 => 1; coefficient=-1, name=:solvated);
             correction=Molly.standard_state_correction(298.0u"K", 1u"bar"),
         )
         jk_vac = Molly.tss_free_energy_uncertainties(vac)
@@ -177,7 +178,7 @@ end
         @test_throws ArgumentError Molly.free_energy_difference(mixed, 1, 4)
         @test_throws ArgumentError Molly.free_energy_difference_uncertainty(mixed, 1, 4)
         # Legs at different temperatures combine, each with its own kBT
-        two_temps = ThermodynamicCycle(Leg(mixed, 1 => 2), Leg(mixed, 3 => 4))
+        two_temps = ThermodynamicCycle(ThermodynamicCycleLeg(mixed, 1 => 2), ThermodynamicCycleLeg(mixed, 3 => 4))
         @test Molly.free_energy(two_temps) ≈ 1.0 * kBT +
                                              3.0 * uconvert(u"kJ/mol", Unitful.R * 310.0u"K")
     end
@@ -188,7 +189,7 @@ end
         awh.f .= [0.0, 1.0, 3.0, 6.0]
         kBT = uconvert(u"kJ/mol", Unitful.R * 298.0u"K")
         @test Molly.free_energy_difference(awh, "d", "a") ≈ -6.0 * kBT
-        cycle = ThermodynamicCycle(Leg(awh, 1 => 4), Leg(awh, 2 => 3; coefficient=-1))
+        cycle = ThermodynamicCycle(ThermodynamicCycleLeg(awh, 1 => 4), ThermodynamicCycleLeg(awh, 2 => 3; coefficient=-1))
         @test Molly.free_energy(cycle) ≈ 4.0 * kBT
         @test_throws ArgumentError Molly.free_energy_difference_uncertainty(awh, 1, 4)
         @test_throws ArgumentError Molly.free_energy_uncertainty(cycle)
