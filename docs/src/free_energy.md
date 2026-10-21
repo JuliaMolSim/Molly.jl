@@ -691,6 +691,49 @@ The relative binding free energy is calculated using the thermodynamic cycle clo
 
 $$\Delta\Delta G = \Delta G_{bind}(B) - \Delta G_{bind}(A) = \Delta G_{bound}(A \to B) - \Delta G_{solv}(A \to B)$$
 
+## Thermodynamic cycles
+
+A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`ThermodynamicCycleLeg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`Molly.free_energy`](@ref) returns
+
+$$\Delta G = \sum_i c_i \Delta F_i + \Delta G_\text{correction}$$
+
+where the correction is an analytic term: a standard-state correction, the release of restraints or a long-range correction. [`Molly.free_energy_uncertainty`](@ref) returns $\sqrt{\sum_i c_i^2 \sigma_i^2}$, which assumes that the legs are independent, e.g. that they come from separate simulations. Both are in energy units.
+
+For the benzene hydration free energy of the TSS example below, where state 1 is decoupled and the last state is coupled, the annihilation free energy of each leg is $F_1 - F_\text{end}$:
+
+```julia
+ΔG_hyd = ThermodynamicCycle(
+    ThermodynamicCycleLeg(tss_state_vac,  N_LAMBDA_STATES => 1; coefficient=+1, name=:vacuum),
+    ThermodynamicCycleLeg(tss_state_solv, N_LAMBDA_STATES => 1; coefficient=-1, name=:solvated),
+)
+Molly.free_energy(ΔG_hyd)             # kJ mol^-1
+Molly.free_energy_uncertainty(ΔG_hyd) # Jackknife standard errors of the legs, combined
+```
+
+The alchemical cycle gives the transfer free energy at equal concentrations in the gas and in the solution. [`Molly.standard_state_correction`](@ref) converts it to a gas at pressure $P$ and a solution at concentration $c$ (1 M by default), adding $k_B T \ln(v_\text{gas} / v_\text{std})$ with $v_\text{gas} = k_B T / P$ and $v_\text{std} = 1 / (c N_A)$:
+
+```julia
+ΔG_hyd° = ThermodynamicCycle(ΔG_hyd.legs...; correction=Molly.standard_state_correction(T0, P0))
+```
+
+A leg source implements [`Molly.free_energy_difference`](@ref)`(source, i, j)`, which returns $F_j - F_i$ in energy units, and [`Molly.free_energy_difference_uncertainty`](@ref)`(source, i, j)`. Molly implements them for:
+- [`TSSState`](@ref): the free energies of [`Molly.tss_free_energies`](@ref), with the jackknife standard errors of [`Molly.tss_free_energy_uncertainties`](@ref);
+- [`AWHState`](@ref): the free energies `f`. AWH has no uncertainty estimate, so [`Molly.free_energy_uncertainty`](@ref) raises an error for a cycle with an AWH leg;
+- [`Molly.MBARResult`](@ref): MBAR free energies with their asymptotic standard errors, for umbrella sampling, REMD or any other set of samples, e.g. `Molly.MBARResult(Molly.assemble_mbar_inputs(coords_k, boundaries_k, thermo_states), thermo_states)`;
+- a PMF from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), computed with `kBT`, between two bins given by index. The uncertainty treats the two bins as independent, an approximation that can be too large or too small since the bins share the normalisation.
+
+The dimensionless free energies of these sources are converted with $k_B T$ of the leg's states. The two states of a leg must therefore have the same temperature, otherwise an error is raised; legs at different temperatures can be combined in one cycle. Any other object can be a leg source by adding methods to the two functions:
+
+```julia
+struct MyEstimate
+    F::Vector{typeof(1.0u"kJ/mol")}
+    σ::Vector{typeof(1.0u"kJ/mol")}
+end
+
+Molly.free_energy_difference(e::MyEstimate, i, j) = e.F[j] - e.F[i]
+Molly.free_energy_difference_uncertainty(e::MyEstimate, i, j) = hypot(e.σ[i], e.σ[j])
+```
+
 ## Hybrid System Setup
 
 Molly allows for two setup options: single topology (parameter scaling) and dual topology (energy scaling). In a single topology for RBFE, shared atoms between ligands (Core atoms) retain their physical identity, with parameters (charges, vdW, bonds, angles) interpolated along an alchemical coupling parameter $\lambda \in [0, 1]$. Atoms present in only one ligand (Unique atoms) are smoothly created or decoupled using soft-core potentials for electrostatic and van der Waals interactions to prevent numerical singularities at $\lambda \to 0$ and $\lambda \to 1$. In a dual topology for RBFE, virtual atoms are added for the core atoms, these represent the core atoms in ligand B. Unique atoms for ligand B are added as atoms. For ABFE simulations, dual topology is most commonly used where the whole solute is annihilated/decoupled along an alchemical coupling parameter $\lambda \in [0, 1]$, but Molly could run ABFE simulations with single topology.
