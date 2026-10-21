@@ -85,6 +85,10 @@ Only compatible with 3D systems.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+# The keys of HarmonicTorsion, so that a parameter keeps its key in an alchemical system
+parameter_prefix(::HarmonicTorsionλ, inter_type) = "inter_HT_$(inter_type)_"
+parameter_fields(::Type{<:HarmonicTorsionλ}) = parameter_fields(HarmonicTorsion)
+
 is_torsion(::HarmonicTorsionλ) = true
 
 Base.zero(t::HarmonicTorsionλ) = HarmonicTorsionλ(k=zero.(t.k), θ0=zero.(t.θ0), λ_mixing=t.λ_mixing,

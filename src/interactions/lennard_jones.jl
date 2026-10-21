@@ -1403,6 +1403,10 @@ and the pair is coupled like any other Lennard-Jones pair of the alchemical syst
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
+parameter_prefix(::LennardJones14Scaled, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14Scaled}) = parameter_fields(LennardJones14)
+
 function Base.zero(lj::LennardJones14Scaled)
     return LennardJones14Scaled(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed), zero(lj.weight_14),
                                 lj.λ_mixing, lj.scheduler)
@@ -1494,6 +1498,10 @@ are those of [`LennardJonesSoftCoreBeutler`](@ref) with the σ and ϵ of the pai
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
+parameter_prefix(::LennardJones14SoftCoreBeutler, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14SoftCoreBeutler}) = parameter_fields(LennardJones14)
 
 function Base.zero(lj::LennardJones14SoftCoreBeutler)
     return LennardJones14SoftCoreBeutler(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
@@ -1614,6 +1622,10 @@ are those of [`LennardJonesSoftCoreGapsys`](@ref) with the σ and ϵ of the pair
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+# The keys of LennardJones14, so that a parameter keeps its key in an alchemical system
+parameter_prefix(::LennardJones14SoftCoreGapsys, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14SoftCoreGapsys}) = parameter_fields(LennardJones14)
 
 function Base.zero(lj::LennardJones14SoftCoreGapsys)
     return LennardJones14SoftCoreGapsys(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
@@ -1737,6 +1749,8 @@ end
 #   interpolates the end states, as for the pairwise soft cores
 const LennardJones14λ = Union{LennardJones14SoftCoreBeutler, LennardJones14SoftCoreGapsys,
                               LennardJones14Scaled}
+
+single_topology(inter::LennardJones14λ) = !inter.scheduler.dual
 
 @inline function lj14_lambda_params(inter::LennardJones14λ, atom_i, atom_l)
     λ_glob = λ_mixing(inter.λ_mixing, (atom_i, atom_l))
