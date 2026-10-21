@@ -188,12 +188,12 @@ end
 
 @doc raw"""
     GridHills(cvs, height, sigma, grid_min, grid_max, n_points; cutoff=6,
-              out_of_grid=:global_strictness)
+              out_of_grid=:global_strictness, derivatives=:stored)
 
 Metadynamics memory for the CVs in the tuple `cvs`, accumulating deposited hills onto a
-discretized grid spanning `[grid_min, grid_max]`, evaluated by (N-linear) interpolation.
-O(1) per evaluation regardless of the number of deposited hills; see [`ListHills`](@ref)
-for an exact but O(n_hills) alternative.
+discretized grid spanning `[grid_min, grid_max]`, evaluated by cubic Hermite interpolation,
+so the forces are continuous. O(1) per evaluation regardless of the number of deposited
+hills; see [`ListHills`](@ref) for an exact but O(n_hills) alternative.
 
 For a single CV, `sigma`, `grid_min` and `grid_max` are scalars and `n_points` an Integer,
 giving a 1D grid. For several CVs, pass same-length tuples (one entry per CV in `cvs`) and
@@ -214,13 +214,20 @@ practical for a handful of CVs (2-3); use [`ListHills`](@ref) for more.
     does: `:error` throws, `:warn` warns once and `:nowarn` is silent. Without an error, the
     bias is held constant at its edge value outside the grid: it exerts no force there, and
     no hills are deposited. `:global_strictness` follows the `strictness` of the simulation.
+- `derivatives::Symbol=:stored`: Source of the derivatives at the grid points used by the
+    interpolation. `:stored` accumulates the exact derivatives of every deposited hill, which
+    needs `2^N` times the memory of the grid values and makes deposits slower. `:estimated`
+    takes them from finite differences of the grid values (Catmull-Rom), which needs no extra
+    memory but is less accurate on coarse grids. With 3 CVs on a fine grid the deposits of
+    `:stored` can dominate the run time; `:estimated`, a coarser grid or a larger `n_steps`
+    reduce it.
 
 The grid of a periodic CV such as a torsion (see [`cv_period`](@ref)) must span exactly
 one period, e.g. `-π` to `π`, with `grid_max` the same point as `grid_min`: its `n_points`
 points are then spaced by `period / n_points`, hills and interpolation wrap around, and CV
 values outside `[grid_min, grid_max]` are wrapped into the grid.
 """
-struct GridHills{C, K, R, G, E, T} <: AbstractMetadynamicsMemory
+struct GridHills{C, K, R, G, E, H, T, D} <: AbstractMetadynamicsMemory
     cvs::C
     height::K
     sigma::R
@@ -228,6 +235,10 @@ struct GridHills{C, K, R, G, E, T} <: AbstractMetadynamicsMemory
     grid_max::G
     bin_width::G
     values::E
+    # values, and with stored derivatives the derivatives scaled by the bin widths, one array
+    #   per subset of dimensions
+    hermite::H
+    derivatives::D # Val(:stored) or Val(:estimated), so the interpolation dispatches on it
     cutoff::T
     out_of_grid::Symbol # Strictness outside the grid, :global_strictness for the simulation's
     period::G # One entry per dimension, zero for a non-periodic one
@@ -235,8 +246,13 @@ struct GridHills{C, K, R, G, E, T} <: AbstractMetadynamicsMemory
     # The only constructor of the struct: checks the per-dimension tuples and derives the
     #   grid from them, so no grid is built unchecked
     function GridHills(cvs::Tuple, height, sigma::Tuple, grid_min::Tuple, grid_max::Tuple,
-                       n_points::Tuple; cutoff=6, out_of_grid::Symbol=:global_strictness)
+                       n_points::Tuple; cutoff=6, out_of_grid::Symbol=:global_strictness,
+                       derivatives::Symbol=:stored)
         out_of_grid == :global_strictness || check_strictness(out_of_grid)
+        if !(derivatives in (:estimated, :stored))
+            throw(ArgumentError("GridHills derivatives must be :estimated or :stored, " *
+                                "got :$derivatives"))
+        end
         height = float(height) # Tempered heights are generally fractional
         # Float bounds of a common type per dimension, so bin_width can share their type
         grid_min_t, grid_max_t = float.(grid_min), float.(grid_max)
@@ -280,11 +296,12 @@ struct GridHills{C, K, R, G, E, T} <: AbstractMetadynamicsMemory
         bin_width_t = map(grid_min_t, grid_max_t, n_points, period_t) do gmin, gmax, n, p
             (gmax - gmin) / (iszero(p) ? n - 1 : n)
         end
-        values = fill(zero(height), n_points)
+        hermite = ntuple(_ -> fill(zero(height), n_points), derivatives == :stored ? 2^n_dims : 1)
+        values = hermite[1]
         return new{typeof(cvs), typeof(height), typeof(sigma), typeof(grid_min_t),
-                   typeof(values), typeof(cutoff)}(
-            cvs, height, sigma, grid_min_t, grid_max_t, bin_width_t, values, cutoff,
-            out_of_grid, period_t,
+                   typeof(values), typeof(hermite), typeof(cutoff), Val{derivatives}}(
+            cvs, height, sigma, grid_min_t, grid_max_t, bin_width_t, values, hermite,
+            Val(derivatives), cutoff, out_of_grid, period_t,
         )
     end
 end
@@ -338,7 +355,7 @@ end
 
 grid_axis_value(mem::GridHills, d::Integer, i::Integer) = mem.grid_min[d] + (i - 1) * mem.bin_width[d]
 
-# Per-dimension bracket indices and fractional distance, for N-linear interpolation.
+# Per-dimension bracket indices and fractional distance, for the interpolation.
 # cv_sim[d] on a scalar cv_sim (1D case) just returns cv_sim itself. A periodic dimension
 # wraps the CV into the grid, and its last point is bracketed with the first one.
 function grid_bracket_dims(mem::GridHills, cv_sim)
@@ -359,42 +376,79 @@ function grid_bracket_dims(mem::GridHills, cv_sim)
     end
 end
 
-# The 2^N corners of the cell bracketing a CV value
-grid_corners(dims) = CartesianIndices(ntuple(_ -> 2, length(dims)))
+# Subset s of the dimensions as a bitmask, with s = 1 the empty subset
+in_subset(s, d) = isodd((s - 1) >> (d - 1))
 
-# Grid value at one corner of the bracketing cell, times the N-linear weight of every
-#   dimension except `skip` (0 for none)
-function grid_corner_value(mem::GridHills, dims, corner, skip=0)
-    n_dims = length(dims)
-    idx = ntuple(d -> corner[d] == 1 ? dims[d][1] : dims[d][2], n_dims)
-    weight = prod(1:n_dims) do d
-        d == skip ? one(dims[d][3]) : (corner[d] == 1 ? 1 - dims[d][3] : dims[d][3])
+# Cubic Hermite bases on [0, 1] for the value and scaled derivative at the lower node, then
+#   at the upper node, and their derivatives along t
+hermite_bases(t) = (2t^3 - 3t^2 + 1, t^3 - 2t^2 + t, -2t^3 + 3t^2, t^3 - t^2)
+hermite_bases_dt(t) = (6t^2 - 6t, 3t^2 - 4t + 1, 6t - 6t^2, 3t^2 - 2t)
+
+# Catmull-Rom weights on the values at i0 - 1, i0, i1 and i1 + 1: Hermite with central differences
+catmull_rom((h00, h10, h01, h11)) = (-h10 / 2, h00 - h11 / 2, h01 + h10 / 2, h11 / 2)
+
+# A missing neighbour at a non-periodic edge is the linear extrapolation of the two nearest values
+function fold_ghosts((wm, w0, w1, w2), lower_edge, upper_edge)
+    if lower_edge
+        w0, w1, wm = w0 + 2wm, w1 - wm, zero(wm)
     end
-    return weight * mem.values[idx...]
+    if upper_edge
+        w1, w0, w2 = w1 + 2w2, w0 - w2, zero(w2)
+    end
+    return (wm, w0, w1, w2)
+end
+
+# Interpolation taps of one dimension: grid indices, whether each reads a stored derivative,
+#   and the weights with their derivatives along the fractional position t
+function grid_taps(::Val{:stored}, mem::GridHills, d, (i0, i1, t))
+    return (i0, i0, i1, i1), (false, true, false, true), hermite_bases(t), hermite_bases_dt(t)
+end
+
+function grid_taps(::Val{:estimated}, mem::GridHills, d, (i0, i1, t))
+    n = size(mem.values, d)
+    w, w_dt = catmull_rom(hermite_bases(t)), catmull_rom(hermite_bases_dt(t))
+    if is_periodic(mem, d)
+        return (mod1(i0 - 1, n), i0, i1, mod1(i1 + 1, n)), (false, false, false, false), w, w_dt
+    end
+    lower, upper = i0 == 1, i1 == n
+    return (max(i0 - 1, 1), i0, i1, min(i1 + 1, n)), (false, false, false, false),
+           fold_ghosts(w, lower, upper), fold_ghosts(w_dt, lower, upper)
+end
+
+# Interpolated value and its gradient along the fractional grid positions, in one pass
+function grid_value_gradient(mem::GridHills{<:Any, <:Any, <:Any, <:NTuple{N, Any}},
+                             cv_sim) where N
+    dims = grid_bracket_dims(mem, cv_sim)
+    taps = ntuple(d -> grid_taps(mem.derivatives, mem, d, dims[d]), Val(N))
+    # Closures only capture bindings that aren't reassigned, which would box them
+    zero_value = zero(eltype(mem.values))
+    value, grad = zero_value, ntuple(_ -> zero_value, Val(N))
+    for c in CartesianIndices(ntuple(_ -> 4, Val(N)))
+        s = 1 + sum(d -> taps[d][2][c[d]] << (d - 1), 1:N) # Stored derivative to read
+        D = mem.hermite[s][ntuple(d -> taps[d][1][c[d]], Val(N))...]
+        w = ntuple(d -> taps[d][3][c[d]], Val(N))
+        value += prod(w) * D
+        grad_prev = grad
+        grad = ntuple(k -> grad_prev[k] + prod(d -> d == k ? taps[d][4][c[d]] : w[d], 1:N) * D,
+                      Val(N))
+    end
+    return value, grad
 end
 
 function potential_energy(mem::GridHills, cv_sim; strictness=default_strictness(), kwargs...)
     check_in_grid(mem, cv_sim; strictness)
-    dims = grid_bracket_dims(mem, cv_sim)
-    return sum(c -> grid_corner_value(mem, dims, c), grid_corners(dims); init=zero(mem.height))
+    return first(grid_value_gradient(mem, cv_sim))
 end
 
-# Partial derivative of the N-linear interpolant along each dimension (chain rule through
+# Partial derivative of the interpolant along each dimension (chain rule through
 # frac_d = (cv_sim[d] - grid_min[d]) / bin_width[d]). Collapses to a scalar for a 1D grid.
 # Zero along dimensions where cv_sim is outside the grid, matching the clamped energy.
 function bias_gradient(mem::GridHills, cv_sim; strictness=default_strictness())
     check_in_grid(mem, cv_sim; strictness)
-    dims = grid_bracket_dims(mem, cv_sim)
-    grad = ntuple(length(dims)) do d
-        total = zero(mem.height) / mem.bin_width[d]
-        in_grid(mem, d, cv_sim[d]) || return total
-        for corner in grid_corners(dims)
-            sign = corner[d] == 1 ? -1 : 1
-            total += sign * grid_corner_value(mem, dims, corner, d) / mem.bin_width[d]
-        end
-        total
-    end
-    return from_dims(grad)
+    grad = last(grid_value_gradient(mem, cv_sim))
+    return from_dims(ntuple(length(grad)) do d
+        in_grid(mem, d, cv_sim[d]) ? grad[d] / mem.bin_width[d] : zero(grad[d]) / mem.bin_width[d]
+    end)
 end
 
 # Grid indices within the cutoff of a hill at cv_value[d]. A periodic dimension isn't
@@ -416,19 +470,28 @@ function hill_index_range(mem::GridHills, d::Integer, cv_value)
     end
 end
 
-function add_hill!(mem::GridHills, cv_value, height=mem.height)
+function add_hill!(mem::GridHills{<:Any, <:Any, <:Any, <:NTuple{N, Any}}, cv_value,
+                   height=mem.height) where N
     check_in_grid(mem, cv_value)
-    n_dims = length(mem.grid_min)
-    ranges = ntuple(d -> hill_index_range(mem, d, cv_value), n_dims)
-    for idx in CartesianIndices(ranges)
-        grid_idx = ntuple(d -> is_periodic(mem, d) ? mod1(idx[d], size(mem.values, d)) : idx[d],
-                          n_dims)
-        scaled_sq = sum(1:n_dims) do d
-            diff = periodic_displacement(grid_axis_value(mem, d, grid_idx[d]) - cv_value[d],
-                                         mem.period[d])
-            (diff / mem.sigma[d])^2
+    ranges = ntuple(d -> hill_index_range(mem, d, cv_value), Val(N))
+    # The Gaussian and its derivative factors (scaled by bin width) separate by dimension, so
+    #   they are computed once per grid line
+    lines = ntuple(Val(N)) do d
+        idxs = [is_periodic(mem, d) ? mod1(i, size(mem.values, d)) : i for i in ranges[d]]
+        diffs = [periodic_displacement(grid_axis_value(mem, d, i) - cv_value[d], mem.period[d])
+                 for i in idxs]
+        g = exp.(-(diffs ./ mem.sigma[d]) .^ 2 ./ 2)
+        (idxs, g, g .* (-diffs .* mem.bin_width[d] ./ mem.sigma[d]^2))
+    end
+    # Indices are within the grid by construction; unrolled tuples keep the loop tight
+    @inbounds for c in CartesianIndices(map(r -> Base.OneTo(length(r)), ranges))
+        grid_idx = ntuple(d -> lines[d][1][c[d]], Val(N))
+        g = ntuple(d -> lines[d][2][c[d]], Val(N))
+        g_deriv = ntuple(d -> lines[d][3][c[d]], Val(N))
+        for s in eachindex(mem.hermite)
+            factors = ntuple(d -> in_subset(s, d) ? g_deriv[d] : g[d], Val(N))
+            mem.hermite[s][grid_idx...] += height * prod(factors)
         end
-        mem.values[grid_idx...] += height * exp(-scaled_sq / 2)
     end
     return nothing
 end

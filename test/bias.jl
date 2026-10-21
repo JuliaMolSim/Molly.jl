@@ -777,15 +777,16 @@ end
 
     add_hill!(gh, 1.0)
     @test isapprox(potential_energy(gh, 1.0), 1.0; atol=1e-9) # Exactly on a grid point
-    @test isapprox(potential_energy(gh, 0.75), 0.52196847; atol=1e-3) # Interpolated
-    @test isapprox(Molly.bias_gradient(gh, 0.75), 1.91212614; atol=1e-3)
+    # Cubic Hermite between the grid points 0.5 and 1, with the stored exact derivatives
+    @test isapprox(potential_energy(gh, 0.75), 0.55629420; atol=1e-6)
+    @test isapprox(Molly.bias_gradient(gh, 0.75), 2.73088628; atol=1e-6)
 
     @test_throws ArgumentError GridHills(one_cv, 1.0,  0.2, 0.0, 2.0, 1)
     @test_throws ArgumentError GridHills(one_cv, 1.0, -0.2, 0.0, 2.0, 5)
     @test_throws ArgumentError GridHills(one_cv, 1.0,  0.2, 2.0, 0.0, 5)
 
     # GridHills: multiple CVs at once, sigma/grid_min/grid_max/n_points become tuples (one
-    # entry per dimension) and hills are deposited/evaluated via N-linear interpolation
+    # entry per dimension) and hills are deposited/evaluated via cubic interpolation
     gh2d = GridHills(two_cvs, 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 9) # bin_width (0.25, 0.25)
     @test size(gh2d.values) == (9, 9)
     @test all(isapprox.(gh2d.bin_width, (0.25, 0.25); atol=1e-9))
@@ -798,11 +799,10 @@ end
     @test gh2d.values[5, 1] == 0.0
     @test gh2d.values[9, 9] == 0.0
 
-    # Evaluated exactly at the hill center, both potential_energy and bias_gradient reduce
-    # to reading/differencing straight off the grid (no interpolation blending needed)
+    # At the hill center the value is read off the grid and the symmetric differences vanish
     @test isapprox(potential_energy(gh2d, (1.0, 1.0)), 1.0; atol=1e-9)
     grad2d = Molly.bias_gradient(gh2d, (1.0, 1.0))
-    @test isapprox(grad2d[1], -3.82423; atol=1e-3)
+    @test isapprox(grad2d[1], 0.0; atol=1e-9)
     # Grid, sigma and hill placement are all symmetric between the two CV dimensions here,
     # so the gradient components must match by symmetry
     @test isapprox(grad2d[1], grad2d[2]; atol=1e-9)
@@ -869,6 +869,104 @@ end
     add_hill!(md_soft, 1.0)
     @test md_soft.n_deposits == 1
     @test length(md_soft.logger.steps) == 1
+end
+
+@testset "GridHills interpolation" begin
+    dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+    tor = CalcTorsion([1, 2, 3, 4])
+    @test_throws ArgumentError GridHills(dist, 1.0, 0.1, 0.0, 2.0, 21; derivatives=:exact)
+    @test length(GridHills(dist, 1.0, 0.1, 0.0, 2.0, 21; derivatives=:estimated).hermite) == 1
+    @test length(GridHills((dist, dist), 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 21).hermite) == 4
+
+    # Catmull-Rom on a coarse grid: derivatives from the neighbouring grid values
+    gh_cr = GridHills(dist, 1.0, 0.2, 0.0, 2.0, 5; derivatives=:estimated)
+    add_hill!(gh_cr, 1.0)
+    @test isapprox(potential_energy(gh_cr, 0.75), 0.58446823; atol=1e-6)
+    @test isapprox(Molly.bias_gradient(gh_cr, 0.75), 2.61819013; atol=1e-6)
+    # In the edge cell the missing neighbour is extrapolated, giving a one-sided difference
+    v = gh_cr.values
+    t = 0.3
+    @test isapprox(potential_energy(gh_cr, 0.5t),
+                   (2t^3 - 3t^2 + 1) * v[1] + (-2t^3 + 3t^2) * v[2] +
+                   (t^3 - 2t^2 + t) * (v[2] - v[1]) + (t^3 - t^2) * (v[3] - v[1]) / 2; atol=1e-12)
+    fd(mem, x, h) = (potential_energy(mem, x + h) - potential_energy(mem, x - h)) / 2h
+
+    for derivatives in (:estimated, :stored)
+        # 1D: close to the exact ListHills bias, gradient matches finite differences
+        lh = ListHills(dist, 1.0, 0.1)
+        gh = GridHills(dist, 1.0, 0.1, 0.0, 2.0, 201; derivatives)
+        for c in (0.73, 1.21)
+            add_hill!(lh, c)
+            add_hill!(gh, c)
+        end
+        # Off the grid points, where the second derivative jumps and spoils finite differences
+        xs = [x + o for x in 0.5:0.01:1.49 for o in (0.0013, 0.0047, 0.0081)]
+        # Errors relative to the largest exact energy and gradient, about 3x the measured ones
+        V_max = maximum(x -> abs(potential_energy(lh, x)), xs)
+        G_max = maximum(x -> abs(Molly.bias_gradient(lh, x)), xs)
+        tol = derivatives == :stored ? (energy=2e-6, grad=1e-4) : (energy=5e-5, grad=5e-3)
+        @test maximum(x -> abs(potential_energy(gh, x) - potential_energy(lh, x)), xs) / V_max <
+              tol.energy
+        @test maximum(x -> abs(Molly.bias_gradient(gh, x) - Molly.bias_gradient(lh, x)), xs) /
+              G_max < tol.grad
+        # The gradient is the derivative of the interpolated energy, up to finite difference round-off
+        @test maximum(x -> abs(fd(gh, x, 1e-6) - Molly.bias_gradient(gh, x)), xs) / G_max < 1e-9
+        # The gradient is continuous across a grid point
+        @test isapprox(Molly.bias_gradient(gh, 0.8 - 1e-12), Molly.bias_gradient(gh, 0.8 + 1e-12);
+                       atol=1e-8)
+
+        # 2D: gradient matches finite differences of the energy
+        gh2 = GridHills((dist, dist), 1.0, (0.1, 0.15), (0.0, 0.0), (2.0, 2.0), 101; derivatives)
+        add_hill!(gh2, (0.73, 1.1))
+        for p in ((0.6113, 0.9471), (0.8027, 1.2033), (0.7, 1.0003))
+            grad = Molly.bias_gradient(gh2, p)
+            h = 1e-6
+            @test isapprox(grad[1], (potential_energy(gh2, (p[1] + h, p[2])) -
+                                     potential_energy(gh2, (p[1] - h, p[2]))) / 2h; atol=1e-5)
+            @test isapprox(grad[2], (potential_energy(gh2, (p[1], p[2] + h)) -
+                                     potential_energy(gh2, (p[1], p[2] - h))) / 2h; atol=1e-5)
+        end
+
+        # Periodic: smooth across ±π
+        ghp = GridHills(tor, 1.0, 0.1, -π, π, 360; derivatives)
+        add_hill!(ghp, π - 0.05)
+        @test isapprox(Molly.bias_gradient(ghp, π - 1e-9), Molly.bias_gradient(ghp, -π + 1e-9);
+                       atol=1e-6)
+        for x in (π - 0.0313, -π + 0.0071)
+            @test isapprox(fd(ghp, x, 1e-6), Molly.bias_gradient(ghp, x); atol=1e-5)
+        end
+    end
+
+    # Stored derivatives are more accurate on a coarse grid
+    lh = ListHills(dist, 1.0, 0.1)
+    add_hill!(lh, 0.97)
+    errs = map((:estimated, :stored)) do derivatives
+        gh = GridHills(dist, 1.0, 0.1, 0.0, 2.0, 41; derivatives) # bin width half of sigma
+        add_hill!(gh, 0.97)
+        maximum(x -> abs(potential_energy(gh, x) - potential_energy(lh, x)), 0.6:0.0071:1.4)
+    end
+    @test errs[2] < errs[1] / 5
+
+    # Continuous forces conserve energy in NVE with a fixed bias (zero-height deposits)
+    for derivatives in (:estimated, :stored)
+        mem = GridHills(dist, 0.0, 0.05, 0.5, 1.5, 51; derivatives)
+        for c in (0.9, 0.97, 1.05, 1.1)
+            add_hill!(mem, c, 2.0)
+        end
+        sys = System(
+            atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
+            coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 1.0, 1.0)],
+            boundary=CubicBoundary(5.0),
+            velocities=[SVector(0.0, 0.0, 0.0), SVector(0.5, 0.0, 0.0)],
+            specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=1.0)]),),
+            general_inters=(Metadynamics(mem; n_steps=10),),
+            loggers=(etot=TotalEnergyLogger(Float64, 1),),
+            force_units=NoUnits, energy_units=NoUnits,
+        )
+        simulate!(sys, VelocityVerlet(dt=0.0005, remove_CM_motion=false), 4000)
+        e = values(sys.loggers.etot)
+        @test maximum(e) - minimum(e) < 1e-4
+    end
 end
 
 @testset "Metadynamics default centers" begin
