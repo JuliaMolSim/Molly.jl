@@ -1725,6 +1725,7 @@ For more information on the sampling properties of splitting schemes, see
 
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
+Not compatible with virial calculation.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -1915,6 +1916,7 @@ Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
+Not compatible with virial calculation.
 Not compatible with gradient calculation using Enzyme.
 
 # Arguments

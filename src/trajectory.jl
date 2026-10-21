@@ -11,6 +11,9 @@ associated with a [`System`](@ref).
 
 The keyword arguments are the same as [`System`](@ref) setup from a file.
 In the case of passing a [`System`](@ref) directly, a copy of the system is made.
+
+Energies calculated from the frames are affected by the precision of the coordinates in the
+trajectory file, which is reduced in many formats such as PDB, XTC and DCD.
 """
 struct EnsembleSystem{S, TR}
     sys::S

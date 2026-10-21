@@ -37,7 +37,6 @@ EnzymeRules.inactive(::typeof(Molly.check_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_force_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_energy_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.has_infinite_boundary), args...) = nothing
-EnzymeRules.inactive(::typeof(Molly.n_infinite_dims), args...) = nothing
 EnzymeRules.inactive(::typeof(random_coord), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocity), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocities), args...) = nothing
@@ -936,7 +935,8 @@ end
                         kx, ky, kz, TV)
             o1, o2 = reim(recip_grid[li])
             g1, g2 = reim(drecip_grid[li])
-            de = desum_arr[li]
+            # The energy buffer can be in a higher precision than the grid
+            de = T(desum_arr[li])
             drecip_grid[li] = Complex(eterm_nou*g1 + 2*weight*de*o1,
                                       eterm_nou*g2 + 2*weight*de*o2)
         end

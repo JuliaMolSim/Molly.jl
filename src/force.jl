@@ -833,7 +833,8 @@ function forces!(fs,
         end
     else
         Threads.@threads for chunk_i in 1:n_threads
-            fill!(buffers.fs_chunks[chunk_i], zero(FT))
+            fs_chunk = buffers.fs_chunks[chunk_i]
+            fill!(fs_chunk, zero(eltype(fs_chunk)))
         end
         if needs_vir
             Threads.@threads for chunk_i in 1:n_threads
@@ -895,11 +896,10 @@ end
 
 function reduce_force_chunks!(fs_nounits, fs_chunks, vir_nounits, vir_chunks,
                               ::Val{n_threads}, ::Val{needs_vir}) where {n_threads, needs_vir}
-    FT = eltype(fs_nounits)
     n_atoms = length(fs_nounits)
     @inbounds Threads.@threads for chunk_i in 1:n_threads
         for i in (((chunk_i - 1) * n_atoms) ÷ n_threads + 1):((chunk_i * n_atoms) ÷ n_threads)
-            f = zero(FT)
+            f = zero(eltype(fs_nounits))
             for ci in 1:n_threads
                 f += fs_chunks[ci][i]
             end

@@ -135,42 +135,169 @@ function pairwise_pe(::LennardJones, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LJDispersionCorrection(atoms, dist_cutoff, σ_mixing=LorentzMixing(),
+    LJDispersionCorrection(atoms, cutoff, σ_mixing=LorentzMixing(),
                            ϵ_mixing=GeometricMixing())
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
 
 See [Shirts et al. 2007](https://doi.org/10.1021/jp0735987).
-Approximately represents contributions from beyond the cutoff distance.
+Approximately represents the part of the potential that the cutoff leaves out, assuming a
+uniform density.
 Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
 correction to the potential energy is required.
-The potential energy is defined as
+`cutoff` is the cutoff of the [`LennardJones`](@ref) interaction, which can be a
+[`DistanceCutoff`](@ref), a [`ShiftedPotentialCutoff`](@ref), a [`PolynomialCutoff`](@ref) or
+a distance, which is treated as a [`DistanceCutoff`](@ref).
+For a [`DistanceCutoff`](@ref) the potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-where the averages run over all pairs of the ``N`` atoms, ``V`` is the volume and ``r_c``
-is `dist_cutoff`.
-The forces are zero, with an isotropic virial contribution from the explicit
-volume dependence.
+where the averages run over all pairs of the ``N`` atoms, including excluded pairs and the
+pair of each atom with itself, ``V`` is the volume and ``r_c`` is the cutoff distance.
+This is the correction of OpenMM.
+For a [`PolynomialCutoff`](@ref) the part of the potential removed by the switching function
+is also included, as in OpenMM.
+For a [`ShiftedPotentialCutoff`](@ref) the shift of the pairs within the cutoff is also
+included, as in GROMACS.
+GROMACS leaves excluded pairs out of the averages and only corrects the ``r^{-6}`` term, so
+its correction differs slightly.
+The forces are zero, with an isotropic virial contribution.
 
 The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
 volume can change).
 Only compatible with 3D systems.
-Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrection{F6, F12, D, S, E}
+struct LJDispersionCorrection{F6, F12, EC, C, S, E}
     factor_6::F6
     factor_12::F12
-    dist_cutoff::D
+    energy_const::EC
+    cutoff::C
     σ_mix::S
     ϵ_mix::E
 end
 
+# The cutoffs that the dispersion correction supports, a distance meaning a DistanceCutoff
+disp_corr_cutoff(cutoff::Union{DistanceCutoff, ShiftedPotentialCutoff, PolynomialCutoff}) = cutoff
+disp_corr_cutoff(dist_cutoff) = DistanceCutoff(dist_cutoff)
+
+function disp_corr_cutoff(cutoff::AbstractCutoff)
+    throw(ArgumentError("the Lennard-Jones dispersion correction supports DistanceCutoff, " *
+                        "ShiftedPotentialCutoff and PolynomialCutoff, found $cutoff"))
+end
+
+# Nodes and weights of n point Gauss-Legendre quadrature on [-1, 1]
+function gauss_legendre(n::Integer)
+    xs, ws = zeros(n), zeros(n)
+    for i in 1:n
+        x = cos(π * (i - 0.25) / (n + 0.5))
+        dp = 1.0
+        for _ in 1:100
+            # Legendre polynomials P_(n-1) and P_n at x by recurrence
+            p0, p1 = 1.0, x
+            for k in 2:n
+                p0, p1 = p1, ((2k - 1) * x * p1 - (k - 1) * p0) / k
+            end
+            dp = n * (x * p1 - p0) / (x^2 - 1)
+            dx = p1 / dp
+            x -= dx
+            abs(dx) < 1e-15 && break
+        end
+        xs[i], ws[i] = x, 2 / ((1 - x^2) * dp^2)
+    end
+    return xs, ws
+end
+
+#=
+For n = 6 and 12, the integral of (1 - S) x^(2 - n) from a to 1, where S is the switching
+    function of PolynomialCutoff as a function of x = r / r_c and a = r_a / r_c.
+Composite Gauss-Legendre quadrature is used, which is accurate to near machine precision for
+    the smooth integrands found for any reasonable a.
+=#
+function switched_out_integrals(a)
+    xs, ws = gauss_legendre(20)
+    n_intervals = 16
+    j6, j12 = 0.0, 0.0
+    h = (1 - a) / n_intervals
+    for m in 1:n_intervals
+        lo = a + (m - 1) * h
+        for (xg, wg) in zip(xs, ws)
+            x = lo + (xg + 1) * h / 2
+            t = (x - a) / (1 - a)
+            frac_out = t^3 * (10 - 15t + 6t^2)
+            j6  += wg * h / 2 * frac_out * x^-4
+            j12 += wg * h / 2 * frac_out * x^-10
+        end
+    end
+    return j6, j12
+end
+
+#=
+For n = 6 and 12, the integral over r from 0 to ∞ of r^(2 - n) times the fraction of the
+    r^-n term of the Lennard-Jones potential that the cutoff leaves out.
+The shifted potential leaves out the shift V(r_c) within the cutoff as well as the
+    potential beyond it.
+=#
+disp_corr_integrals(c::DistanceCutoff) = (inv(3 * c.dist_cutoff^3), inv(9 * c.dist_cutoff^9))
+
+function disp_corr_integrals(c::ShiftedPotentialCutoff)
+    return (2 / (3 * c.dist_cutoff^3), 4 / (9 * c.dist_cutoff^9))
+end
+
+function disp_corr_integrals(c::PolynomialCutoff)
+    rc = c.dist_cutoff
+    j6, j12 = switched_out_integrals(Float64(uconvert(NoUnits, c.dist_activation / rc)))
+    return (inv(3 * rc^3) + j6 / rc^3, inv(9 * rc^9) + j12 / rc^9)
+end
+
+#=
+The weights of the r^-6 and r^-12 terms of the correction energy in each diagonal component
+    of the virial, the "mechanical" virial of the pairs that the cutoff leaves out.
+For a term u(r) ∝ r^-n beyond the cutoff r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r, so each
+    component is (n / 3)U_n, 2U6 and 4U12 for the r^-6 and r^-12 terms.
+When the potential is continuous at the cutoff, as for the shifted and switched potentials,
+    integrating by parts shows that each component is U6 + U12.
+=#
+disp_corr_virial_weights(::DistanceCutoff) = (2, 4)
+disp_corr_virial_weights(::Union{ShiftedPotentialCutoff, PolynomialCutoff}) = (1, 1)
+
+#=
+The part of the correction that does not depend on the volume. The shifted potential
+    subtracts V(r_c) from each pair within the cutoff, and as in GROMACS each atom is taken
+    to have one fewer partner within the cutoff than the uniform density gives.
+`ϵσ6_mean` and `ϵσ12_mean` are the pair averages and `n` is the number of atoms.
+=#
+function disp_corr_energy_const(c::ShiftedPotentialCutoff, ϵσ6_mean, ϵσ12_mean, n)
+    rc = c.dist_cutoff
+    return -2 * n * (ϵσ12_mean / rc^12 - ϵσ6_mean / rc^6)
+end
+
+disp_corr_energy_const(c, ϵσ6_mean, ϵσ12_mean, n) = zero(ϵσ6_mean / c.dist_cutoff^6)
+
+ustrip_cutoff(c::DistanceCutoff) = DistanceCutoff(ustrip(c.dist_cutoff))
+ustrip_cutoff(c::ShiftedPotentialCutoff) = ShiftedPotentialCutoff(ustrip(c.dist_cutoff))
+ustrip_cutoff(c::PolynomialCutoff) = PolynomialCutoff(ustrip(c.dist_activation),
+                                                      ustrip(c.dist_cutoff))
+
+# The correction from the pair averages of ϵσ^6 and ϵσ^12, as factors to be divided by the
+#   volume and a part independent of the volume, in the types of the example terms
+function disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, term_6_example, term_12_example)
+    Tacc = Float64
+    rc = cutoff.dist_cutoff
+    i6, i12 = disp_corr_integrals(cutoff)
+    factor_6_acc  = 8 * Tacc(π) * n^2 * (-ϵσ6_mean  * i6 )
+    factor_12_acc = 8 * Tacc(π) * n^2 * ( ϵσ12_mean * i12)
+    energy_const_acc = disp_corr_energy_const(cutoff, ϵσ6_mean, ϵσ12_mean, n)
+    F6  = typeof(-(term_6_example / rc^3))
+    F12 = typeof(term_12_example / rc^9)
+    EC  = typeof(term_6_example / rc^6)
+    return convert(F6, factor_6_acc), convert(F12, factor_12_acc), convert(EC, energy_const_acc)
+end
+
 function LJDispersionCorrection(atoms::AbstractArray,
-                                dist_cutoff,
+                                cutoff,
                                 σ_mix=LorentzMixing(),
                                 ϵ_mix=GeometricMixing())
-    T = typeof(ustrip(dist_cutoff))
+    cutoff_used = disp_corr_cutoff(cutoff)
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
     at = atoms_cpu[1]
@@ -214,28 +341,9 @@ function LJDispersionCorrection(atoms::AbstractArray,
     ϵσ6_mean = ϵσ6_sum / n_pairs_acc
     ϵσ12_mean = ϵσ12_sum / n_pairs_acc
 
-    # Factors are divided by volume when evaluating the correction.
-    n_atoms_acc = Tacc(n_atoms)
-    π_acc = Tacc(π)
-
-    factor_6_acc =
-        8 * π_acc * n_atoms_acc^2 *
-        (-ϵσ6_mean / (Tacc(3) * dist_cutoff^3))
-
-    factor_12_acc =
-        8 * π_acc * n_atoms_acc^2 *
-        (ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
-
-    F6 = typeof(-(term_6_example / dist_cutoff^3))
-    F12 = typeof(term_12_example / dist_cutoff^9)
-
-    return LJDispersionCorrection(
-        convert(F6, factor_6_acc),
-        convert(F12, factor_12_acc),
-        dist_cutoff,
-        σ_mix,
-        ϵ_mix,
-    )
+    factor_6, factor_12, energy_const = disp_corr_factors(cutoff_used, ϵσ6_mean, ϵσ12_mean,
+                                            Tacc(n_atoms), term_6_example, term_12_example)
+    return LJDispersionCorrection(factor_6, factor_12, energy_const, cutoff_used, σ_mix, ϵ_mix)
 end
 
 # The fields of an atom other than its index, as a tuple
@@ -263,60 +371,63 @@ function identical_atom_groups(atoms)
     return group_atoms, group_counts
 end
 
-Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S, E} =
-    LJDispersionCorrection(zero(F6), zero(F12), zero(D), S(), E())
-Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
+function Base.zero(dc::LJDispersionCorrection)
+    return LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12), zero(dc.energy_const),
+                                  dc.cutoff, dc.σ_mix, dc.ϵ_mix)
+end
 
 function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     return LJDispersionCorrection(
         dc1.factor_6  + dc2.factor_6,
         dc1.factor_12 + dc2.factor_12,
-        dc1.dist_cutoff,
+        dc1.energy_const + dc2.energy_const,
+        dc1.cutoff,
         dc1.σ_mix,
         dc1.ϵ_mix,
     )
 end
 
-Unitful.ustrip(dc::LJDispersionCorrection) =
-    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12), ustrip(dc.dist_cutoff), dc.σ_mix, dc.ϵ_mix)
+function Unitful.ustrip(dc::LJDispersionCorrection)
+    return LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12),
+                                  ustrip(dc.energy_const), ustrip_cutoff(dc.cutoff), dc.σ_mix,
+                                  dc.ϵ_mix)
+end
 
-
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
-                                                        inter::LJDispersionCorrection; kwargs...)
-    return (inter.factor_6 + inter.factor_12) / volume(sys)
+function disp_corr_pe(inter, sys)
+    return (inter.factor_6 + inter.factor_12) / volume(sys) + inter.energy_const
 end
 
 # The omitted LJ pairs have nonzero forces, but their isotropic average gives
-# no net force on any atom. Their virial contributions, however, do not cancel.
-#
-# For a term u(r) ∝ r^-n, r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r so each
-# diagonal component of the isotropic tail virial is (n / 3)U_n. The r^-6 and 
-# r^-12 terms therefore contribute 2U6 and 4U12, respectively.
-#
-# This is the "mechanical" tail virial.
+#   no net force on any atom. Their virial contributions, however, do not cancel,
+#   see `disp_corr_virial_weights`.
+function disp_corr_virial!(buffers, sys, inter)
+    vol = volume(sys)
+    w6, w12 = disp_corr_virial_weights(inter.cutoff)
+    w = w6 * inter.factor_6 / vol + w12 * inter.factor_12 / vol
+    for d in axes(buffers.virial, 1)
+        buffers.virial[d, d] += w
+    end
+    return buffers
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return disp_corr_pe(inter, sys)
+end
+
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
         fs, sys, inter::LJDispersionCorrection;
         buffers=nothing,
         needs_vir=false,
         kwargs...)
-
     if needs_vir
-        vol = volume(sys)
-        U6  = inter.factor_6  / vol
-        U12 = inter.factor_12 / vol
-
-        w = 2 * U6 + 4 * U12
-
-        for d in axes(buffers.virial, 1)
-            buffers.virial[d, d] += w
-        end
+        disp_corr_virial!(buffers, sys, inter)
     end
-
     return fs
 end
 
 @doc raw"""
-    LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
+    LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction, scaled by λ for
 alchemical transformations, the λ version of [`LJDispersionCorrection`](@ref).
@@ -324,11 +435,12 @@ alchemical transformations, the λ version of [`LJDispersionCorrection`](@ref).
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
 [`LJDispersionCorrection`](@ref) to this type.
 Approximately represents contributions from beyond the cutoff distance.
-The potential energy is defined as
+For a [`DistanceCutoff`](@ref) the potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-where the averages run over all pairs, ``\lambda_{ij}`` is the steric coupling of the pair
+and the other cutoffs are treated as in [`LJDispersionCorrection`](@ref).
+The averages run over all pairs, ``\lambda_{ij}`` is the steric coupling of the pair
 that `scheduler` gives from the `λ` of the atoms mixed with `λ_mix` and their alchemical
 roles, and ``N`` is the effective number of atoms, since dual topology duplicates an atom as
 a real atom and a virtual one whose couplings sum to 1.
@@ -342,12 +454,12 @@ directly has no effect; [`Molly.set_lambda!`](@ref) recomputes them.
 The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
 volume can change).
 Only compatible with 3D systems.
-Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrectionλ{F6,F12, D,S,E,SCH}
+struct LJDispersionCorrectionλ{F6, F12, EC, C, S, E, SCH}
     factor_6::F6
     factor_12::F12
-    dist_cutoff::D
+    energy_const::EC
+    cutoff::C
     σ_mix::S
     ϵ_mix::E
     # Kept so that `set_lambda!` can rebuild the factors, which are precomputed from the coupling
@@ -355,8 +467,9 @@ struct LJDispersionCorrectionλ{F6,F12, D,S,E,SCH}
 end
 
 # The scheduler is a keyword so that this does not clash with the type's own 6 field constructor
-function LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
-    T = typeof(ustrip(dist_cutoff))
+function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
+    cutoff_used = disp_corr_cutoff(cutoff)
+    T = typeof(ustrip(cutoff_used.dist_cutoff))
     n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
     at = atoms_cpu[1]
@@ -429,55 +542,25 @@ function LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; sc
     ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
     ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
 
-    π_acc = Tacc(π)
-
-    factor_6_acc  = 8 * π_acc * n_eff^2 * (-ϵσ6_mean  / (Tacc(3) * dist_cutoff^3))
-    factor_12_acc = 8 * π_acc * n_eff^2 * ( ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
-
-    F6 = typeof(-(term_6_example / dist_cutoff^3))
-    F12 = typeof(term_12_example / dist_cutoff^9)
-
-    return LJDispersionCorrectionλ(
-        convert(F6, factor_6_acc),
-        convert(F12, factor_12_acc),
-        dist_cutoff,
-        σ_mix,
-        ϵ_mix,
-        scheduler,
-    )
+    factor_6, factor_12, energy_const = disp_corr_factors(cutoff_used, ϵσ6_mean, ϵσ12_mean,
+                                            n_eff, term_6_example, term_12_example)
+    return LJDispersionCorrectionλ(factor_6, factor_12, energy_const, cutoff_used, σ_mix,
+                                   ϵ_mix, scheduler)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrectionλ; kwargs...)
-    return (inter.factor_6 + inter.factor_12) / volume(sys)
+    return disp_corr_pe(inter, sys)
 end
 
-# The omitted LJ pairs have nonzero forces, but their isotropic average gives
-# no net force on any atom. Their virial contributions, however, do not cancel.
-#
-# For a term u(r) ∝ r^-n, r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r so each
-# diagonal component of the isotropic tail virial is (n / 3)U_n. The r^-6 and 
-# r^-12 terms therefore contribute 2U6 and 4U12, respectively.
-#
-# This is the "mechanical" tail virial.
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
         fs, sys, inter::LJDispersionCorrectionλ;
         buffers=nothing,
         needs_vir=false,
         kwargs...)
-
     if needs_vir
-        vol = volume(sys)
-        U6  = inter.factor_6  / vol
-        U12 = inter.factor_12 / vol
-
-        w = 2 * U6 + 4 * U12
-
-        for d in axes(buffers.virial, 1)
-            buffers.virial[d, d] += w
-        end
+        disp_corr_virial!(buffers, sys, inter)
     end
-
     return fs
 end
 

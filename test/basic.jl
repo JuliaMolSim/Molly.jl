@@ -2753,3 +2753,22 @@ end
         @test maximum(norm, from_device(accels) .- from_device(accels_true)) < (1e-10 * AU)
     end
 end
+
+@testset "Virtual site 1-4 pairs" begin
+    # A virtual site shares the exclusions and the 1-4 pairs of its first atom
+    ff = MolecularForceField(joinpath(ff_dir, "gaff.xml"), joinpath(ff_dir, "ethanol_vsite.xml"))
+    for AT in array_list
+        sys = System(joinpath(data_dir, "ethanol_vsite.pdb"), ff; array_type=AT,
+                     float_type=Float64, nonbonded_method=NoCutoff(), strictness=:nowarn)
+        if AT == Array
+            special, eligible = sys.neighbor_finder.special, sys.neighbor_finder.eligible
+            @test [j for j in 1:9 if special[10, j]] == [4, 5, 6]
+            @test [j for j in 1:9 if eligible[10, j]] == [4, 5, 6]
+        end
+        # Match to OpenMM
+        @test isapprox(potential_energy(sys), -1.198394851713553u"kJ * mol^-1";
+                       atol=1e-8u"kJ * mol^-1")
+        @test isapprox(potential_energy(sys; specific_inter_lists=()),
+                       -9.680706225998881u"kJ * mol^-1"; atol=1e-8u"kJ * mol^-1")
+    end
+end

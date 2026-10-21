@@ -64,7 +64,8 @@ end
 end
 
 """
-    Ewald(dist_cutoff; error_tol=0.0005, scheduler=Molly.DefaultLambdaScheduler())
+    Ewald(dist_cutoff; error_tol=0.0005, ϵr=1.0, coulomb_const=coulomb_const,
+          scheduler=Molly.DefaultLambdaScheduler())
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -72,10 +73,11 @@ AtomsCalculators.jl calculator.
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
-`dist_cutoff` and `error_tol` should match these interactions.
+`dist_cutoff`, `error_tol`, `ϵr` and `coulomb_const` should match these interactions.
 [`SetupEwald`](@ref) provides Ewald parameters when setting up a system from a file.
 
-`dist_cutoff` is the cutoff distance for short range interactions.
+`dist_cutoff` is the cutoff distance for short range interactions, `ϵr` is the relative
+permittivity and `coulomb_const` is the Coulomb constant.
 The charge of each atom is scaled by its electrostatic coupling, which `scheduler`, a
 [`Molly.LambdaScheduler`](@ref), gives from the `λ` and alchemical role of the atom; this
 has no effect for atoms that are not alchemical.
@@ -84,21 +86,35 @@ Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Not compatible with infinite boundaries.
 Runs on the CPU, even for GPU systems.
 """
-struct Ewald{T, D, SCH} <: AbstractEwald
+struct Ewald{T, D, C, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
+    ϵr::T
+    coulomb_const::C
     scheduler::SCH
 end
 
-function Ewald(dist_cutoff; error_tol=default_ewald_error_tol, scheduler=DefaultLambdaScheduler())
-    T = typeof(ustrip(dist_cutoff))
-    return Ewald(dist_cutoff, T(error_tol), scheduler)
+function ewald_coulomb_const(coulomb_const, dist_cutoff, ::Type{T}) where T
+    if unit(dist_cutoff) == NoUnits
+        return T(ustrip(coulomb_const))
+    else
+        return T(coulomb_const)
+    end
 end
 
-Base.zero(inter::Ewald{T, D}) where {T, D} = Ewald(zero(D), zero(T), inter.scheduler)
+function Ewald(dist_cutoff; error_tol=default_ewald_error_tol, ϵr=1.0,
+               coulomb_const=coulomb_const, scheduler=DefaultLambdaScheduler())
+    T = typeof(ustrip(dist_cutoff))
+    return Ewald(dist_cutoff, T(error_tol), T(ϵr),
+                 ewald_coulomb_const(coulomb_const, dist_cutoff, T), scheduler)
+end
+
+Base.zero(inter::Ewald{T, D, C}) where {T, D, C} = Ewald(zero(D), zero(T), zero(T), zero(C),
+                                                         inter.scheduler)
 
 function Base.:+(i1::Ewald, i2::Ewald)
-    return Ewald(i1.dist_cutoff + i2.dist_cutoff, i1.error_tol + i2.error_tol, i1.scheduler)
+    return Ewald(i1.dist_cutoff + i2.dist_cutoff, i1.error_tol + i2.error_tol, i1.ϵr + i2.ϵr,
+                 i1.coulomb_const + i2.coulomb_const, i1.scheduler)
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -161,7 +177,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     end
     partial_charges_cpu = [effective_charge(inter.scheduler, atom, Val(T)) for atom in atoms_cpu]
     V = volume(boundary)
-    f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
+    f = inter.coulomb_const / inter.ϵr
     if AT <: AbstractGPUArray && calculate_forces
         Fs_cpu = zeros(SVector{3, typeof(zero(T) * force_units)}, n_atoms)
     else
@@ -174,7 +190,7 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
     tab_qxyz = zeros(Complex{T}, n_atoms)
     factor_ewald = -inv(4 * α^2)
     recip_coeff = f * 4 * T(π) / V
-    reciprocal_space_E = zero(T) * energy_units
+    reciprocal_space_E = zero(TH) * energy_units
 
     for i in 1:n_atoms
         for m in 1:3
@@ -269,14 +285,18 @@ function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, for
 end
 
 function Base.:(==)(a::Ewald, b::Ewald)
-    return a.dist_cutoff == b.dist_cutoff &&
-           a.error_tol   == b.error_tol   &&
-           a.scheduler == b.scheduler
+    return a.dist_cutoff   == b.dist_cutoff   &&
+           a.error_tol     == b.error_tol     &&
+           a.ϵr            == b.ϵr            &&
+           a.coulomb_const == b.coulomb_const &&
+           a.scheduler     == b.scheduler
 end
 
 function Base.hash(a::Ewald, h::UInt)
     v = hash(a.dist_cutoff, h)
     v = hash(a.error_tol, v)
+    v = hash(a.ϵr, v)
+    v = hash(a.coulomb_const, v)
     return hash(a.scheduler, v)
 end
 
@@ -322,13 +342,14 @@ function setup_coulomb_pairwise(se::AbstractSetupEwald, dist_cutoff, weight_spec
 end
 
 function setup_coulomb_general(se::SetupEwald, atoms, boundary, dist_cutoff, n_threads,
-                               grad_safe, units, T)
-    return Ewald(T(dist_cutoff); error_tol=T(se.error_tol))
+                               grad_safe, units, T, TH)
+    return Ewald(T(dist_cutoff); error_tol=T(se.error_tol),
+                 coulomb_const=convert_setup_quantity(se.coulomb_const, units, T))
 end
 
-"""
+@doc raw"""
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-        ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
+        ϵr=1.0, coulomb_const=coulomb_const, fixed_charges=true, mesh_dims=nothing,
         scheduler=Molly.DefaultLambdaScheduler(), float_type_high=Float64,
         grad_safe=false, n_threads=Threads.nthreads())
 
@@ -338,12 +359,17 @@ AtomsCalculators.jl calculator.
 Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
 which provides the short range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
-`dist_cutoff` and `error_tol` should match these interactions.
+`dist_cutoff`, `error_tol`, `ϵr` and `coulomb_const` should match these interactions.
 [`SetupPME`](@ref) provides PME parameters when setting up a system from a file.
 
 `dist_cutoff` is the cutoff distance for short range interactions.
-`order` is the order of the B-spline interpolation onto the grid and `ϵr` is the relative
-permittivity.
+The Ewald splitting parameter is
+```math
+\alpha = \frac{\sqrt{-\ln(2 \epsilon_{\mathrm{tol}})}}{r_c}
+```
+where ``r_c`` is `dist_cutoff` and ``\epsilon_{\mathrm{tol}}`` is `error_tol`.
+`order` is the order of the B-spline interpolation onto the grid, `ϵr` is the relative
+permittivity and `coulomb_const` is the Coulomb constant.
 `fixed_charges` should be set to `false` if the partial charges can change,
 for example when using a polarizable force field.
 `mesh_dims` gives the number of grid points in each dimension, overriding the
@@ -351,8 +377,8 @@ value chosen from `error_tol`.
 The charge of each atom is scaled by its electrostatic coupling, which `scheduler`, a
 [`Molly.LambdaScheduler`](@ref), gives from the `λ` and alchemical role of the atom; this
 has no effect for atoms that are not alchemical.
-`float_type_high` is the float type used to sum the charges for the constant self energy
-and neutralizing terms.
+`float_type_high` is the float type used to sum the reciprocal space energy
+and the charges for the constant self energy and neutralizing terms.
 `grad_safe` should be set to `true` if gradients are going to be calculated
 with Enzyme.jl.
 `n_threads` is used to pre-allocate memory on CPU and plan the FFTs.
@@ -364,11 +390,12 @@ is based on the smooth PME algorithm from
 Only compatible with 3D systems.
 Not compatible with infinite boundaries.
 """
-struct PME{T, D, A, I, M, BM, C, RG, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
+struct PME{T, D, K, A, I, M, BM, C, RG, CB, RB, VB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
     ϵr::T
+    coulomb_const::K
     α::A
     mesh_dims::SVector{3, Int}
     grid_indices::I
@@ -471,7 +498,8 @@ function update_charges(inter::PME, atoms)
 end
 
 function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, order=5,
-             ϵr=1.0, fixed_charges=true, mesh_dims=nothing, scheduler=DefaultLambdaScheduler(),
+             ϵr=1.0, coulomb_const=coulomb_const, fixed_charges=true, mesh_dims=nothing,
+             scheduler=DefaultLambdaScheduler(),
              float_type_high=Float64, grad_safe=false, n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
     TH = float_type_high
@@ -515,18 +543,21 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
 
     bsplines_moduli = pme_bspline_moduli(T, order, mesh_dims)
 
+    # The reciprocal space energy is summed in `float_type_high`, or in the float type of the
+    #   system on devices without Float64 support
+    TE = ((AT <: AbstractGPUArray && default_float_type_high(AT, T) != Float64) ? T : TH)
     if AT <: AbstractGPUArray
         # The charge is added to the real grid atomically, so no per-thread grid is needed
         charge_grid_buffer = nothing
-        recip_conv_buffer  = to_device(zeros(T, size(recip_grid)), AT)
+        recip_conv_buffer  = to_device(zeros(TE, size(recip_grid)), AT)
         virial_buffer      = to_device(zeros(T, 3, 3), AT)
     elseif n_threads > 1
         charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_spread_threads(n_threads)]
-        recip_conv_buffer = zeros(T, n_threads)
+        recip_conv_buffer = zeros(TE, n_threads)
         virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
     else
         charge_grid_buffer = nothing
-        recip_conv_buffer = zeros(T, 1)
+        recip_conv_buffer = zeros(TE, 1)
         virial_buffer = [zeros(T, 3, 3)]
     end
 
@@ -551,7 +582,8 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
 
-    return PME(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
+    return PME(dist_cutoff, error_tol_T, order, T(ϵr),
+               ewald_coulomb_const(coulomb_const, dist_cutoff, T), α, mesh_dims, grid_indices, grid_fractions,
                bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, recip_grid, charge_grid_buffer,
                recip_conv_buffer, virial_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
                scheduler, grad_safe)
@@ -565,6 +597,7 @@ function Base.deepcopy(pme::PME)
     error_tol      = pme.error_tol
     order          = pme.order
     ϵr             = pme.ϵr
+    coulomb_const  = pme.coulomb_const
     α              = pme.α
     mesh_dims      = pme.mesh_dims
     pc_sum         = deepcopy(pme.pc_sum)
@@ -602,7 +635,7 @@ function Base.deepcopy(pme::PME)
 
     # 4. Return the brand new, isolated PME struct
     return PME(
-        dist_cutoff, error_tol, order, ϵr, α, mesh_dims,
+        dist_cutoff, error_tol, order, ϵr, coulomb_const, α, mesh_dims,
         grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, 
         bsplines_moduli_x, bsplines_moduli_y, bsplines_moduli_z,
         charge_grid, recip_grid, charge_grid_buffer,
@@ -622,6 +655,7 @@ function Base.zero(pme::PME)
         zero(pme.error_tol),
         pme.order,
         zero(pme.ϵr),
+        zero(pme.coulomb_const),
         zero(pme.α),
         pme.mesh_dims,
         zero(pme.grid_indices),
@@ -646,14 +680,15 @@ function Base.zero(pme::PME)
 end
 
 function Base.:(==)(a::PME, b::PME)
-    return a.dist_cutoff == b.dist_cutoff &&
-           a.error_tol   == b.error_tol   &&
-           a.order       == b.order       &&
-           a.ϵr          == b.ϵr          &&
-           a.α           == b.α           &&
-           a.mesh_dims   == b.mesh_dims   &&
-           a.scheduler   == b.scheduler   &&
-           a.grad_safe   == b.grad_safe
+    return a.dist_cutoff   == b.dist_cutoff   &&
+           a.error_tol     == b.error_tol     &&
+           a.order         == b.order         &&
+           a.ϵr            == b.ϵr            &&
+           a.coulomb_const == b.coulomb_const &&
+           a.α             == b.α             &&
+           a.mesh_dims     == b.mesh_dims     &&
+           a.scheduler     == b.scheduler     &&
+           a.grad_safe     == b.grad_safe
 end
 
 function Base.hash(a::PME, h::UInt)
@@ -661,6 +696,7 @@ function Base.hash(a::PME, h::UInt)
     v = hash(a.error_tol, v)
     v = hash(a.order, v)
     v = hash(a.ϵr, v)
+    v = hash(a.coulomb_const, v)
     v = hash(a.α, v)
     v = hash(a.mesh_dims, v)
     v = hash(a.scheduler, v)
@@ -1035,8 +1071,9 @@ function recip_conv!(vir, buffer_virial, recip_grid::Array{Complex{T}, 3}, buffe
             buffer_virial[chunk_i] .= zero(T)
         end
         # The energy is summed into a local variable rather than into `buffer`, where the
-        # threads would be writing to the same cache line on every grid point
-        esum = zero(T)
+        # threads would be writing to the same cache line on every grid point, in the float
+        # type of `buffer`, which is `float_type_high`
+        esum = zero(eltype(buffer))
         for column in chunk_i:n_threads:n_columns
             kx, ky = fldmod(column - 1, mesh_dims[2])
             for kz in 0:(nzh-1)
@@ -1262,8 +1299,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
-    f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
-    f_div_ϵr = f / ϵr
+    f_div_ϵr = inter.coulomb_const / ϵr
 
     recip_box = invert_box_vectors(boundary)
     grid_indices, grid_fractions = atom_last(inter.grid_indices), atom_last(inter.grid_fractions)
@@ -1309,8 +1345,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     return nothing
 end
 
-"""
-    SetupPME(; error_tol=0.0005, approximate_erfc=true, mesh_dims=nothing,
+@doc raw"""
+    SetupPME(; error_tol=0.0005, approximate_erfc=true, mesh_dims=nothing, order=5,
              coulomb_const=138.93545764u"kJ * mol^-1 * nm")
 
 Set up the particle mesh Ewald (PME) summation for long range electrostatics.
@@ -1319,34 +1355,49 @@ Passed to the [`System`](@ref) constructor from files, where it creates a [`PME`
 general interaction, a [`CoulombEwald`](@ref) pairwise interaction and a
 [`EwaldExclusion`](@ref) specific interaction.
 
-`error_tol` is the error tolerance for Ewald summation.
+`error_tol` is the error tolerance for Ewald summation, which sets the Ewald splitting
+parameter
+```math
+\alpha = \frac{\sqrt{-\ln(2 \epsilon_{\mathrm{tol}})}}{r_c}
+```
+where ``r_c`` is the cutoff distance and ``\epsilon_{\mathrm{tol}}`` is `error_tol`, as in
+OpenMM.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
 `mesh_dims` determines the number of PME grid points in each dimension and defaults
 to a value chosen from `error_tol`.
+`order` is the order of the B-spline interpolation onto the grid.
+`coulomb_const` is the Coulomb constant used by all three interactions.
 """
 struct SetupPME{T, C, M} <: AbstractSetupEwald
     error_tol::T
     approximate_erfc::Bool
     coulomb_const::C
     mesh_dims::M
+    order::Int
 end
 
 function SetupPME(; error_tol=default_ewald_error_tol, approximate_erfc::Bool=true,
-                  coulomb_const=coulomb_const, mesh_dims=nothing)
+                  coulomb_const=coulomb_const, mesh_dims=nothing, order::Integer=5)
     if error_tol <= zero(error_tol)
         throw(ArgumentError("error_tol must be greater than zero, found $error_tol"))
     end
-    return SetupPME(error_tol, approximate_erfc, coulomb_const, mesh_dims)
+    if order < 3
+        throw(ArgumentError("order must be at least 3, found $order"))
+    end
+    return SetupPME(error_tol, approximate_erfc, coulomb_const, mesh_dims, Int(order))
 end
 
 function setup_coulomb_general(se::SetupPME, atoms, boundary, dist_cutoff, n_threads,
-                               grad_safe, units, T)
+                               grad_safe, units, T, TH)
     return PME(
         T(dist_cutoff),
         atoms,
         boundary;
         error_tol=T(se.error_tol),
+        order=se.order,
+        coulomb_const=convert_setup_quantity(se.coulomb_const, units, T),
         mesh_dims=se.mesh_dims,
+        float_type_high=TH,
         grad_safe=grad_safe,
         n_threads=n_threads,
     )
@@ -1395,7 +1446,8 @@ which provides the short range term.
 
 Since the properties of the interaction are the same for all pairs, they are stored once
 in the `data` field of the [`InteractionList2Atoms`](@ref) with `EwaldExclusionData`.
-`dist_cutoff` and `error_tol` for `EwaldExclusionData` should match the above interactions.
+`dist_cutoff`, `error_tol`, `ϵr` and `coulomb_const` for `EwaldExclusionData` should match
+the above interactions.
 
 Only compatible with 3D systems.
 """
@@ -1411,25 +1463,27 @@ struct EwaldExclusionData{T, D, A, F, S, LM}
     error_tol::T
     ϵr::T
     α::A
+    coulomb_const::F
     f_div_ϵr::F
     scheduler::S
     λ_mixing::LM
 end
 
 function EwaldExclusionData(dist_cutoff; error_tol=default_ewald_error_tol, ϵr=1.0,
-                            scheduler=DefaultLambdaScheduler(), λ_mix=MinimumMixing())
+                            coulomb_const=coulomb_const, scheduler=DefaultLambdaScheduler(),
+                            λ_mix=MinimumMixing())
     T = typeof(ustrip(dist_cutoff))
     error_tol_T = T(error_tol)
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
-    f = (unit(dist_cutoff) == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
+    f = ewald_coulomb_const(coulomb_const, dist_cutoff, T)
     ϵr_T = T(ϵr)
     f_div_ϵr = f / ϵr_T
-    return EwaldExclusionData(dist_cutoff, error_tol_T, ϵr_T, α, f_div_ϵr, scheduler, λ_mix)
+    return EwaldExclusionData(dist_cutoff, error_tol_T, ϵr_T, α, f, f_div_ϵr, scheduler, λ_mix)
 end
 
 function Base.zero(inter::EwaldExclusionData{T, D, A, F}) where {T, D, A, F}
-    return EwaldExclusionData(zero(D), zero(T), zero(T), zero(A), zero(F), inter.scheduler,
-                              inter.λ_mixing)
+    return EwaldExclusionData(zero(D), zero(T), zero(T), zero(A), zero(F), zero(F),
+                              inter.scheduler, inter.λ_mixing)
 end
 
 function Base.:+(i1::EwaldExclusionData, i2::EwaldExclusionData)
@@ -1438,6 +1492,7 @@ function Base.:+(i1::EwaldExclusionData, i2::EwaldExclusionData)
         i1.error_tol + i2.error_tol,
         i1.ϵr + i2.ϵr,
         i1.α + i2.α,
+        i1.coulomb_const + i2.coulomb_const,
         i1.f_div_ϵr + i2.f_div_ϵr,
         i1.scheduler,
         i1.λ_mixing
@@ -1485,7 +1540,7 @@ end
 
 @doc raw"""
     PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5, ϵr=1.0,
-          fixed_charges=true, mesh_dims=nothing,
+          coulomb_const=coulomb_const, fixed_charges=true, mesh_dims=nothing,
           scheduler=Molly.GROMACSLambdaABFEScheduler(), λ=0.0, grad_safe=false,
           n_threads=Threads.nthreads())
 
@@ -1517,11 +1572,12 @@ charges of the end states are always recalculated from the atoms.
 See [`PME`](@ref) for the other arguments, the interactions that this should be used
 alongside and the systems that it is compatible with.
 """
-struct PME_λ{T, D, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
+struct PME_λ{T, D, K, A, I, M, BM, C, RG, CB, RB, VB, PB, P, F, B, SCH} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
     ϵr::T
+    coulomb_const::K
     α::A
     mesh_dims::SVector{3, Int}
     grid_indices::I
@@ -1572,7 +1628,7 @@ function pme_lambda_mesh_weight(scheduler::Union{GROMACSLambdaABFEScheduler, GRO
 end
 
 function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-               ϵr=1.0, fixed_charges=true, mesh_dims=nothing,
+               ϵr=1.0, coulomb_const=coulomb_const, fixed_charges=true, mesh_dims=nothing,
                scheduler=GROMACSLambdaABFEScheduler(dual=true), λ=0.0, grad_safe=false,
                n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
@@ -1609,7 +1665,8 @@ function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
 
     # The charge is added to the real grid atomically, so no per-thread grid is needed
     charge_grid_buffer    = nothing
-    recip_conv_buffer     = to_device(zeros(T, size(recip_grid)), AT)
+    # The reciprocal space energy is summed in Float64 where the device supports it
+    recip_conv_buffer     = to_device(zeros(default_float_type_high(AT, T), size(recip_grid)), AT)
     virial_buffer         = to_device(zeros(T, 2, 3, 3), AT)
     partial_charge_buffer = to_device(zeros(T, 2, n_atoms), AT)
 
@@ -1638,7 +1695,8 @@ function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     bsm_y = to_device(bsplines_moduli[2], AT)
     bsm_z = to_device(bsplines_moduli[3], AT)
 
-    return PME_λ(dist_cutoff, error_tol_T, order, T(ϵr), α, mesh_dims, grid_indices, grid_fractions,
+    return PME_λ(dist_cutoff, error_tol_T, order, T(ϵr),
+                 ewald_coulomb_const(coulomb_const, dist_cutoff, T), α, mesh_dims, grid_indices, grid_fractions,
                bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z, charge_grid, recip_grid, charge_grid_buffer,
                recip_conv_buffer, virial_buffer, partial_charge_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan,
                scheduler, grad_safe, mesh_w)
@@ -1652,6 +1710,7 @@ function Base.deepcopy(pme::PME_λ)
     error_tol      = pme.error_tol
     order          = pme.order
     ϵr             = pme.ϵr
+    coulomb_const  = pme.coulomb_const
     α              = pme.α
     mesh_dims      = pme.mesh_dims
     pc_sum         = deepcopy(pme.pc_sum)
@@ -1693,7 +1752,7 @@ function Base.deepcopy(pme::PME_λ)
 
     # 4. Return the brand new, isolated PME_λ struct
     return PME_λ(
-        dist_cutoff, error_tol, order, ϵr, α, mesh_dims,
+        dist_cutoff, error_tol, order, ϵr, coulomb_const, α, mesh_dims,
         grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, 
         bsplines_moduli_x, bsplines_moduli_y, bsplines_moduli_z,
         charge_grid, recip_grid, charge_grid_buffer,
@@ -1713,6 +1772,7 @@ function Base.zero(pme::PME_λ)
         zero(pme.error_tol),
         pme.order,
         zero(pme.ϵr),
+        zero(pme.coulomb_const),
         zero(pme.α),
         pme.mesh_dims,
         zero(pme.grid_indices),
@@ -1743,6 +1803,7 @@ function Base.:(==)(a::PME_λ, b::PME_λ)
            a.error_tol      == b.error_tol      &&
            a.order          == b.order          &&
            a.ϵr             == b.ϵr             &&
+           a.coulomb_const  == b.coulomb_const  &&
            a.α              == b.α              &&
            a.mesh_dims      == b.mesh_dims      &&
            a.scheduler      == b.scheduler      &&
@@ -1755,6 +1816,7 @@ function Base.hash(a::PME_λ, h::UInt)
     v = hash(a.error_tol, v)
     v = hash(a.order, v)
     v = hash(a.ϵr, v)
+    v = hash(a.coulomb_const, v)
     v = hash(a.α, v)
     v = hash(a.mesh_dims, v)
     v = hash(a.scheduler, v)
@@ -2167,8 +2229,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, fo
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     order, ϵr, α, mesh_dims, λ = inter.order, inter.ϵr, inter.α, inter.mesh_dims, inter.λ
     V = volume(boundary)
-    f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
-    f_div_ϵr = f / ϵr
+    f_div_ϵr = inter.coulomb_const / ϵr
 
     recip_box = invert_box_vectors(boundary)
     grid_indices, grid_fractions = atom_last_batch(inter.grid_indices), atom_last_batch(inter.grid_fractions)
@@ -2240,6 +2301,7 @@ function convert_component(c::SystemConversion{<:Any, <:Any, TH}, pme::PME) wher
         error_tol=convert_component(c, pme.error_tol),
         order=pme.order,
         ϵr=convert_component(c, pme.ϵr),
+        coulomb_const=convert_component(c, pme.coulomb_const),
         # The charge sums are not stored for gradient safe PME, so fixed charges are not
         #   assumed in that case
         fixed_charges=!isnothing(pme.pc_sum),
@@ -2261,6 +2323,7 @@ function convert_component(c::SystemConversion, pme::PME_λ)
         error_tol=convert_component(c, pme.error_tol),
         order=pme.order,
         ϵr=convert_component(c, pme.ϵr),
+        coulomb_const=convert_component(c, pme.coulomb_const),
         fixed_charges=false,
         mesh_dims=pme.mesh_dims,
         scheduler=convert_component(c, pme.scheduler),

@@ -435,7 +435,8 @@ end
                        offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
                        sa_factor=gb_sa_factor, use_ACE=true, use_OBC2=false,
                        element_to_radius=mbondi2_element_to_radius,
-                       element_to_screen=obc_element_to_screen, n_threads=Threads.nthreads())
+                       element_to_screen=obc_element_to_screen, coulomb_const=coulomb_const,
+                       n_threads=Threads.nthreads())
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
@@ -457,6 +458,7 @@ by the solvent accessible surface area term, which `use_ACE` switches on and off
 `use_OBC2` determines whether to use parameter set I (`false`, the default) or II (`true`).
 `element_to_radius` and `element_to_screen` map an element to its intrinsic radius and its
 screening parameter, the key `"-"` giving the value used for elements not in the dictionary.
+`coulomb_const` is the Coulomb constant, which should match that of the Coulomb interaction.
 `n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
@@ -478,6 +480,7 @@ struct ImplicitSolventOBC{T, D, VT, VD, K, S, F, BF, BS, PT, MT, FC, ER, ES} <: 
     sa_factor::S
     factor_solute::F
     factor_solvent::F
+    coulomb_const::F
     buffer_Bs::VD
     buffer_B_grads::VT
     buffer_atom_charges::VT
@@ -506,6 +509,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                             use_OBC2=false,
                             element_to_radius=mbondi2_element_to_radius,
                             element_to_screen=obc_element_to_screen,
+                            coulomb_const=coulomb_const,
                             n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
     if offset < zero(offset)
         throw(ArgumentError("offset for ImplicitSolventOBC must be non-negative, found $offset"))
@@ -570,7 +574,8 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                         typeof(element_to_screen)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset),
                     T(dist_cutoff), use_ACE, α, β, γ, T(probe_radius), T(sa_factor),
-                    factor_solute, factor_solvent, bufs.Bs, bufs.B_grads, bufs.atom_charges,
+                    factor_solute, factor_solvent, T(coulomb_const_units), bufs.Bs,
+                    bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
                     bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks,
                     element_to_radius, element_to_screen)
@@ -583,7 +588,8 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                         typeof(element_to_radius), typeof(element_to_screen)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)),
                     T(ustrip(offset)), T(ustrip(dist_cutoff)), use_ACE, α, β, γ, T(ustrip(probe_radius)),
-                    T(ustrip(sa_factor)), factor_solute, factor_solvent, bufs.Bs, bufs.B_grads,
+                    T(ustrip(sa_factor)), factor_solute, factor_solvent, T(coulomb_const_units),
+                    bufs.Bs, bufs.B_grads,
                     bufs.atom_charges, bufs.born_forces, bufs.born_forces_scaled,
                     bufs.born_forces_mod, bufs.Is_nounits, bufs.pes, bufs.fs_mat,
                     bufs.force_chunks, element_to_radius, element_to_screen)
@@ -640,6 +646,7 @@ function inject_interaction(inter::ImplicitSolventOBC, params_dic, sys)
         use_OBC2=(inter.β != zero(inter.β)),
         element_to_radius=element_to_radius,
         element_to_screen=element_to_screen,
+        coulomb_const=inter.coulomb_const,
         n_threads=gbsa_n_threads(inter),
     )
 end
@@ -668,15 +675,16 @@ end
                             probe_radius=gb_probe_radius,
                             sa_factor=gb_sa_factor, use_ACE=true,
                             element_to_radius=mbondi2_element_to_radius,
-                            element_to_screen=obc_element_to_screen)
+                            element_to_screen=obc_element_to_screen, coulomb_const=nothing)
 
 Set up the Onufriev-Bashford-Case GBSA model.
 
 Passed to the [`System`](@ref) constructor from files, where it creates an
 [`ImplicitSolventOBC`](@ref) general interaction.
 See [`ImplicitSolventOBC`](@ref) for argument descriptions.
+`coulomb_const=nothing` uses the Coulomb constant of the non-bonded method.
 """
-@kwdef struct SetupImplicitSolventOBC{T, D, K, S, ER, ES} <: AbstractSetupGBSA
+@kwdef struct SetupImplicitSolventOBC{T, D, K, S, ER, ES, C} <: AbstractSetupGBSA
     use_OBC2::Bool = false
     solvent_dielectric::T = gb_solvent_dielectric
     solute_dielectric::T = gb_solute_dielectric
@@ -688,9 +696,11 @@ See [`ImplicitSolventOBC`](@ref) for argument descriptions.
     use_ACE::Bool = true
     element_to_radius::ER = mbondi2_element_to_radius
     element_to_screen::ES = obc_element_to_screen
+    coulomb_const::C = nothing
 end
 
-function setup_implicit_solvent(is::SetupImplicitSolventOBC, atoms, atoms_data, bonds, n_threads)
+function setup_implicit_solvent(is::SetupImplicitSolventOBC, atoms, atoms_data, bonds, n_threads,
+                                coulomb_const)
     return ImplicitSolventOBC(
         atoms,
         atoms_data,
@@ -706,6 +716,7 @@ function setup_implicit_solvent(is::SetupImplicitSolventOBC, atoms, atoms_data, 
         use_OBC2=is.use_OBC2,
         element_to_radius=is.element_to_radius,
         element_to_screen=is.element_to_screen,
+        coulomb_const=coulomb_const,
         n_threads=n_threads,
     )
 end
@@ -721,7 +732,8 @@ end
                         element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
                         atom_params=gbn2_atom_params,
                         atom_params_nucleic=gbn2_atom_params_nucleic, data_d0=gbn2_data_d0,
-                        data_m0=gbn2_data_m0, n_threads=Threads.nthreads())
+                        data_m0=gbn2_data_m0, coulomb_const=coulomb_const,
+                        n_threads=Threads.nthreads())
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
@@ -749,6 +761,7 @@ atoms in nucleic acid residues. The key `"-"` gives the value used for elements 
 dictionary.
 `data_d0` and `data_m0` are the tabulated neck function parameters, interpolated over the
 radii of each pair of atoms.
+`coulomb_const` is the Coulomb constant, which should match that of the Coulomb interaction.
 `n_threads` determines how many per-thread force buffers are allocated.
 
 Only compatible with 3D systems.
@@ -771,6 +784,7 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, TD, TM, VI, BF, BS, PT, MT, FC
     sa_factor::S
     factor_solute::F
     factor_solvent::F
+    coulomb_const::F
     d0s::TD
     m0s::TM
     radius_classes::VI
@@ -815,6 +829,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                              atom_params_nucleic=gbn2_atom_params_nucleic,
                              data_d0=gbn2_data_d0,
                              data_m0=gbn2_data_m0,
+                             coulomb_const=coulomb_const,
                              n_threads::Integer=Threads.nthreads()) where {TY, M, T, D, E, L}
     if offset < zero(offset)
         throw(ArgumentError("offset for ImplicitSolventGBN2 must be non-negative, found $offset"))
@@ -921,7 +936,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                         typeof(atom_params), typeof(data_d0), typeof(data_m0)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(kappa), T(offset), T(dist_cutoff),
                     use_ACE, αs, βs, γs, T(probe_radius), T(sa_factor), factor_solute, factor_solvent,
-                    d0s, m0s, rcs, neck_scale, neck_cut, bufs.Bs, bufs.B_grads, bufs.atom_charges,
+                    T(coulomb_const_units), d0s, m0s, rcs, neck_scale, neck_cut, bufs.Bs, bufs.B_grads, bufs.atom_charges,
                     bufs.born_forces, bufs.born_forces_scaled, bufs.born_forces_mod,
                     bufs.Is_nounits, bufs.pes, bufs.fs_mat, bufs.force_chunks, element_to_radius,
                     element_to_screen, element_to_screen_nucleic, atom_params, atom_params_nucleic,
@@ -937,7 +952,8 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E, L}},
                         typeof(data_m0)}(
                     or, sor, T(solvent_dielectric), T(solute_dielectric), T(ustrip(kappa)), T(ustrip(offset)),
                     T(ustrip(dist_cutoff)), use_ACE, αs, βs, γs, T(ustrip(probe_radius)), ustrip(sa_factor),
-                    factor_solute, factor_solvent, d0s, m0s, rcs, neck_scale, ustrip(neck_cut),
+                    factor_solute, factor_solvent, T(coulomb_const_units), d0s, m0s, rcs,
+                    neck_scale, ustrip(neck_cut),
                     bufs.Bs, bufs.B_grads, bufs.atom_charges, bufs.born_forces,
                     bufs.born_forces_scaled, bufs.born_forces_mod, bufs.Is_nounits, bufs.pes,
                     bufs.fs_mat, bufs.force_chunks, element_to_radius, element_to_screen,
@@ -975,6 +991,7 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
         atom_params_nucleic=inter.atom_params_nucleic,
         data_d0=inter.data_d0,
         data_m0=inter.data_m0,
+        coulomb_const=inter.coulomb_const,
         n_threads=gbsa_n_threads(inter),
     )
 end
@@ -1013,15 +1030,17 @@ end
                              element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
                              atom_params=gbn2_atom_params,
                              atom_params_nucleic=gbn2_atom_params_nucleic,
-                             data_d0=gbn2_data_d0, data_m0=gbn2_data_m0)
+                             data_d0=gbn2_data_d0, data_m0=gbn2_data_m0,
+                             coulomb_const=nothing)
 
 Set up the GBn2 solvation model.
 
 Passed to the [`System`](@ref) constructor from files, where it creates an
 [`ImplicitSolventGBN2`](@ref) general interaction.
 See [`ImplicitSolventGBN2`](@ref) for argument descriptions.
+`coulomb_const=nothing` uses the Coulomb constant of the non-bonded method.
 """
-@kwdef struct SetupImplicitSolventGBN2{T, D, K, S, ER, ES, A, DD, DM} <: AbstractSetupGBSA
+@kwdef struct SetupImplicitSolventGBN2{T, D, K, S, ER, ES, A, DD, DM, C} <: AbstractSetupGBSA
     solvent_dielectric::T = gb_solvent_dielectric
     solute_dielectric::T = gb_solute_dielectric
     kappa::K = 0.0u"nm^-1"
@@ -1039,9 +1058,11 @@ See [`ImplicitSolventGBN2`](@ref) for argument descriptions.
     atom_params_nucleic::A = gbn2_atom_params_nucleic
     data_d0::DD = gbn2_data_d0
     data_m0::DM = gbn2_data_m0
+    coulomb_const::C = nothing
 end
 
-function setup_implicit_solvent(is::SetupImplicitSolventGBN2, atoms, atoms_data, bonds, n_threads)
+function setup_implicit_solvent(is::SetupImplicitSolventGBN2, atoms, atoms_data, bonds, n_threads,
+                                coulomb_const)
     return ImplicitSolventGBN2(
         atoms,
         atoms_data,
@@ -1063,6 +1084,7 @@ function setup_implicit_solvent(is::SetupImplicitSolventGBN2, atoms, atoms_data,
         atom_params_nucleic=is.atom_params_nucleic,
         data_d0=is.data_d0,
         data_m0=is.data_m0,
+        coulomb_const=coulomb_const,
         n_threads=n_threads,
     )
 end

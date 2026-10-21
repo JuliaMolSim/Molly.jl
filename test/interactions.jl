@@ -1764,6 +1764,66 @@
 
     ljdc = LJDispersionCorrection([a1, a2], 1.0u"nm")
     @test ljdc.factor_6 + ljdc.factor_12 ≈ -0.00208532857855u"kJ * nm^3 * mol^-1"
+    @test ljdc.cutoff == DistanceCutoff(1.0u"nm")
+    @test_throws ArgumentError LJDispersionCorrection([a1, a2], ShiftedForceCutoff(1.0u"nm"))
+
+    # The dispersion correction with the cutoffs it supports, compared with OpenMM and GROMACS
+    # No pair is within the cutoff, so the energy of each system is the correction alone
+    grid_coords = [SVector(2.0i + 0.5, 2.0j + 0.5, 2.0k + 0.5) for i in 0:4 for j in 0:4 for k in 0:3]
+    grid_types = vcat(fill((0.3, 0.5), 50), fill((0.25, 0.1), 30), fill((0.35, 0.8), 20))
+    grid_atoms = [Atom(index=i, mass=10.0u"g/mol", σ=(σ * u"nm"), ϵ=(ϵ * u"kJ * mol^-1"))
+                  for (i, (σ, ϵ)) in enumerate(grid_types)]
+    for (cutoff, E_openmm) in ((DistanceCutoff(1.0u"nm")             , -2.9833374390162641e-02),
+                               (PolynomialCutoff(0.85u"nm", 1.0u"nm"), -3.7899060815880382e-02),
+                               (PolynomialCutoff(0.6u"nm" , 1.0u"nm"), -6.1462753563729197e-02))
+        sys_dc = System(atoms=grid_atoms, coords=(grid_coords .* u"nm"),
+                        boundary=CubicBoundary(10.0u"nm"),
+                        general_inters=(LJDispersionCorrection(grid_atoms, cutoff),))
+        # OpenMM loses a few digits for a narrow switch, Molly integrates numerically
+        @test potential_energy(sys_dc) ≈ E_openmm * u"kJ * mol^-1" rtol=1e-9
+        dc_nounits = ustrip(only(sys_dc.general_inters))
+        @test dc_nounits.factor_6 == ustrip(only(sys_dc.general_inters).factor_6)
+        @test dc_nounits.cutoff isa typeof(cutoff).name.wrapper
+    end
+
+    # One atom type, without units, for the GROMACS comparison and the virial
+    σ_dc, ϵ_dc, n_dc, V_dc, rs_dc, rc_dc = 0.3, 0.5, 100, 1000.0, 0.6, 1.0
+    grid_atoms_1 = [Atom(index=i, mass=10.0, σ=σ_dc, ϵ=ϵ_dc) for i in 1:n_dc]
+    function disp_sys(cutoff)
+        return System(atoms=grid_atoms_1, coords=grid_coords, boundary=CubicBoundary(10.0),
+                      general_inters=(LJDispersionCorrection(grid_atoms_1, cutoff),),
+                      energy_units=NoUnits, force_units=NoUnits)
+    end
+    sys_cut, sys_shift = disp_sys(DistanceCutoff(rc_dc)), disp_sys(ShiftedPotentialCutoff(rc_dc))
+    sys_switch = disp_sys(PolynomialCutoff(rs_dc, rc_dc))
+    # GROMACS only corrects the r^-6 term, so the r^-12 term is taken away for the comparison
+    E12_cut = 8π * n_dc^2 * ϵ_dc * σ_dc^12 / (9 * rc_dc^9 * V_dc)
+    E12_shift = 4 * E12_cut - 2 * n_dc * ϵ_dc * σ_dc^12 / rc_dc^12
+    @test potential_energy(sys_cut  ) - E12_cut   ≈ -0.030536288396 rtol=1e-6
+    @test potential_energy(sys_shift) - E12_shift ≈  0.011827439070 rtol=1e-6
+
+    # The virial is that of the pairs that the cutoff leaves out, checked against quadrature
+    # Beyond the cutoff r ⋅ f = n ⋅ u for a term u ∝ r^-n
+    W_tail = 12 * 4ϵ_dc * σ_dc^12 / (9 * rc_dc^9) - 6 * 4ϵ_dc * σ_dc^6 / (3 * rc_dc^3)
+    W_factor = 2π * n_dc^2 / (3 * V_dc)
+    @test virial(sys_cut)[1, 1] ≈ W_factor * W_tail rtol=1e-12
+    # The shift does not change the forces
+    @test virial(sys_shift) ≈ virial(sys_cut) rtol=1e-12
+    # r^3 times minus the derivative of the part (1 - S)V that the switch leaves out
+    V_lj(r) = 4ϵ_dc * ((σ_dc / r)^12 - (σ_dc / r)^6)
+    dV_lj(r) = 4ϵ_dc * (-12 * σ_dc^12 / r^13 + 6 * σ_dc^6 / r^7)
+    t_sw(r) = (r - rs_dc) / (rc_dc - rs_dc)
+    S_sw(r) = 1 - 6 * t_sw(r)^5 + 15 * t_sw(r)^4 - 10 * t_sw(r)^3
+    dS_sw(r) = (-30 * t_sw(r)^4 + 60 * t_sw(r)^3 - 30 * t_sw(r)^2) / (rc_dc - rs_dc)
+    g_sw(r) = r^3 * -((1 - S_sw(r)) * dV_lj(r) - dS_sw(r) * V_lj(r))
+    n_quad = 10_000
+    h_quad = (rc_dc - rs_dc) / n_quad
+    W_sw = h_quad / 3 * sum((i == 0 || i == n_quad ? 1 : (isodd(i) ? 4 : 2)) *
+                            g_sw(rs_dc + i * h_quad) for i in 0:n_quad)
+    @test virial(sys_switch)[1, 1] ≈ W_factor * (W_sw + W_tail) rtol=1e-8
+    # The switched potential is continuous at the cutoff, so the virial is the energy
+    @test virial(sys_switch)[1, 1] ≈ potential_energy(sys_switch) rtol=1e-12
+    @test iszero(virial(sys_switch)[1, 2])
 
     InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
     @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])
@@ -2104,6 +2164,85 @@ end
         dU_dλ = (potential_energy(scaled_system(method, 1 + h), nothing) -
                     potential_energy(scaled_system(method, 1 - h), nothing)) / (2h)
         @test tr(virial(scaled_system(method, 1.0), nothing; n_threads=1)) ≈ -dU_dλ rtol=1e-5
+    end
+end
+
+@testset "Coulomb constant and permittivity" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+    c0 = Molly.coulomb_const
+    dist_cutoff = 0.9u"nm"
+
+    # The electrostatic terms of a system, everything apart from Lennard-Jones and bonded terms
+    function elec_components(sys)
+        nb = find_neighbors(sys)
+        pis = Tuple(inter for inter in sys.pairwise_inters if !(inter isa LennardJones))
+        sils = Tuple(il for il in sys.specific_inter_lists if eltype(il.inters) <: EwaldExclusion)
+        gis = Tuple(gi for gi in sys.general_inters if !(gi isa LJDispersionCorrection))
+        return [
+            potential_energy(sys, nb; pairwise_inters=pis, specific_inter_lists=(),
+                             general_inters=()),
+            potential_energy(sys, nb; pairwise_inters=(), specific_inter_lists=sils,
+                             general_inters=()),
+            potential_energy(sys, nb; pairwise_inters=(), specific_inter_lists=(),
+                             general_inters=gis),
+        ]
+    end
+
+    for AT in array_list, T in (Float64, Float32)
+        rtol = (T == Float64 ? 1e-12 : 1e-5)
+        for (method_1, method_2) in (
+                    (SetupPME(), SetupPME(coulomb_const=(2 * c0))),
+                    (SetupEwald(), SetupEwald(coulomb_const=(2 * c0))),
+                    (SetupCoulombReactionField(), SetupCoulombReactionField(coulomb_const=(2 * c0))),
+                    (DistanceCutoff(T(dist_cutoff)),
+                     SetupCoulomb(cutoff=DistanceCutoff(T(dist_cutoff)), coulomb_const=(2 * c0))))
+            sys_1, sys_2 = (System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff; array_type=AT,
+                                   float_type=T, dist_cutoff=T(dist_cutoff),
+                                   dist_buffer=zero(T(dist_cutoff)), nonbonded_method=m,
+                                   center_coords=false, strictness=:nowarn)
+                            for m in (method_1, method_2))
+            # Every electrostatic term uses the Coulomb constant of the setup type
+            E_1, E_2 = elec_components(sys_1), elec_components(sys_2)
+            @test all(isapprox.(E_2, 2 .* E_1; rtol=rtol))
+            # The other terms are found by subtraction, so the tolerance is relative to the
+            #   larger electrostatic terms
+            @test isapprox(potential_energy(sys_2) - sum(E_2), potential_energy(sys_1) - sum(E_1);
+                           atol=(rtol * sum(abs, E_2)))
+        end
+
+        # ϵr scales every term of Ewald summation by 1 / ϵr
+        sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff; array_type=AT, float_type=T,
+                     dist_cutoff=T(dist_cutoff), dist_buffer=zero(T(dist_cutoff)),
+                     nonbonded_method=SetupPME(), center_coords=false, strictness=:nowarn)
+        coul, excl, pme = sys.pairwise_inters[2], sys.specific_inter_lists[end], sys.general_inters[1]
+        coul_ϵr = CoulombEwald(dist_cutoff=coul.dist_cutoff, error_tol=coul.error_tol, ϵr=2,
+                               use_neighbors=true, weight_special=coul.weight_special,
+                               coulomb_const=coul.coulomb_const)
+        @test coul_ϵr.ϵr isa T
+        excl_ϵr = InteractionList2Atoms(excl.is, excl.js, excl.inters, excl.types,
+                        Molly.EwaldExclusionData(coul.dist_cutoff; error_tol=coul.error_tol, ϵr=2))
+        pme_ϵr = PME(coul.dist_cutoff, sys.atoms, sys.boundary; error_tol=coul.error_tol, ϵr=2,
+                     mesh_dims=pme.mesh_dims)
+        E_1 = potential_energy(sys; pairwise_inters=(coul,), specific_inter_lists=(excl,),
+                               general_inters=(pme,))
+        E_2 = potential_energy(sys; pairwise_inters=(coul_ϵr,), specific_inter_lists=(excl_ϵr,),
+                               general_inters=(pme_ϵr,))
+        @test E_2 ≈ E_1 / 2 rtol=rtol
+        fs_1 = forces(sys; pairwise_inters=(coul,), specific_inter_lists=(excl,),
+                      general_inters=(pme,))
+        fs_2 = forces(sys; pairwise_inters=(coul_ϵr,), specific_inter_lists=(excl_ϵr,),
+                      general_inters=(pme_ϵr,))
+        @test maximum(norm.(from_device(fs_2) .- from_device(fs_1) ./ 2)) <
+                        (T == Float64 ? 1e-10 : 1e-3)u"kJ * mol^-1 * nm^-1"
+        ewald_1 = Ewald(coul.dist_cutoff; error_tol=coul.error_tol)
+        ewald_2 = Ewald(coul.dist_cutoff; error_tol=coul.error_tol, ϵr=2)
+        @test potential_energy(sys; pairwise_inters=(), specific_inter_lists=(),
+                               general_inters=(ewald_2,)) ≈
+              potential_energy(sys; pairwise_inters=(), specific_inter_lists=(),
+                               general_inters=(ewald_1,)) / 2 rtol=rtol
+        # The λ versions of CoulombEwald fold ϵr into the Coulomb constant
+        coul_ϵr_λ = Molly.to_lambda_function(coul_ϵr, Molly.ScaledSoftCore(); float_type=T)
+        @test coul_ϵr_λ.coulomb_const ≈ coul.coulomb_const / 2
     end
 end
 

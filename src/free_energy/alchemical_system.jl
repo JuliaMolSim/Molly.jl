@@ -255,17 +255,20 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
         if inter isa PME && two_grid
             push!(inters, PME_λ(inter.dist_cutoff, to_device(atoms, AT), boundary;
                                 grad_safe=inter.grad_safe, error_tol=inter.error_tol,
-                                order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
+                                order=inter.order, ϵr=inter.ϵr,
+                                coulomb_const=inter.coulomb_const, mesh_dims=inter.mesh_dims,
                                 fixed_charges=false, scheduler=scheduler, λ=FT(global_λ)))
         elseif inter isa PME
             push!(inters, PME(inter.dist_cutoff, to_device(atoms, AT), boundary;
                               grad_safe=inter.grad_safe, error_tol=inter.error_tol,
-                              order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
+                              order=inter.order, ϵr=inter.ϵr,
+                              coulomb_const=inter.coulomb_const, mesh_dims=inter.mesh_dims,
                               fixed_charges=false, scheduler=scheduler))
         elseif inter isa Ewald
-            push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, scheduler=scheduler))
+            push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, ϵr=inter.ϵr,
+                                coulomb_const=inter.coulomb_const, scheduler=scheduler))
         elseif inter isa LJDispersionCorrection
-            push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.dist_cutoff,
+            push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff,
                                                   MinimumMixing(), inter.σ_mix, inter.ϵ_mix;
                                                   scheduler=scheduler))
         else
@@ -307,7 +310,7 @@ function set_lambda!(sys::System, λ)
         if inter isa PME_λ
             pme_lambda_reweight(inter, λ)
         elseif inter isa LJDispersionCorrectionλ
-            LJDispersionCorrectionλ(sys.atoms, inter.dist_cutoff, MinimumMixing(), inter.σ_mix,
+            LJDispersionCorrectionλ(sys.atoms, inter.cutoff, MinimumMixing(), inter.σ_mix,
                                     inter.ϵ_mix; scheduler=inter.scheduler)
         else
             inter
@@ -433,7 +436,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
             push!(SpecificInteraction, InteractionList2Atoms(
                 inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
                 EwaldExclusionData(d.dist_cutoff; error_tol=d.error_tol, ϵr=d.ϵr,
-                                   scheduler=scheduler, λ_mix=d.λ_mixing),
+                                   coulomb_const=d.coulomb_const, scheduler=scheduler,
+                                   λ_mix=d.λ_mixing),
             ))
         else
             push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, LJsoftcore_params))
@@ -956,7 +960,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         if inter isa AbstractEwald
             excluded_pairs = find_excluded_pairs(eligible, special)
             exclusion_data = EwaldExclusionData(FT(inter.dist_cutoff); error_tol=FT(inter.error_tol),
-                                    ϵr=(inter isa PME ? FT(inter.ϵr) : one(FT)), scheduler=scheduler)
+                                    ϵr=FT(inter.ϵr), coulomb_const=inter.coulomb_const,
+                                    scheduler=scheduler)
             ewald_exclusions = InteractionList2Atoms(
                 to_device([ep[1] for ep in excluded_pairs], AT),
                 to_device([ep[2] for ep in excluded_pairs], AT),

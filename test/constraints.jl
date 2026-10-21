@@ -1791,7 +1791,8 @@ end
     d_w = Molly.build_lincs_data(c_w, m_w)
     ws_w = Molly.create_lincs_workspace(d_w)
     xp_w = x_w .+ v_w .* 0.002
-    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
+    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0),
+                       Molly.default_position_constraint_context())
 
     # apply_lincs! zero allocations. The solve itself allocates nothing; running it over
     #   more than one thread allocates only the tasks that `Threads.@threads` spawns,

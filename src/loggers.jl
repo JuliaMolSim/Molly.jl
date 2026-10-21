@@ -837,6 +837,12 @@ Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
 snapshot; different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
+
+Many formats store coordinates at reduced precision, for example 0.001 Å for PDB, about
+0.001 nm for XTC and single precision for DCD.
+Energies calculated from frames read back, for example with [`EnsembleSystem`](@ref),
+are affected by this, so a full precision format or [`CoordinatesLogger`](@ref) should
+be used if that matters.
 """
 mutable struct TrajectoryWriter{I, T}
     n_steps::Int
