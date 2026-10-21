@@ -1,7 +1,8 @@
 export
     Leg,
-    ThermodynamicCycle,
-    free_energy,
+    ThermodynamicCycle
+
+@public free_energy,
     free_energy_uncertainty,
     free_energy_difference,
     free_energy_difference_uncertainty,
@@ -15,11 +16,11 @@ energy units.
 
 States are given by index or by [`ThermoState`](@ref) name. This is the interface a
 [`Leg`](@ref) source implements, together with
-[`free_energy_difference_uncertainty`](@ref). Molly implements it for:
+[`Molly.free_energy_difference_uncertainty`](@ref). Molly implements it for:
 - [`TSSState`](@ref), from [`Molly.tss_free_energies`](@ref), with the jackknife
   standard error of [`Molly.tss_free_energy_uncertainties`](@ref);
 - [`AWHState`](@ref), from its current free energies `f`. AWH has no uncertainty
-  estimate, so `free_energy_difference_uncertainty` raises an error;
+  estimate, so `Molly.free_energy_difference_uncertainty` raises an error;
 - [`Molly.MBARResult`](@ref), the MBAR estimate for umbrella sampling, REMD or any
   other set of samples, with its asymptotic standard error;
 - a `PMF` from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), between two
@@ -36,7 +37,7 @@ function free_energy_difference end
 """
     free_energy_difference_uncertainty(source, i, j)
 
-Standard error of [`free_energy_difference`](@ref)`(source, i, j)`, in energy units.
+Standard error of [`Molly.free_energy_difference`](@ref)`(source, i, j)`, in energy units.
 """
 function free_energy_difference_uncertainty end
 
@@ -48,8 +49,8 @@ One leg of a [`ThermodynamicCycle`](@ref): the free-energy difference
 (usually ±1).
 
 `from` and `to` are state indices or [`ThermoState`](@ref) names. `source` is any
-object that implements [`free_energy_difference`](@ref) and
-[`free_energy_difference_uncertainty`](@ref), such as a [`TSSState`](@ref), an
+object that implements [`Molly.free_energy_difference`](@ref) and
+[`Molly.free_energy_difference_uncertainty`](@ref), such as a [`TSSState`](@ref), an
 [`AWHState`](@ref), a [`Molly.MBARResult`](@ref) or a PMF.
 """
 struct Leg{S, I, J}
@@ -76,11 +77,11 @@ end
 
 A free energy composed from the free-energy differences of several legs.
 
-[`free_energy`](@ref) returns ``\\sum_i c_i \\Delta F_i`` plus `correction`, and
-[`free_energy_uncertainty`](@ref) its standard error.
+[`Molly.free_energy`](@ref) returns ``\\sum_i c_i \\Delta F_i`` plus `correction`, and
+[`Molly.free_energy_uncertainty`](@ref) its standard error.
 
 `correction` is an analytic term in energy units, e.g. a standard-state correction
-(see [`standard_state_correction`](@ref)), the release of restraints or a long-range
+(see [`Molly.standard_state_correction`](@ref)), the release of restraints or a long-range
 correction. `nothing` adds no term.
 
 Each leg is converted to energy units with the temperature of its own states, so legs
@@ -137,7 +138,7 @@ end
 """
     free_energy_uncertainty(cycle::ThermodynamicCycle)
 
-Standard error of [`free_energy`](@ref)`(cycle)`, ``\\sqrt{\\sum_i c_i^2 \\sigma_i^2}``,
+Standard error of [`Molly.free_energy`](@ref)`(cycle)`, ``\\sqrt{\\sum_i c_i^2 \\sigma_i^2}``,
 in the energy units of the first leg.
 
 The legs are assumed to be independent, e.g. from separate simulations. Legs that share

@@ -693,11 +693,11 @@ $$\Delta\Delta G = \Delta G_{bind}(B) - \Delta G_{bind}(A) = \Delta G_{bound}(A 
 
 ## Thermodynamic cycles
 
-A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`Leg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`free_energy`](@ref) returns
+A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`Leg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`Molly.free_energy`](@ref) returns
 
 $$\Delta G = \sum_i c_i \Delta F_i + \Delta G_\text{correction}$$
 
-where the correction is an analytic term: a standard-state correction, the release of restraints or a long-range correction. [`free_energy_uncertainty`](@ref) returns $\sqrt{\sum_i c_i^2 \sigma_i^2}$, which assumes that the legs are independent, e.g. that they come from separate simulations. Both are in energy units.
+where the correction is an analytic term: a standard-state correction, the release of restraints or a long-range correction. [`Molly.free_energy_uncertainty`](@ref) returns $\sqrt{\sum_i c_i^2 \sigma_i^2}$, which assumes that the legs are independent, e.g. that they come from separate simulations. Both are in energy units.
 
 For the benzene hydration free energy of the TSS example below, where state 1 is decoupled and the last state is coupled, the annihilation free energy of each leg is $F_1 - F_\text{end}$:
 
@@ -706,19 +706,19 @@ For the benzene hydration free energy of the TSS example below, where state 1 is
     Leg(tss_state_vac,  N_LAMBDA_STATES => 1; coefficient=+1, name=:vacuum),
     Leg(tss_state_solv, N_LAMBDA_STATES => 1; coefficient=-1, name=:solvated),
 )
-free_energy(ΔG_hyd)             # kJ mol^-1
-free_energy_uncertainty(ΔG_hyd) # Jackknife standard errors of the legs, combined
+Molly.free_energy(ΔG_hyd)             # kJ mol^-1
+Molly.free_energy_uncertainty(ΔG_hyd) # Jackknife standard errors of the legs, combined
 ```
 
-The alchemical cycle gives the transfer free energy at equal concentrations in the gas and in the solution. [`standard_state_correction`](@ref) converts it to a gas at pressure $P$ and a solution at concentration $c$ (1 M by default), adding $k_B T \ln(v_\text{gas} / v_\text{std})$ with $v_\text{gas} = k_B T / P$ and $v_\text{std} = 1 / (c N_A)$:
+The alchemical cycle gives the transfer free energy at equal concentrations in the gas and in the solution. [`Molly.standard_state_correction`](@ref) converts it to a gas at pressure $P$ and a solution at concentration $c$ (1 M by default), adding $k_B T \ln(v_\text{gas} / v_\text{std})$ with $v_\text{gas} = k_B T / P$ and $v_\text{std} = 1 / (c N_A)$:
 
 ```julia
-ΔG_hyd° = ThermodynamicCycle(ΔG_hyd.legs...; correction=standard_state_correction(T0, P0))
+ΔG_hyd° = ThermodynamicCycle(ΔG_hyd.legs...; correction=Molly.standard_state_correction(T0, P0))
 ```
 
-A leg source implements [`free_energy_difference`](@ref)`(source, i, j)`, which returns $F_j - F_i$ in energy units, and [`free_energy_difference_uncertainty`](@ref)`(source, i, j)`. Molly implements them for:
+A leg source implements [`Molly.free_energy_difference`](@ref)`(source, i, j)`, which returns $F_j - F_i$ in energy units, and [`Molly.free_energy_difference_uncertainty`](@ref)`(source, i, j)`. Molly implements them for:
 - [`TSSState`](@ref): the free energies of [`Molly.tss_free_energies`](@ref), with the jackknife standard errors of [`Molly.tss_free_energy_uncertainties`](@ref);
-- [`AWHState`](@ref): the free energies `f`. AWH has no uncertainty estimate, so [`free_energy_uncertainty`](@ref) raises an error for a cycle with an AWH leg;
+- [`AWHState`](@ref): the free energies `f`. AWH has no uncertainty estimate, so [`Molly.free_energy_uncertainty`](@ref) raises an error for a cycle with an AWH leg;
 - [`Molly.MBARResult`](@ref): MBAR free energies with their asymptotic standard errors, for umbrella sampling, REMD or any other set of samples, e.g. `Molly.MBARResult(Molly.assemble_mbar_inputs(coords_k, boundaries_k, thermo_states), thermo_states)`;
 - a PMF from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), computed with `kBT`, between two bins given by index. The uncertainty treats the two bins as independent, an approximation that can be too large or too small since the bins share the normalisation.
 

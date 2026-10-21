@@ -1049,8 +1049,8 @@ end
 Relative free energies of `K` thermodynamic states from MBAR, with their asymptotic
 covariance, see [Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq D6.
 
-It is a leg source for [`ThermodynamicCycle`](@ref): [`free_energy_difference`](@ref)
-and [`free_energy_difference_uncertainty`](@ref) return values in energy units.
+It is a leg source for [`ThermodynamicCycle`](@ref): [`Molly.free_energy_difference`](@ref)
+and [`Molly.free_energy_difference_uncertainty`](@ref) return values in energy units.
 
 # Arguments
 - `u::AbstractMatrix` - `N×K` reduced potentials, as for [`Molly.iterate_mbar`](@ref).

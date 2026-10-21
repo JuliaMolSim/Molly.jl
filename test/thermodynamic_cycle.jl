@@ -88,47 +88,47 @@ end
         @test length(cycle.legs) == 2
         @test cycle.legs[2].coefficient === -2.0
         @test cycle.legs[1].name == :a
-        @test free_energy(cycle) ≈ (5.0 - 2 * 4.0 + 1.5)u"kJ/mol"
-        @test free_energy_uncertainty(cycle) ≈ sqrt(0.4^2 + 4 * (0.1^2 + 0.2^2))u"kJ/mol"
+        @test Molly.free_energy(cycle) ≈ (5.0 - 2 * 4.0 + 1.5)u"kJ/mol"
+        @test Molly.free_energy_uncertainty(cycle) ≈ sqrt(0.4^2 + 4 * (0.1^2 + 0.2^2))u"kJ/mol"
 
         # Compatible units are converted to the units of the first leg
         src_kcal = ToyFreeEnergies([0.0, 1.0]u"kcal/mol", [0.0, 0.5]u"kcal/mol")
         mixed = ThermodynamicCycle(Leg(src_a, 1 => 2), Leg(src_kcal, 1 => 2);
                                    correction=1.0u"kcal/mol")
-        @test unit(free_energy(mixed)) == u"kJ/mol"
-        @test free_energy(mixed) ≈ (2.0 + 2 * 4.184)u"kJ/mol"
-        @test free_energy_uncertainty(mixed) ≈ hypot(0.3, 0.5 * 4.184)u"kJ/mol"
+        @test unit(Molly.free_energy(mixed)) == u"kJ/mol"
+        @test Molly.free_energy(mixed) ≈ (2.0 + 2 * 4.184)u"kJ/mol"
+        @test Molly.free_energy_uncertainty(mixed) ≈ hypot(0.3, 0.5 * 4.184)u"kJ/mol"
 
         # Without a correction, unitless sources work too
         unitless = ThermodynamicCycle(Leg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 2 => 1))
-        @test free_energy(unitless) ≈ -3.0
-        @test free_energy_uncertainty(unitless) ≈ 0.4
+        @test Molly.free_energy(unitless) ≈ -3.0
+        @test Molly.free_energy_uncertainty(unitless) ≈ 0.4
 
         @test_throws ArgumentError ThermodynamicCycle()
         @test_throws ArgumentError Leg(src_a, 1.0 => 2)
         @test_throws ArgumentError Leg(src_a, 1 => :b)
         @test_throws ArgumentError Leg(src_a, true => 2)
         src_nm = ToyFreeEnergies([0.0, 1.0]u"nm", [0.0, 0.1]u"nm")
-        @test_throws ArgumentError free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2),
-                                                                  Leg(src_nm, 1 => 2)))
-        @test_throws ArgumentError free_energy_uncertainty(
+        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2),
+                                                                        Leg(src_nm, 1 => 2)))
+        @test_throws ArgumentError Molly.free_energy_uncertainty(
                                         ThermodynamicCycle(Leg(src_a, 1 => 2),
                                                            Leg(src_nm, 1 => 2)))
-        @test_throws ArgumentError free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2);
-                                                                  correction=1.0u"K"))
-        @test_throws ArgumentError free_energy(ThermodynamicCycle(
+        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(Leg(src_a, 1 => 2);
+                                                                        correction=1.0u"K"))
+        @test_throws ArgumentError Molly.free_energy(ThermodynamicCycle(
                         Leg(ToyFreeEnergies([0.0, 3.0], [0.0, 0.4]), 1 => 2);
                         correction=1.0u"kJ/mol"))
     end
 
     @testset "standard-state correction" begin
         T, P = 298.15u"K", 1.0u"bar"
-        correction = standard_state_correction(T, P)
+        correction = Molly.standard_state_correction(T, P)
         @test unit(correction) == u"kJ/mol"
         # RT ln(RTc/P), about 7.96 kJ/mol at 298.15 K and 1 bar
         @test correction ≈ Unitful.R * T * log(ustrip(upreferred(Unitful.R * T * u"mol/L" / P)))
         @test isapprox(correction, 7.9585u"kJ/mol"; atol=1e-4u"kJ/mol")
-        @test standard_state_correction(T, P; concentration=2u"mol/L") ≈
+        @test Molly.standard_state_correction(T, P; concentration=2u"mol/L") ≈
               correction + Unitful.R * T * log(2)
     end
 
@@ -138,48 +138,48 @@ end
         vac = make_fixed_tss_state(make_cycle_thermo_states(names=names), f_vac)
         solv = make_fixed_tss_state(make_cycle_thermo_states(names=names), f_solv; noise=0.8)
         kBT = uconvert(u"kJ/mol", Unitful.R * 298.0u"K")
-        @test free_energy_difference(vac, 1, 4) ≈ 6.0 * kBT
-        @test free_energy_difference(vac, "coupled", "s2") ≈ -5.0 * kBT
+        @test Molly.free_energy_difference(vac, 1, 4) ≈ 6.0 * kBT
+        @test Molly.free_energy_difference(vac, "coupled", "s2") ≈ -5.0 * kBT
 
         cycle = ThermodynamicCycle(
             Leg(vac, "coupled" => "decoupled"; name=:vacuum),
             Leg(solv, 4 => 1; coefficient=-1, name=:solvated);
-            correction=standard_state_correction(298.0u"K", 1u"bar"),
+            correction=Molly.standard_state_correction(298.0u"K", 1u"bar"),
         )
         jk_vac = Molly.tss_free_energy_uncertainties(vac)
         jk_solv = Molly.tss_free_energy_uncertainties(solv)
         f_vac_rep, f_solv_rep = Molly.tss_free_energies(vac), Molly.tss_free_energies(solv)
         β_vac, β_solv = vac.state_space.betas[1], solv.state_space.betas[1]
         manual = (f_vac_rep[1] - f_vac_rep[4]) / β_vac - (f_solv_rep[1] - f_solv_rep[4]) / β_solv
-        @test free_energy(cycle) ≈ manual * u"kJ/mol" +
-                                   standard_state_correction(298.0u"K", 1u"bar")
-        @test free_energy(cycle) ≈ (-6.0 + 4.0) * kBT +
-                                   standard_state_correction(298.0u"K", 1u"bar")
+        @test Molly.free_energy(cycle) ≈ manual * u"kJ/mol" +
+                                         Molly.standard_state_correction(298.0u"K", 1u"bar")
+        @test Molly.free_energy(cycle) ≈ (-6.0 + 4.0) * kBT +
+                                         Molly.standard_state_correction(298.0u"K", 1u"bar")
         σ_vac, σ_solv = jk_vac.standard_errors[4] / β_vac, jk_solv.standard_errors[4] / β_solv
         @test σ_vac > 0 && σ_solv > 0
-        @test free_energy_uncertainty(cycle) ≈ hypot(σ_vac, σ_solv) * u"kJ/mol"
+        @test Molly.free_energy_uncertainty(cycle) ≈ hypot(σ_vac, σ_solv) * u"kJ/mol"
         # The jackknife reference state is the leg's `from` state
-        @test free_energy_difference_uncertainty(vac, 2, 4) ≈
+        @test Molly.free_energy_difference_uncertainty(vac, 2, 4) ≈
               Molly.tss_free_energy_uncertainties(vac; reference_state=2).standard_errors[4] /
               β_vac * u"kJ/mol"
 
-        @test_throws ArgumentError free_energy_difference(vac, 1, 5)
-        @test_throws ArgumentError free_energy_difference(vac, "absent", "coupled")
+        @test_throws ArgumentError Molly.free_energy_difference(vac, 1, 5)
+        @test_throws ArgumentError Molly.free_energy_difference(vac, "absent", "coupled")
         # Default names are equal for states at the same temperature and pressure
         unnamed = make_fixed_tss_state(make_cycle_thermo_states(), f_vac)
-        @test_throws ArgumentError free_energy_difference(unnamed, "state_T298.0 K", 1)
+        @test_throws ArgumentError Molly.free_energy_difference(unnamed, "state_T298.0 K", 1)
 
         # A leg between states at different temperatures needs a single kBT
         temps = [298.0, 298.0, 310.0, 310.0]u"K"
         mixed = make_fixed_tss_state(make_cycle_thermo_states(temps=temps), f_vac)
-        @test free_energy_difference(mixed, 3, 4) ≈
+        @test Molly.free_energy_difference(mixed, 3, 4) ≈
               3.0 * uconvert(u"kJ/mol", Unitful.R * 310.0u"K")
-        @test_throws ArgumentError free_energy_difference(mixed, 1, 4)
-        @test_throws ArgumentError free_energy_difference_uncertainty(mixed, 1, 4)
+        @test_throws ArgumentError Molly.free_energy_difference(mixed, 1, 4)
+        @test_throws ArgumentError Molly.free_energy_difference_uncertainty(mixed, 1, 4)
         # Legs at different temperatures combine, each with its own kBT
         two_temps = ThermodynamicCycle(Leg(mixed, 1 => 2), Leg(mixed, 3 => 4))
-        @test free_energy(two_temps) ≈ 1.0 * kBT +
-                                       3.0 * uconvert(u"kJ/mol", Unitful.R * 310.0u"K")
+        @test Molly.free_energy(two_temps) ≈ 1.0 * kBT +
+                                             3.0 * uconvert(u"kJ/mol", Unitful.R * 310.0u"K")
     end
 
     @testset "AWHState legs" begin
@@ -187,11 +187,11 @@ end
         awh = AWHState(make_cycle_thermo_states(names=names); n_bias=10)
         awh.f .= [0.0, 1.0, 3.0, 6.0]
         kBT = uconvert(u"kJ/mol", Unitful.R * 298.0u"K")
-        @test free_energy_difference(awh, "d", "a") ≈ -6.0 * kBT
+        @test Molly.free_energy_difference(awh, "d", "a") ≈ -6.0 * kBT
         cycle = ThermodynamicCycle(Leg(awh, 1 => 4), Leg(awh, 2 => 3; coefficient=-1))
-        @test free_energy(cycle) ≈ 4.0 * kBT
-        @test_throws ArgumentError free_energy_difference_uncertainty(awh, 1, 4)
-        @test_throws ArgumentError free_energy_uncertainty(cycle)
+        @test Molly.free_energy(cycle) ≈ 4.0 * kBT
+        @test_throws ArgumentError Molly.free_energy_difference_uncertainty(awh, 1, 4)
+        @test_throws ArgumentError Molly.free_energy_uncertainty(cycle)
     end
 
     @testset "MBARResult legs" begin
@@ -202,13 +202,14 @@ end
                                   names=["w$k" for k in 1:9])
         f, _ = Molly.iterate_mbar(samples.u, samples.win_of, samples.N_k)
         @test result.f == f
-        @test free_energy_difference(result, 2, 9) ≈ (f[9] - f[2]) * 2.5u"kJ/mol"
-        @test free_energy_difference(result, "w9", "w2") ≈ (f[2] - f[9]) * 2.5u"kJ/mol"
-        @test free_energy_difference_uncertainty(result, 3, 3) == 0.0u"kJ/mol"
-        @test free_energy_difference_uncertainty(result, 1, 9) ≈
-              free_energy_difference_uncertainty(result, 9, 1)
-        @test abs(free_energy_difference(result, 1, 9) - samples.exact_f[9] * 2.5u"kJ/mol") <
-              4 * free_energy_difference_uncertainty(result, 1, 9)
+        @test Molly.free_energy_difference(result, 2, 9) ≈ (f[9] - f[2]) * 2.5u"kJ/mol"
+        @test Molly.free_energy_difference(result, "w9", "w2") ≈ (f[2] - f[9]) * 2.5u"kJ/mol"
+        @test Molly.free_energy_difference_uncertainty(result, 3, 3) == 0.0u"kJ/mol"
+        @test Molly.free_energy_difference_uncertainty(result, 1, 9) ≈
+              Molly.free_energy_difference_uncertainty(result, 9, 1)
+        @test abs(Molly.free_energy_difference(result, 1, 9) -
+                  samples.exact_f[9] * 2.5u"kJ/mol") <
+              4 * Molly.free_energy_difference_uncertainty(result, 1, 9)
         # Shifted reduced potentials give the same result
         shifted = Molly.MBARResult(samples.u .- minimum(samples.u; dims=2), samples.win_of,
                                    samples.N_k, kBT)
@@ -221,39 +222,39 @@ end
         for _ in 1:30
             s = harmonic_umbrella_samples(rng)
             r = Molly.MBARResult(s.u, s.win_of, s.N_k, kBT)
-            push!(ΔF, ustrip(free_energy_difference(r, 1, 9)))
-            push!(σ, ustrip(free_energy_difference_uncertainty(r, 1, 9)))
+            push!(ΔF, ustrip(Molly.free_energy_difference(r, 1, 9)))
+            push!(σ, ustrip(Molly.free_energy_difference_uncertainty(r, 1, 9)))
         end
         @test std(ΔF) ≈ mean(σ) rtol=0.3
         @test mean(ΔF) ≈ samples.exact_f[9] * 2.5 atol=3 * mean(σ) / sqrt(30)
 
         # Unequal sample counts and poor overlap: the covariance equals the direct form
-        #   Θ = Wᵀ(I − WNWᵀ)⁺W (Shirts and Chodera 2008, Eq D6), and its standard error matches the
-        #   spread over independent data sets
+        #   Θ = Wᵀ(I − WNWᵀ)⁺W (Shirts and Chodera 2008, Eq D6), and its standard error
+        #   matches the spread over independent data sets
         small = unequal_umbrella_samples(rng; N_k=[40, 600, 100, 20, 400])
         r_small = Molly.MBARResult(small.u, small.win_of, small.N_k, fill(1.0, 5))
         W, _ = Molly.mbar_weights_sampled(small.u, r_small.f, log.(Float64.(small.N_k)))
         W ./= W * Float64.(small.N_k)
         Θ = W' * pinv(I - W * Diagonal(Float64.(small.N_k)) * W') * W
-        @test free_energy_difference_uncertainty(r_small, 1, 5) ≈
+        @test Molly.free_energy_difference_uncertainty(r_small, 1, 5) ≈
               sqrt(Θ[1, 1] + Θ[5, 5] - 2 * Θ[1, 5]) rtol=1e-4
         ΔF_unequal = Float64[]
         σ_unequal = Float64[]
         for _ in 1:50
             s = unequal_umbrella_samples(rng)
             r = Molly.MBARResult(s.u, s.win_of, s.N_k, fill(1.0, 5))
-            push!(ΔF_unequal, free_energy_difference(r, 1, 5))
-            push!(σ_unequal, free_energy_difference_uncertainty(r, 1, 5))
+            push!(ΔF_unequal, Molly.free_energy_difference(r, 1, 5))
+            push!(σ_unequal, Molly.free_energy_difference_uncertainty(r, 1, 5))
         end
         @test std(ΔF_unequal) ≈ mean(σ_unequal) rtol=0.3
 
         @test_throws ArgumentError Molly.MBARResult(samples.u, samples.win_of, samples.N_k, kBT;
                                                     names=[Symbol("w", k) for k in 1:9])
-        @test_throws ArgumentError free_energy_difference(
+        @test_throws ArgumentError Molly.free_energy_difference(
                     Molly.MBARResult(samples.u, samples.win_of, samples.N_k, kBT), "w1", 2)
         mixed_T = Molly.MBARResult(samples.u, samples.win_of, samples.N_k,
                                    [fill(2.5u"kJ/mol", 8); 2.6u"kJ/mol"])
-        @test_throws ArgumentError free_energy_difference(mixed_T, 1, 9)
+        @test_throws ArgumentError Molly.free_energy_difference(mixed_T, 1, 9)
         @test_throws DimensionMismatch Molly.MBARResult(samples.u, samples.win_of,
                                                         samples.N_k, kBT[1:8])
 
@@ -276,18 +277,18 @@ end
         kBT = 2.5u"kJ/mol"
         pmf = Molly.pmf_with_uncertainty(samples.u, u_target, f, samples.N_k, logN, R_k;
                                          edges=-1.5:0.25:1.5, kBT=kBT)
-        @test free_energy_difference(pmf, 2, 10) ≈ (pmf.F[10] - pmf.F[2]) * kBT
-        @test free_energy_difference_uncertainty(pmf, 2, 10) ≈
+        @test Molly.free_energy_difference(pmf, 2, 10) ≈ (pmf.F[10] - pmf.F[2]) * kBT
+        @test Molly.free_energy_difference_uncertainty(pmf, 2, 10) ≈
               hypot(pmf.sigma_F[2], pmf.sigma_F[10]) * kBT
         # Harmonic PMF, F(x) = x²/2 in kBT
-        @test abs(free_energy_difference(pmf, 2, 10) -
+        @test abs(Molly.free_energy_difference(pmf, 2, 10) -
                   0.5 * (pmf.centers[10]^2 - pmf.centers[2]^2) * kBT) <
-              4 * free_energy_difference_uncertainty(pmf, 2, 10)
+              4 * Molly.free_energy_difference_uncertainty(pmf, 2, 10)
 
         reduced = Molly.pmf_with_uncertainty(samples.u, u_target, f, samples.N_k, logN, R_k;
                                              edges=-1.5:0.25:1.5)
-        @test_throws ArgumentError free_energy_difference(reduced, 2, 10)
-        @test_throws ArgumentError free_energy_difference(pmf, "a", 10)
-        @test_throws ArgumentError free_energy_difference(pmf, 1, 13)
+        @test_throws ArgumentError Molly.free_energy_difference(reduced, 2, 10)
+        @test_throws ArgumentError Molly.free_energy_difference(pmf, "a", 10)
+        @test_throws ArgumentError Molly.free_energy_difference(pmf, 1, 13)
     end
 end
