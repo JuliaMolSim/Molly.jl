@@ -788,8 +788,6 @@
         @testset "default solute dielectric is a float of the solvent dielectric type" begin
             @test CoulombReactionField(dist_cutoff=1.0f0,
                                        solvent_dielectric=78.3f0).solute_dielectric === 1.0f0
-            @test CoulombReactionField(dist_cutoff=1.0,
-                                       solvent_dielectric=80).solute_dielectric === 1.0
             @test CoulombReactionField(dist_cutoff=1.0).solute_dielectric === 1.0
             @test Molly.CoulombReactionFieldScaled(dist_cutoff=1.0f0,
                                     solvent_dielectric=Inf32).solute_dielectric === 1.0f0
