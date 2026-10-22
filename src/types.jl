@@ -2350,6 +2350,9 @@ calculation functions to save on computation when the neighbors are the same
 for multiple calls.
 In a similar way, `n_threads` can be given to determine the number of threads
 to use when running the calculation function.
+`visit_state=true` lets history-dependent general interactions such as
+[`Metadynamics`](@ref) update (see [`forces`](@ref)); pass the current `step_n` with it
+so they follow the step schedule.
 Note that this calculator is designed for using Molly in other contexts; if you
 want to use another calculator in Molly it can be given as `general_inters` when
 creating a [`System`](@ref).
@@ -2420,6 +2423,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         neighbors=nothing,
         step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
+        visit_state::Bool=false,
         kwargs...,
     )
     sys_nointers = System(abstract_sys; force_units=calc.force_units,
@@ -2433,7 +2437,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return forces(sys, nbs, step_n; n_threads=n_threads)
+    return forces(sys, nbs, step_n; n_threads=n_threads, visit_state=visit_state)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
@@ -2442,6 +2446,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         neighbors=nothing,
         step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
+        visit_state::Bool=false,
         kwargs...,
     )
     sys_nointers = System(abstract_sys; force_units=calc.force_units,
@@ -2455,7 +2460,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads,
+                            visit_state=visit_state)
 end
 
 """

@@ -608,23 +608,24 @@ passed in, which is also `bias.memory`, so biases built from one memory are walk
 their hills. Deposits into a memory aren't thread-safe, so walkers sharing a memory must
 run one after the other, not in parallel.
 
-A hill is deposited on the first step of each window of `n_steps` steps -- no external
-logger is needed: by molecular dynamics integrators from `forces!`, and by
-[`MetropolisMonteCarlo`](@ref) on the configuration after each accept/reject step. The first hill is on the start configuration, at step 0, or at step 1 for
-integrators such as [`Langevin`](@ref) that first compute forces there. Recomputing forces
-within a step (e.g. by a logger or coupler) adds no hill and a multiple time step
-integrator deposits once per outer step. Chunked `simulate!` calls deposit as one
-continuous run, with or without `init_step`, as long as a bias uses one of the two
-throughout: mixing them, or calling `forces(sys)` between runs and then continuing with
-`init_step`, shifts the schedule. Energy minimizers also count as
-steps and warn, so minimize without the bias. The number of hills deposited so far is
+Hills are deposited when a simulator visits a state, on the first visit in each window of
+`n_steps` steps -- no external logger is needed. Molecular dynamics integrators visit a
+state in their force calculation (`visit_state=true` in [`forces`](@ref)), and
+[`MetropolisMonteCarlo`](@ref) on the chain's current state after each accept/reject step.
+The first hill is on the start configuration, at step 0, or at step 1 for integrators such
+as [`Langevin`](@ref); with Monte Carlo it is on the state after the first accept/reject
+step. A multiple time step integrator deposits once per outer step. Minimizers, loggers, couplers and other force or energy calls don't deposit.
+Chunked `simulate!` calls deposit as one continuous run, with or without `init_step`, as
+long as a bias uses one of the two throughout: mixing them, or visiting with a step number
+between runs, shifts the schedule. The number of hills deposited so far is
 `bias.n_deposits` and the step of the last deposit window is `bias.last_deposit_step`
 (outside a [`GridHills`](@ref) grid that window adds no hill).
 
-[`add_hill!`](@ref) deposits a hill manually. Force evaluations outside a simulator, e.g.
-`AtomsCalculators.forces(sys, bias)` or `energy_forces`, have no step number and count
-towards the same manual call counter, so they deposit hills too (every call for
-`n_steps=1`).
+[`add_hill!`](@ref) deposits a hill manually, on every `n_steps`-th call. Force or energy
+calls outside a simulator deposit only when given `visit_state=true`: with a step number,
+as [`forces`](@ref) and [`potential_energy`](@ref) pass (0 by default), they follow the
+step schedule; without one, as in `AtomsCalculators.forces(sys, bias; visit_state=true)`,
+they count towards the same call counter as `add_hill!`.
 
 `tempering` (an [`AbstractTempering`](@ref)) scales each deposited hill's height; the
 default [`NoTempering`](@ref) always deposits the full base height.
@@ -633,9 +634,9 @@ default [`NoTempering`](@ref) always deposits the full base height.
 - `memory::AbstractMetadynamicsMemory`: The CVs, and the storage and evaluation strategy
     for deposited hills.
 - `n_steps::Integer=1`: Number of simulation steps between deposits into
-    `memory`, starting with the start configuration. [`add_hill!`](@ref) calls and force calls without a
-    step number use a separate call counter, depositing on every `n_steps`-th
-    such call without affecting the simulation schedule.
+    `memory`, starting with the start configuration. [`add_hill!`](@ref) calls and visiting
+    force calls without a step number use a separate call counter, depositing on every
+    `n_steps`-th such call without affecting the simulation schedule.
 - `tempering::AbstractTempering=NoTempering()`: Scales the height of each deposited hill.
 - `logger=nothing`: A [`MetadynamicsLogger`](@ref) to record each deposit for reweighting,
     available as `bias.logger`.
@@ -709,9 +710,9 @@ end
 
 is_history_dependent(::Metadynamics) = true
 
-# Monte Carlo deposits on the configuration after the accept/reject step. Only the kT check
+# Explicit visit, e.g. by Monte Carlo after each accept/reject step. Only the kT check
 #   precedes the pacing; the CVs are evaluated on deposit steps only.
-function update_after_step!(md::Metadynamics, sys, step_n; strictness=default_strictness())
+function visit_state!(md::Metadynamics, sys, step_n; strictness=default_strictness(), kwargs...)
     check_logger_kT(md.logger, md, sys.k)
     should_deposit_hill!(md, step_n) || return false
     cv_sim = check_bias_finite(evaluate_metadynamics_cvs(md, sys), "collective variable", md)
@@ -1109,11 +1110,11 @@ function should_deposit_hill!(md::Metadynamics, ::Nothing=nothing)
     return (md.call_count % md.n_steps) == 0
 end
 
-# Step pacing: one hill per window of n_steps counted steps, on the first force
-#   call in the window, so the start configuration is deposited at step 0, or at step 1 by
-#   integrators that first compute forces there (e.g. Langevin). Recomputing forces within
-#   a step (loggers, couplers, the initial virial, the inner steps of a multiple time step
-#   integrator) adds no hill. A lower step number is a new run, whose step 0 is the previous
+# Step pacing: one hill per window of n_steps counted steps, on the first visit in the
+#   window, so the start configuration is deposited at step 0, or at step 1 by integrators
+#   that first compute forces there (e.g. Langevin). Repeated visits within a step (the
+#   initial virial, the substeps of a multiple time step integrator) add no hill. A lower
+#   step number is a new run, whose step 0 is the previous
 #   run's last configuration, so chunked runs deposit as one run with or without init_step.
 #   Mixing runs with and without init_step shifts the schedule (documented, not caught).
 function should_deposit_hill!(md::Metadynamics, step_n::Integer)
@@ -1154,19 +1155,32 @@ function evaluate_metadynamics_cvs(md::Metadynamics, sys)
     return from_dims(cv_values)
 end
 
-function AtomsCalculators.potential_energy(sys, md::Metadynamics;
+# Deposits at a visited state when the pacing allows, after every finite check so non-finite
+#   values are never deposited; step_n is nothing outside a simulator, recorded as -1
+function visit_deposit!(md::Metadynamics, cv_sim, step_n, k; v_bias=nothing,
+                        strictness=default_strictness())
+    should_deposit_hill!(md, step_n) || return false
+    return deposit_hill!(md, cv_sim, something(step_n, -1), k; v_bias, strictness)
+end
+
+# Returns the bias energy before any hill deposited by visiting this state
+function AtomsCalculators.potential_energy(sys, md::Metadynamics; step_n=nothing,
+                                          visit_state::Bool=false,
                                           strictness=default_strictness(), kwargs...)
+    visit_state && check_logger_kT(md.logger, md, sys.k)
     cv_sim = check_bias_finite(evaluate_metadynamics_cvs(md, sys), "collective variable", md)
-    pe = potential_energy(md.memory, cv_sim; strictness)
-    return check_bias_finite(pe, "potential energy", md; cv_sim)
+    pe = check_bias_finite(potential_energy(md.memory, cv_sim; strictness), "potential energy",
+                           md; cv_sim)
+    visit_state && visit_deposit!(md, cv_sim, step_n, sys.k; v_bias=pe, strictness)
+    return pe
 end
 
 # Subtracts the bias forces from fs and returns the bias energy before any deposit (nothing
 #   without with_energy), from one evaluation of the CVs
 function metadynamics_forces!(fs, sys, md::Metadynamics; needs_vir::Bool=false,
                               buffers=nothing, step_n=nothing, with_energy::Bool=false,
-                              strictness=default_strictness())
-    check_logger_kT(md.logger, md, sys.k)
+                              visit_state::Bool=false, strictness=default_strictness())
+    visit_state && check_logger_kT(md.logger, md, sys.k) # Only a deposit uses kT
     cvs = md.memory.cvs
     cv_coords, atoms, velocities = metadynamics_host_state(md, sys)
 
@@ -1194,19 +1208,14 @@ function metadynamics_forces!(fs, sys, md::Metadynamics; needs_vir::Bool=false,
                            md; cv_sim) :
          nothing
 
-    # Self-paced deposit, by simulation step when called from a simulator, after every
-    #   finite check so non-finite values are never deposited
-    if should_deposit_hill!(md, step_n)
-        # step_n is nothing outside a simulator, recorded as -1
-        deposit_hill!(md, cv_sim, something(step_n, -1), sys.k; v_bias=pe, strictness)
-    end
+    visit_state && visit_deposit!(md, cv_sim, step_n, sys.k; v_bias=pe, strictness)
     return pe
 end
 
 function AtomsCalculators.forces!(fs, sys, md::Metadynamics; needs_vir::Bool=false,
-                                  buffers=nothing, step_n=nothing,
+                                  buffers=nothing, step_n=nothing, visit_state::Bool=false,
                                   strictness=default_strictness(), kwargs...)
-    metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, strictness)
+    metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, visit_state, strictness)
     return fs
 end
 
@@ -1217,9 +1226,10 @@ AtomsCalculators.forces(sys::System, md::Metadynamics; kwargs...) =
 function AtomsCalculators.energy_forces!(fs::AbstractVector, # Required for disambiguation
                                          sys::System, md::Metadynamics; needs_vir::Bool=false,
                                          buffers=nothing, step_n=nothing,
+                                         visit_state::Bool=false,
                                          strictness=default_strictness(), kwargs...)
     pe = metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, with_energy=true,
-                              strictness)
+                              visit_state, strictness)
     return (energy=pe, forces=fs)
 end
 

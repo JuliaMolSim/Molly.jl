@@ -259,7 +259,6 @@ threads.
                            strictness=default_strictness()) where T
     # @inline needed to avoid Enzyme error
     check_simulate_inputs(init_step, run_loggers, strictness)
-    check_minimizer_inters(sys, strictness)
     sis = minimizer_specific_inter_lists(sys, sim.constraint_bond_constant, strictness)
 
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -396,7 +395,6 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
-    check_minimizer_inters(sys, strictness)
     if !(0 < sim.alpha_start < 1)
         throw(ArgumentError("alpha_start must be between 0 and 1, found " *
                             "$(sim.alpha_start)"))
@@ -596,7 +594,6 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness()) where T
     check_simulate_inputs(init_step, run_loggers, strictness)
-    check_minimizer_inters(sys, strictness)
     if sim.n_history < 1
         throw(ArgumentError("n_history must be positive, found $(sim.n_history)"))
     end
@@ -1044,7 +1041,7 @@ end
     buffers = init_buffers!(sys, n_threads)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
-            n_threads=n_threads, strictness=strictness)
+            n_threads=n_threads, strictness=strictness, visit_state=true)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, accels_t;
@@ -1089,7 +1086,7 @@ end
         place_virtual_sites!(sys; n_threads=n_threads)
 
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .+= accels_t_dt .* dt_div2
@@ -1214,7 +1211,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(needs_vir_init);
-            n_threads=n_threads, strictness=strictness)
+            n_threads=n_threads, strictness=strictness, visit_state=true)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     merge_initial_constraint_virial!(buffers, sys, init_step, needs_vir_init, accels_t;
@@ -1268,7 +1265,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                         strictness=strictness)
         end
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= velocities_half .+ accels_t_dt .* dt_div2
@@ -1375,7 +1372,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads, strictness=strictness)
@@ -1397,7 +1394,7 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
@@ -1485,7 +1482,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads, strictness=strictness)
@@ -1506,7 +1503,7 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         coords_copy .= sys.coords
@@ -1612,7 +1609,7 @@ end
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads, strictness=strictness)
@@ -1647,7 +1644,7 @@ end
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         sys.velocities .+= accels_t .* sim.dt
@@ -1820,7 +1817,7 @@ end
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true;
                    n_threads=n_threads, strictness=strictness)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(false); n_threads=n_threads,
-            strictness=strictness)
+            strictness=strictness, visit_state=true)
     accels_t = calc_accels.(forces_t, masses(sys))
 
     effective_dts = [sim.dt / c for c in splitting_counts]
@@ -1894,7 +1891,7 @@ function B_step!(sys, forces_t, buffers, accels_t, dt_eff, compute_forces::Bool,
                  n_threads::Integer, neighbors, step_n::Integer, strictness)
     if compute_forces
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
     end
     sys.velocities .+= dt_eff .* accels_t
@@ -1965,7 +1962,7 @@ end
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
@@ -2061,7 +2058,7 @@ end
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-            strictness=strictness)
+            strictness=strictness, visit_state=true)
     accels_t = calc_accels.(forces_t, masses(sys))
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
@@ -2089,7 +2086,7 @@ end
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
-                n_threads=n_threads, strictness=strictness)
+                n_threads=n_threads, strictness=strictness, visit_state=true)
         accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
 
         sys.velocities .= (v_half .+ accels_t_dt .* dt_div2) ./
@@ -2105,7 +2102,7 @@ end
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                     n_threads=n_threads)
-        if recompute_forces
+        if recompute_forces # Recomputed after coupling, so not a new visit
             forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                     n_threads=n_threads, strictness=strictness)
             forces_t, forces_t_dt = forces_t_dt, forces_t
@@ -2344,7 +2341,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
         if recompute_forces
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                     pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis,
-                    strictness=strictness)
+                    strictness=strictness, visit_state=true)
             accels_t .= calc_accels.(forces_t, masses(sys))
         end
         sys.velocities .+= accels_t .* dt_frac_v
@@ -2376,7 +2373,7 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
 
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                 pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
         sys.velocities .+= accels_t .* dt_frac_v
         recompute_forces = false
@@ -2413,7 +2410,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     needs_vir_init = needs_virial_on_step(needs_vir, needs_vir_steps, init_step)
     if needs_vir_init
         forces!(forces_t, sys, neighbors, init_step, buffers, Val(true); n_threads=n_threads,
-                strictness=strictness)
+                strictness=strictness, visit_state=true)
         accels_t .= calc_accels.(forces_t, masses(sys))
         merge_initial_constraint_virial!(buffers, sys, init_step, true, accels_t;
                                          n_threads=n_threads, strictness=strictness)
@@ -2456,7 +2453,7 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
             # Virial calculated with all interactions
             # The constraint contribution is evaluated at the current configuration
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
-                    strictness=strictness)
+                    strictness=strictness, visit_state=true)
             accels_t .= calc_accels.(forces_t, masses(sys))
             merge_step_constraint_virial!(buffers, sys, step_n, true, accels_t, sim, sim.dt,
                                           vir_coord_storage, vir_vel_storage,
@@ -3021,16 +3018,11 @@ end
 # History-dependent general interactions (e.g. Metadynamics) change during a run
 is_history_dependent(inter) = false
 
-# Minimizers would change history-dependent interactions, e.g. deposit Metadynamics hills
-function check_minimizer_inters(sys, strictness)
-    if any(is_history_dependent, values(sys.general_inters))
-        report_issue("a history-dependent general interaction (e.g. Metadynamics) changes " *
-                     "during minimization; minimize without it", strictness)
-    end
+# Lets general interactions update at the current state (e.g. deposit a hill); true if any changed
+visit_state!(inter, sys, step_n; kwargs...) = false
+function visit_state!(sys::System, step_n; kwargs...)
+    return any(map(inter -> visit_state!(inter, sys, step_n; kwargs...), values(sys.general_inters)))
 end
-
-# Updates an interaction at the accepted configuration of a Monte Carlo step; true if it changed
-update_after_step!(inter, sys, step_n; kwargs...) = false
 
 @inline function simulate!(sys::System,
                            sim::MetropolisMonteCarlo,
@@ -3059,8 +3051,6 @@ update_after_step!(inter, sys, step_n; kwargs...) = false
     coords_old = zero(sys.coords)
     check_nan_labels = ("coordinates",)
     check_nans && check_array_nans((sys.coords,), check_nan_labels, init_step)
-    # The interactions don't change during the run, so this is checked once
-    has_history = any(is_history_dependent, values(sys.general_inters))
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -3080,17 +3070,13 @@ update_after_step!(inter, sys, step_n; kwargs...) = false
         else
             sys.coords .= coords_old
         end
-        # History updates run before the loggers, so a logger's force call never deposits
-        if has_history
-            changed = map(inter -> update_after_step!(inter, sys, step_n; strictness),
-                          values(sys.general_inters))
-            if any(changed)
-                if !accepted # A rejected move left the neighbors of the trial configuration
-                    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-                end
-                E_old = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
-                                         strictness=strictness)
+        # The chain's current state is visited every step; a rejected move repeats the old state
+        if visit_state!(sys, step_n; strictness=strictness)
+            if !accepted # A rejected move left the neighbors of the trial configuration
+                neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
             end
+            E_old = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
+                                     strictness=strictness)
         end
         apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
                        strictness=strictness, current_potential_energy=E_old, success=accepted,

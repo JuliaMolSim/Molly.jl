@@ -1180,7 +1180,7 @@ end
                                       5.0, (0.1, 0.1)))
     sys_mixed = System(atoms=atoms, coords=coords, boundary=boundary, velocities=velocities,
                        force_units=NoUnits, energy_units=NoUnits)
-    AtomsCalculators.forces!(Molly.zero_forces(sys_mixed), sys_mixed, md_mixed)
+    AtomsCalculators.forces!(Molly.zero_forces(sys_mixed), sys_mixed, md_mixed; visit_state=true)
     @test all(isapprox.(only(md_mixed.memory.centers), (0.3, 0.4); atol=1e-9))
 
     # A custom memory with only the documented contract works through the System
@@ -1204,7 +1204,7 @@ end
         general_inters=(bias_grid,), force_units=NoUnits, energy_units=NoUnits,
     )
     fs_grid = Molly.zero_forces(sys_grid)
-    AtomsCalculators.forces!(fs_grid, sys_grid, bias_grid) # Deposits a hill at (0.3, 0.4)
+    AtomsCalculators.forces!(fs_grid, sys_grid, bias_grid; visit_state=true) # Hill at (0.3, 0.4)
     @test isapprox(AtomsCalculators.potential_energy(sys_grid, bias_grid), 5.0; atol=1e-6)
 
     bias = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1), Tuple{Float64, Float64}[]))
@@ -1221,11 +1221,17 @@ end
 
     @test isapprox(AtomsCalculators.potential_energy(sys, bias), 0.0; atol=1e-9)
 
-    # forces! is self-updating: with the default n_steps=1, every call both
-    # computes forces and deposits a hill, with no external logger needed. This first call
-    # starts from an empty memory, so the resulting forces are trivially zero.
+    # A force call deposits only when it visits the state
     fs = Molly.zero_forces(sys)
     AtomsCalculators.forces!(fs, sys, bias)
+    AtomsCalculators.energy_forces!(fs, sys, bias)
+    potential_energy(sys)
+    @test isempty(bias.memory.centers)
+
+    # Visiting with the default n_steps=1, every call computes forces and deposits a hill.
+    #   This first call starts from an empty memory, so the forces are trivially zero.
+    fs = Molly.zero_forces(sys)
+    AtomsCalculators.forces!(fs, sys, bias; visit_state=true)
     @test length(bias.memory.centers) == 1
     @test isapprox(bias.memory.centers[1][1], 0.3; atol=1e-9)
     @test isapprox(bias.memory.centers[1][2], 0.4; atol=1e-9)
@@ -1239,7 +1245,7 @@ end
     # dimension, so the force on every atom should again be ~0, non-trivially this time
     # since the memory is no longer empty. It also deposits a second, identical hill.
     fs2 = Molly.zero_forces(sys)
-    AtomsCalculators.forces!(fs2, sys, bias)
+    AtomsCalculators.forces!(fs2, sys, bias; visit_state=true)
     @test length(bias.memory.centers) == 2
     for f in fs2
         @test isapprox(f, SVector(0.0, 0.0, 0.0); atol=1e-9)
@@ -1266,7 +1272,7 @@ end
     )
     fs3 = Molly.zero_forces(sys3)
     for i in 1:6
-        AtomsCalculators.forces!(fs3, sys3, md3)
+        AtomsCalculators.forces!(fs3, sys3, md3; visit_state=true)
     end
     @test length(md3.memory.centers) == 2
     @test md3.n_deposits == 2
@@ -1274,7 +1280,7 @@ end
     # One hill per window of 3 steps (at steps 1, 3 and 6), none for recomputed forces
     md_step = Metadynamics(ListHills(cvs, 5.0, (0.1, 0.1)); n_steps=3)
     for step_n in 1:6, _ in 1:2
-        AtomsCalculators.forces!(fs3, sys3, md_step; step_n=step_n)
+        AtomsCalculators.forces!(fs3, sys3, md_step; step_n=step_n, visit_state=true)
     end
     @test md_step.n_deposits == 3
     @test md_step.last_deposit_step == 6
@@ -1282,7 +1288,7 @@ end
     # Chunks deposit as one continuous run, with or without continuing step numbers
     function run_chunks!(md, chunks)
         for chunk in chunks, step_n in chunk
-            AtomsCalculators.forces!(fs3, sys3, md; step_n=step_n)
+            AtomsCalculators.forces!(fs3, sys3, md; step_n=step_n, visit_state=true)
         end
         return md.n_deposits
     end
@@ -1302,8 +1308,8 @@ end
     # Manual deposits use a separate call counter and leave the step schedule unchanged
     mixed = new_bias(3)
     run_chunks!(mixed, (0:2,))
-    AtomsCalculators.forces!(fs3, sys3, mixed)
-    AtomsCalculators.forces!(fs3, sys3, mixed)
+    AtomsCalculators.forces!(fs3, sys3, mixed; visit_state=true)
+    AtomsCalculators.forces!(fs3, sys3, mixed; visit_state=true)
     add_hill!(mixed, sys3) # 3rd manual call, deposits
     @test mixed.n_deposits == 2
     run_chunks!(mixed, (3:6,))
@@ -1362,11 +1368,15 @@ end
     @test ef_inplace.forces ≈ fs && ef_inplace.energy ≈ ef.energy
     @test md.n_deposits == 0
 
-    # Without a step number they count towards the manual deposits, as forces! does
+    # They deposit only when visiting, then without a step number on the manual counter
     md_1 = Metadynamics(ListHills((dist,), 1.0, 0.1))
     AtomsCalculators.forces(sys, md_1)
     AtomsCalculators.energy_forces(sys, md_1)
-    @test md_1.n_deposits == 2
+    @test md_1.n_deposits == 0
+    AtomsCalculators.forces(sys, md_1; visit_state=true)
+    AtomsCalculators.energy_forces(sys, md_1; visit_state=true)
+    AtomsCalculators.potential_energy(sys, md_1; visit_state=true)
+    @test md_1.n_deposits == 3
 end
 
 @testset "Metadynamics logger" begin
@@ -1581,8 +1591,8 @@ end
         boundary=CubicBoundary(3.0), general_inters=(md_k,),
         force_units=NoUnits, energy_units=NoUnits, k=2.0,
     )
-    forces(sys_k, find_neighbors(sys_k), 0)
-    forces(sys_k, find_neighbors(sys_k), 1)
+    forces(sys_k, find_neighbors(sys_k), 0; visit_state=true)
+    forces(sys_k, find_neighbors(sys_k), 1; visit_state=true)
     @test md_k.logger.kT == 2.0 * T
     v_1 = potential_energy(ListHills((dist,), 1.0, 0.1, md_k.memory.centers[1:1]), 0.5)
     @test md_k.memory.heights[2] ≈ exp(-v_1 / (2.0 * T * (γ - 1)))
@@ -1593,10 +1603,12 @@ end
     sys_d = System(atoms=sys_k.atoms, coords=sys_k.coords, boundary=sys_k.boundary,
                    general_inters=(md_k,), force_units=NoUnits, energy_units=NoUnits)
     pacing = (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step)
-    @test_throws ArgumentError forces(sys_d, find_neighbors(sys_d), 2)
+    @test_throws ArgumentError forces(sys_d, find_neighbors(sys_d), 2; visit_state=true)
     @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
+    # Without visiting, nothing is deposited, so another k is fine
+    forces(sys_d, find_neighbors(sys_d), 2)
     # Monte Carlo also checks kT before the pacing
-    @test_throws ArgumentError Molly.update_after_step!(md_k, sys_d, 3)
+    @test_throws ArgumentError Molly.visit_state!(md_k, sys_d, 3)
     @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
 
     # NoTempering needs kT and ListHills needs cv_points; no logger by default
@@ -1620,7 +1632,8 @@ end
     )
     simulator = MetropolisMonteCarlo(temperature=300.0,
                                      trial_moves=Molly.random_uniform_translation!,
-                                     trial_args=Dict(:shift_size => 0.02))
+                                     trial_args=Dict(:shift_size => 0.02,
+                                                     :rng => MersenneTwister(2)))
     simulate!(sys, simulator, 50; rng=MersenneTwister(1))
     # Windows open at steps 1, 5, 10, ..., 50
     @test bias.n_deposits == 11
@@ -1639,7 +1652,7 @@ end
     @test bias_high.n_deposits == 5
     @test all(sys_fixed.loggers.mc.state_changed)
 
-    # A forces logger runs after the history update, so it never deposits
+    # A forces logger doesn't visit the state, so it never deposits
     bias_log = Metadynamics(ListHills(cv, 10 * Molly.default_k(NoUnits) * 300.0, 0.05); n_steps=5)
     sys_log = System(sys; general_inters=(bias_log,),
                      loggers=(mc=MonteCarloLogger(), f=ForcesLogger(Float64, 5)))
@@ -1647,6 +1660,27 @@ end
     @test bias_log.n_deposits == 5
     @test all(sys_log.loggers.mc.state_changed)
     @test length(values(sys_log.loggers.f)) == 4
+
+    # A rejected move still visits the chain's state, the old configuration
+    bias_rej = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=1)
+    sys_rej = System(sys; general_inters=(bias_rej,), loggers=(mc=MonteCarloLogger(),))
+    s_start = calculate_cv(cv, sys_rej.coords, sys_rej.atoms, sys_rej.boundary)
+    stretch!(sys; kwargs...) = (sys.coords[2] += SVector(0.5, 0.0, 0.0)) # Costs ~25 kT
+    simulate!(sys_rej, MetropolisMonteCarlo(temperature=300.0, trial_moves=stretch!,
+                                            trial_args=Dict()), 10; rng=MersenneTwister(1))
+    @test !any(sys_rej.loggers.mc.state_changed)
+    @test bias_rej.n_deposits == 10
+    @test all(c -> c ≈ s_start, bias_rej.memory.centers)
+    # E_old is recomputed after each rejected deposit: every step adds one hill at the state
+    kT = Molly.default_k(NoUnits) * 300.0
+    @test diff(sys_rej.loggers.mc.energy_rates) ≈ fill(0.1 / kT, 9)
+
+    # visit_state! reports whether an interaction changed
+    bias_visit = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=5)
+    sys_visit = System(sys; general_inters=(bias_visit,))
+    @test Molly.visit_state!(sys_visit, 0) # Opens the first window
+    @test !Molly.visit_state!(sys_visit, 1)
+    @test !Molly.visit_state!(System(sys; general_inters=()), 5)
 end
 
 @testset "Metadynamics REMD" begin
@@ -1741,18 +1775,29 @@ end
     @test langevin_deposits((n_steps,), 5; loggers=(forces=ForcesLogger(Float64, 1),)) ==
           n_steps ÷ 5 + 1
 
-    # Minimizers report a history-dependent interaction, which they would change
-    minimizer_sys(inters) = System(
+    # A bias in an inner MTS level is visited at every substep, still one hill per window
+    bias_mts = Metadynamics(ListHills((cv,), 0.1, 0.05); n_steps=5)
+    sys_mts = System(
         atoms=atoms, coords=coords, boundary=boundary,
+        velocities=[SVector(0.0, 0.0, 0.0) for _ in 1:2],
         specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=0.3)]),),
-        general_inters=inters, force_units=NoUnits, energy_units=NoUnits,
+        general_inters=(bias_mts,), force_units=NoUnits, energy_units=NoUnits,
     )
-    minimizer = SteepestDescentMinimizer(tol=1000.0)
-    @test_logs (:warn, r"minimization") match_mode=:any simulate!(
-        minimizer_sys((Metadynamics(ListHills(cv, 0.1, 0.05)),)), minimizer; strictness=:warn)
-    @test_throws ErrorException simulate!(
-        minimizer_sys((Metadynamics(ListHills(cv, 0.1, 0.05)),)), minimizer; strictness=:error)
-    @test_logs simulate!(minimizer_sys(()), minimizer; strictness=:warn)
+    simulate!(sys_mts, MTSIntegrator(dt=0.002, si_fractions=(1,), gi_fractions=(4,)), n_steps)
+    @test bias_mts.n_deposits == n_steps ÷ 5 + 1
+
+    # Minimizers don't visit states, so they deposit nothing
+    for minimizer in (SteepestDescentMinimizer(tol=1000.0),
+                      FIREMinimizer(dt=0.001, dt_max=0.01, tol=1000.0), LBFGSMinimizer(tol=1000.0))
+        md_min = Metadynamics(ListHills(cv, 0.1, 0.05))
+        sys_min = System(
+            atoms=atoms, coords=coords, boundary=boundary,
+            specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=0.3)]),),
+            general_inters=(md_min,), force_units=NoUnits, energy_units=NoUnits,
+        )
+        @test_logs simulate!(sys_min, minimizer; strictness=:warn)
+        @test md_min.n_deposits == 0
+    end
 end
 
 @testset "Metadynamics periodic CVs" begin

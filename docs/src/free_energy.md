@@ -2691,7 +2691,7 @@ bias = Metadynamics(memory; n_steps=100, tempering=tempering,
                     logger=MetadynamicsLogger(filepath="metadynamics.txt", overwrite=true))
 ```
 
-`n_steps=100` deposits a hill at steps 0, 100, 200, ...; recomputing forces within a step (e.g. by a logger or coupler) does not change this schedule, and a run split over several `simulate!` calls deposits as one continuous run. The well-tempered kT uses the Boltzmann constant of the System. The CV should stay within `[grid_min, grid_max]`: outside the grid the bias exerts no force along that CV and deposits no hills. By default leaving the grid warns once per grid and CV, following Molly's strictness; `GridHills(...; out_of_grid=:error)` throws instead. No external logger is needed to deposit hills, since `bias` deposits them from `forces!`; we just add it to `general_inters` and simulate as normal:
+`n_steps=100` deposits a hill every 100 steps, starting at step 0 (or step 1 for integrators such as `Langevin`), when the simulator visits a state; forces computed by loggers, couplers or direct calls don't deposit, and a run split over several `simulate!` calls deposits as one continuous run. The well-tempered kT uses the Boltzmann constant of the System. The CV should stay within `[grid_min, grid_max]`: outside the grid the bias exerts no force along that CV and deposits no hills. By default leaving the grid warns once per grid and CV, following Molly's strictness; `GridHills(...; out_of_grid=:error)` throws instead. No external logger is needed to deposit hills, since `bias` deposits them in the simulator's force calculation; we just add it to `general_inters` and simulate as normal:
 
 ```julia
 # dt in ps, coupling const in ps. With only 2 atoms, removing the centre of mass velocity
