@@ -1206,6 +1206,37 @@
         test_partition_matches_direct(exclusion_states, PME; has_exclusions=true)
     end
 
+    @testset "AlchemicalPartition without a neighbor finder" begin
+        boundary_nf = CubicBoundary(3.0u"nm")
+        coords_nf = place_atoms(10, boundary_nf; min_dist=0.3u"nm")
+        atoms_nf = [Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:10]
+        bonds_nf = InteractionList2Atoms(Int32[1], Int32[2],
+                        [HarmonicBond(k=1000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm")])
+        states_nf(inters_nf) = [
+            ThermoState(System(atoms=atoms_nf, coords=coords_nf, boundary=boundary_nf,
+                               pairwise_inters=pis, specific_inter_lists=(bonds_nf,)),
+                        VelocityVerlet(dt=0.001u"ps"); temperature=temp)
+            for (pis, temp) in zip(inters_nf, (300.0u"K", 350.0u"K"))
+        ]
+        lj_nf = LennardJones(cutoff=DistanceCutoff(1.0u"nm"))
+
+        # Shared pairwise interactions need a neighbor finder to split the pairs, otherwise
+        #   their energy would be counted twice
+        shared_nf = states_nf(((lj_nf,), (lj_nf,)))
+        @test_throws ArgumentError Molly.AlchemicalPartition(shared_nf)
+        @test_throws ArgumentError ReplicaSystem(shared_nf, [copy(coords_nf) for _ in 1:2])
+
+        # Without shared pairwise interactions the energy of each state is counted once
+        for inters_nf in (((), ()), ((lj_nf,), (LennardJones(cutoff=DistanceCutoff(0.9u"nm")),)))
+            unshared_nf = states_nf(inters_nf)
+            partition_nf = Molly.AlchemicalPartition(unshared_nf)
+            @test isnothing(partition_nf.master_sys.neighbor_finder)
+            partitioned_nf = Molly.evaluate_energy_all!(partition_nf, coords_nf, boundary_nf)
+            direct_nf = [potential_energy(ts.system) for ts in unshared_nf]
+            @test all(isapprox.(partitioned_nf, direct_nf; rtol=1e-10))
+        end
+    end
+
     inter = Yukawa(; weight_special=0.5)
     @test isapprox(
         force(inter, dr12, a1, a1),

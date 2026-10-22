@@ -96,7 +96,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         end
         pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
     else
-        neighbor_finder = NoNeighborFinder()
+        neighbor_finder = nothing
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     end
 

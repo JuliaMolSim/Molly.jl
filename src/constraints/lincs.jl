@@ -1390,7 +1390,7 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
 end
 
 function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
-    if !(neighbor_finder isa NoNeighborFinder)
+    if !isnothing(neighbor_finder)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 

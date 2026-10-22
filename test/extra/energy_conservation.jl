@@ -42,7 +42,7 @@ using Test
                     )
                 end
             else
-                neighbor_finder = NoNeighborFinder()
+                neighbor_finder = nothing
             end
 
             sys = System(

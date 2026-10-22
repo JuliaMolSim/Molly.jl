@@ -491,6 +491,29 @@ end
     @test_throws ArgumentError ParameterPlan(sys_single, Dict{String, Float64}())
 end
 
+@testset "Alchemical systems without a neighbor finder" begin
+    ff = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml");
+                             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+    sys = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; dist_cutoff=1.0u"nm",
+                 neighbor_finder_type=Nothing, strictness=:nowarn)
+
+    # The hybrid system excludes the pairs between the A and B sides with the neighbor finder
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+    for dual in (true, false)
+        @test_throws ArgumentError RelativeFESystem(sys, sys, 0.5, deepcopy(mapping), core_mapAB;
+                                        scheduler=Molly.DefaultLambdaScheduler(dual=dual))
+    end
+
+    # An absolute system keeps the pairs of the original system, so it does not need one
+    is_disp(g) = g isa LJDispersionCorrection || g isa Molly.LJDispersionCorrectionλ
+    pe_no_disp(s) = potential_energy(s; general_inters=Tuple(g for g in s.general_inters
+                                                              if !is_disp(g)))
+    sys_0 = AbsoluteFESystem(sys, 0.0, collect(1:9))
+    @test isnothing(sys_0.neighbor_finder)
+    @test isapprox(pe_no_disp(sys_0), pe_no_disp(sys); rtol=1e-10)
+end
+
 @testset "Alchemical parameter keys" begin
     # A key of the original system whose interactions include one between alchemical atoms,
     #   with a nonzero value

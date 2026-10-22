@@ -194,7 +194,7 @@ end
 
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
     # Disable Neighbor interactions that are constrained
-    if typeof(neighbor_finder) != NoNeighborFinder
+    if !isnothing(neighbor_finder)
         disable_constrained_interactions!(neighbor_finder, sr.clusters12)
         disable_constrained_interactions!(neighbor_finder, sr.clusters23)
         disable_constrained_interactions!(neighbor_finder, sr.clusters34)

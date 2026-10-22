@@ -64,7 +64,6 @@ EnzymeRules.inactive(::typeof(use_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.uses_gpu_neighbor_finder), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.claim_block!), args...) = nothing
-EnzymeRules.inactive_type(::Type{<:NoNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:GPUNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:GPUCellListNeighborFinder}) = true
 EnzymeRules.inactive_type(::Type{<:Molly.GPUCellListState}) = true

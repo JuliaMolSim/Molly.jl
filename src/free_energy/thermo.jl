@@ -153,6 +153,16 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
 
+    # The shared pairwise interactions are split between the master system and the λ systems by
+    #   the eligible matrices, which need a neighbor finder; without one every system sees every
+    #   pair, and the shared pairwise energy would be counted twice
+    if isnothing(ref_nfinder) && !isempty(master_pils)
+        throw(ArgumentError("the thermodynamic states share pairwise interactions but have no " *
+                "neighbor finder, which is needed to split the pairs between the energy shared " *
+                "by all states and the energy of each state; without one the shared pairwise " *
+                "energy would be counted twice, so give the systems a neighbor finder"))
+    end
+
     filter!(inter -> keep_master_specific_inter(inter, λ_atoms), master_sils_2a)
     filter!(inter -> keep_master_general_inter(inter, λ_atoms), master_gils)
 
@@ -285,8 +295,8 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             n_steps = 1,
             strictness = :nowarn,
         )
-    elseif ref_nfinder isa NoNeighborFinder
-        return NoNeighborFinder()
+    elseif isnothing(ref_nfinder)
+        return nothing
     else
         throw(ArgumentError("Unknown NeighborFinder type $(typeof(ref_nfinder))"))
     end

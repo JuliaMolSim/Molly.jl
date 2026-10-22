@@ -183,7 +183,7 @@
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_cpu,
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
             )
@@ -484,13 +484,13 @@
             atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms]
             r_cut = T(5.0)
 
-            # System on GPU with NoNeighborFinder
+            # System on GPU with no neighbor finder
             sys = System(
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(use_neighbors=false, cutoff=DistanceCutoff(r_cut)),),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 force_units=NoUnits,
                 energy_units=NoUnits
             )
@@ -501,7 +501,7 @@
                 coords=coords,
                 boundary=boundary,
                 pairwise_inters=(LennardJones(use_neighbors=false, cutoff=DistanceCutoff(r_cut)),),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 force_units=NoUnits,
                 energy_units=NoUnits
             )

@@ -165,7 +165,7 @@
                 for _ in 1:n_atoms]
     velocities = [random_velocity(10.0u"g/mol", 100.0u"K") for _ in 1:n_atoms]
     neighbor_finders = [
-        "NoNeighborFinder"          => NoNeighborFinder(),
+        "no neighbor finder"        => nothing,
         "DistanceNeighborFinder"    => DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=1.2u"nm"),
         "TreeNeighborFinder"        => TreeNeighborFinder(
@@ -181,7 +181,7 @@
             boundary=boundary,
             velocities=velocities,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                use_neighbors=!(neighbor_finder isa NoNeighborFinder)),),
+                                use_neighbors=!isnothing(neighbor_finder)),),
             neighbor_finder=neighbor_finder,
         )
         JET.test_call(find_neighbors, Base.typesof(sys); jet_config...)

@@ -667,7 +667,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         sys = System(
@@ -709,7 +709,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.2u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         if run_cuda_tests
@@ -720,7 +720,7 @@ end
                     array_type=CuArray,
                 )
             else
-                neighbor_finder_gpu = NoNeighborFinder()
+                neighbor_finder_gpu = nothing
             end
         end
 

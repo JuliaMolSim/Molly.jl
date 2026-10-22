@@ -76,7 +76,7 @@ end
     # The analytic force should be the negative gradient of the potential energy
     function test_force_is_energy_grad(name, coords, atoms, boundary; pairwise_inters=(),
                                        specific_inter_lists=(), general_inters=(),
-                                       neighbor_finder=NoNeighborFinder(), tol=1e-10)
+                                       neighbor_finder=nothing, tol=1e-10)
         sys = System(
             atoms=atoms,
             coords=coords,

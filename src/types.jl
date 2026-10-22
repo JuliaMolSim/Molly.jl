@@ -1105,7 +1105,7 @@ end
 
 function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary,
                                on_gpu, strictness)
-    neighbor_finder isa NoNeighborFinder && return nothing
+    isnothing(neighbor_finder) && return nothing
 
     if neighbor_finder isa GPUCellListNeighborFinder
         if neighbor_finder.output == :ragged && any(use_neighbors, values(pairwise_inters))
@@ -1250,8 +1250,10 @@ minimum box side, are reported according to `strictness`.
     Should be a `Tuple` or `NamedTuple`.
 - `virtual_sites::VS=[]`: the virtual sites present in the system; these are
     mass-less particles determined by the positions of other atoms.
-- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation.
+- `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
+    save on computation. `nothing` means that no neighbor finder is used and all pairs
+    of atoms are considered, in which case [`use_neighbors`](@ref) should return `false`
+    for the pairwise interactions.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
@@ -1312,7 +1314,7 @@ function System(;
                 general_inters=(),
                 constraints=(),
                 virtual_sites=[],
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -1432,11 +1434,11 @@ function System(;
                             "found types $(typeof.(specific_inter_lists))"))
     end
 
-    if neighbor_finder isa NoNeighborFinder && any(use_neighbors, values(pairwise_inters))
-        throw(ArgumentError("neighbor_finder is NoNeighborFinder but one of pairwise_inters " *
+    if isnothing(neighbor_finder) && any(use_neighbors, values(pairwise_inters))
+        throw(ArgumentError("neighbor_finder is nothing but one of pairwise_inters " *
                             "uses the neighbor list"))
     end
-    if !(neighbor_finder isa NoNeighborFinder) && !all(use_neighbors, values(pairwise_inters))
+    if !isnothing(neighbor_finder) && !all(use_neighbors, values(pairwise_inters))
         err_str = "A neighbor finder is used but one of pairwise_inters does not use the " *
                   "neighbor finder, this may not be intended"
         report_issue(err_str, strictness)
@@ -1598,7 +1600,7 @@ function System(crystal::Crystal{D};
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -1793,6 +1795,9 @@ an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This is
 topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
+The pairs are split between the shared and the state-specific parts by the neighbor finder, so the
+systems need a neighbor finder if the states share pairwise interactions, for example in temperature
+REMD, and an error is thrown otherwise.
 
 Furthermore, upon a successful exchange, coordinates and velocities are not physically swapped in memory; 
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
@@ -2261,7 +2266,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -2387,8 +2392,9 @@ Not compatible with using atom properties such as `σ` and `ϵ`.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
     implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
-- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation.
+- `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
+    save on computation. `nothing` means that no neighbor finder is used and all pairs
+    of atoms are considered.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
@@ -2411,7 +2417,7 @@ function MollyCalculator(;
         pairwise_inters=(),
         specific_inter_lists=(),
         general_inters=(),
-        neighbor_finder=NoNeighborFinder(),
+        neighbor_finder=nothing,
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
         k=default_k(energy_units),

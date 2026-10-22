@@ -519,12 +519,12 @@ Each residue is matched to a residue template of the force field, and a
     atom they are bonded to. This is applied before constraints are generated.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
-- `neighbor_finder_type`: which neighbor finder to use, default is
-    [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
-    on CUDA compatible GPUs and [`GPUCellListNeighborFinder`](@ref) on non-CUDA
-    compatible GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the
-    box is too small for a cell list. [`NoNeighborFinder`](@ref) can be used but in
-    this case bonded atoms will not be excluded from the non-bonded interactions.
+- `neighbor_finder_type=nothing`: which type of neighbor finder to use. The default
+    `nothing` chooses [`CellListMapNeighborFinder`](@ref) on CPU,
+    [`GPUNeighborFinder`](@ref) on CUDA compatible GPUs and
+    [`GPUCellListNeighborFinder`](@ref) on non-CUDA compatible GPUs, falling back to
+    [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
+    `Nothing`, the type of `nothing`, gives a system with no neighbor finder.
 - `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
     updates. Can be tuned along with `dist_buffer` to ensure that particles
     do not cross the buffer distance during the update interval.
@@ -629,19 +629,19 @@ function System(coord_file::AbstractString,
         throw(ArgumentError("the cutoff distance for lj_cutoff " *
                 "($(lj_cutoff.dist_cutoff)) must not exceed dist_cutoff ($dist_cutoff)"))
     end
-    if coul_cutoff == NoCutoff() && neighbor_finder_type != NoNeighborFinder
+    if coul_cutoff == NoCutoff() && neighbor_finder_type !== Nothing
         err_str = "nonbonded_method is NoCutoff() but a neighbor finder is being used, this " *
                   "means that interactions may depend on internal details of the neighbor finder"
         report_issue(err_str, strictness)
     end
-    if lj_cutoff == NoCutoff() && neighbor_finder_type != NoNeighborFinder
+    if lj_cutoff == NoCutoff() && neighbor_finder_type !== Nothing
         err_str = "lj_cutoff is NoCutoff() but a neighbor finder is being used, this " *
                   "means that interactions may depend on internal details of the neighbor finder"
         report_issue(err_str, strictness)
     end
-    if neighbor_finder_type == NoNeighborFinder
-        err_str = "neighbor_finder_type is NoNeighborFinder, this means that bonded atoms " *
-                  "will not be excluded from the non-bonded interactions"
+    if neighbor_finder_type === Nothing
+        err_str = "neighbor_finder_type is Nothing, so no neighbor finder is used, this means " *
+                  "that bonded atoms will not be excluded from the non-bonded interactions"
         report_issue(err_str, strictness)
     end
     if neighbor_finder_n_steps <= 0
@@ -1436,7 +1436,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
                 n_threads)
     coords_dev = to_device(coords, AT)
-    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
+    using_neighbors = (neighbor_finder_type !== Nothing)
 
     if length(lj_exceptions_σ) > 0
         σ_mix = MixingException(LorentzMixing(), ExceptionList(lj_exceptions_σ))
@@ -1643,8 +1643,8 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if neighbor_finder_type == NoNeighborFinder
-        neighbor_finder = NoNeighborFinder()
+    if neighbor_finder_type === Nothing
+        neighbor_finder = nothing
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT) && !grad_safe
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(

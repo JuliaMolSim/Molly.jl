@@ -1843,7 +1843,6 @@ The virtual site atoms need to be present in the structure file to assign the co
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbor finders are:
-- [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
 - [`GPUNeighborFinder`](@ref)
 - [`GPUCellListNeighborFinder`](@ref)

@@ -407,9 +407,9 @@ end
                 array_type=AT,
             )
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
-        pairwise_inters = (LennardJones(use_neighbors=(nft != NoNeighborFinder), cutoff=cutoff),)
+        pairwise_inters = (LennardJones(use_neighbors=(nft != Nothing), cutoff=cutoff),)
         show(devnull, neighbor_finder)
 
         coords = to_device(copy(f32 ? starting_coords_f32 : starting_coords), AT)
@@ -438,18 +438,18 @@ end
     end
 
     runs = [
-        ("CPU"                , [NoNeighborFinder      , false, false, Array]),
-        ("CPU f32"            , [NoNeighborFinder      , false, true , Array]),
+        ("CPU"                , [Nothing               , false, false, Array]),
+        ("CPU f32"            , [Nothing               , false, true , Array]),
         ("CPU NL"             , [DistanceNeighborFinder, false, false, Array]),
         ("CPU f32 NL"         , [DistanceNeighborFinder, false, true , Array]),
-        ("CPU parallel"       , [NoNeighborFinder      , true , false, Array]),
-        ("CPU parallel f32"   , [NoNeighborFinder      , true , true , Array]),
+        ("CPU parallel"       , [Nothing               , true , false, Array]),
+        ("CPU parallel f32"   , [Nothing               , true , true , Array]),
         ("CPU parallel NL"    , [DistanceNeighborFinder, true , false, Array]),
         ("CPU parallel f32 NL", [DistanceNeighborFinder, true , true , Array]),
     ]
     for AT in array_list[2:end]
-        push!(runs, ("$AT"            , [NoNeighborFinder         , false, false, AT]))
-        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT"            , [Nothing                  , false, false, AT]))
+        push!(runs, ("$AT f32"        , [Nothing                  , false, true , AT]))
         push!(runs, ("$AT NL"         , [DistanceNeighborFinder   , false, false, AT]))
         push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
         push!(runs, ("$AT cell NL"    , [GPUCellListNeighborFinder, false, false, AT]))
@@ -462,7 +462,7 @@ end
     end
     if run_metal_tests
         AT = MtlArray
-        push!(runs, ("$AT f32"        , [NoNeighborFinder         , false, true , AT]))
+        push!(runs, ("$AT f32"        , [Nothing                  , false, true , AT]))
         push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
         push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
     end

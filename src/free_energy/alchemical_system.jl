@@ -48,11 +48,11 @@ function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_list
 end
 
 ### Neighborfinder functions ###
-neighbor_exclusions(nf::NoNeighborFinder) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
+neighbor_exclusions(::Nothing) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
 neighbor_exclusions(nf) = dense_masks_to_pair_lists(from_device(nf.eligible), from_device(nf.special))
 # The output modes other than :molly_pairs ignore the exclusions and store none
 neighbor_exclusions(nf::GPUCellListNeighborFinder) = (isnothing(nf.eligible) ?
-                neighbor_exclusions(NoNeighborFinder()) :
+                neighbor_exclusions(nothing) :
                 dense_masks_to_pair_lists(nf.eligible, nf.special))
 
 ### Constraints ###
@@ -470,6 +470,9 @@ unique A, is taken from `sysA`. The atoms of the returned system are ordered as 
 unique B and environment. In dual topology each core atom is added twice, with the parameters
 of A and as a massless copy with the parameters of B. Interactions are replaced by their
 λ-dependent versions and random velocities are generated at `temp`.
+The pairs between the A and B sides are excluded, and the exclusions and special pairs of both
+end states are kept, through a neighbor finder of the type used by `sysA`. An error is
+thrown if `sysA` has no neighbor finder and there are such pairs.
 
 # Arguments
 - `sysA`: the [`System`](@ref) of state A, which also provides the environment.
@@ -921,10 +924,17 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     special  = SparsePairMatrix(n_atoms, special_hybrid; listed=true)
 
     # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
-    #   `isa`, since the finders are parametric and `NoNeighborFinder` has no fields
+    #   `isa`, since the finders are parametric
     nf_A = sysA.neighbor_finder
-    if nf_A isa NoNeighborFinder
-        nf = NoNeighborFinder()
+    if isnothing(nf_A)
+        # Without a neighbor finder every pair interacts, including the A and B sides
+        if !isempty(excluded_hybrid) || !isempty(special_hybrid)
+            throw(ArgumentError("sysA has no neighbor finder, but the hybrid system has pairs " *
+                    "to exclude or scale, such as those between the A and B sides of the " *
+                    "transformation, and only a neighbor finder can do this; give the end " *
+                    "states a neighbor finder"))
+        end
+        nf = nothing
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
         nf = GPUNeighborFinder(eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
                                n_steps=nf_A.n_steps, array_type=AT)

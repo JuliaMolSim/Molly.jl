@@ -2454,6 +2454,15 @@ end
     @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       neighbor_finder_type=Int)
 
+    # Nothing, rather than the default nothing, gives a system with no neighbor finder
+    sys_nonf = System(water_fp, ff; dist_cutoff=0.5u"nm", neighbor_finder_type=Nothing,
+                      strictness=:nowarn)
+    @test isnothing(sys_nonf.neighbor_finder)
+    @test isnothing(find_neighbors(sys_nonf))
+    @test !any(use_neighbors, sys_nonf.pairwise_inters)
+    @test_throws ErrorException System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                       neighbor_finder_type=Nothing, strictness=:error)
+
     # Residues that do not match a template give a diagnostic message
     missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
     open(missing_h_fp, "w") do out

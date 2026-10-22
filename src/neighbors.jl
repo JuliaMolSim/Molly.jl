@@ -4,7 +4,6 @@ export
     use_neighbors,
     neighbor_pairs,
     ragged_neighbors,
-    NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
     GPUCellListNeighborFinder,
@@ -208,16 +207,6 @@ function check_neighbor_array_type(AT)
 end
 
 """
-    NoNeighborFinder()
-
-Placeholder neighbor finder that returns no neighbors.
-
-When using this neighbor finder, ensure that [`use_neighbors`](@ref) for the interactions
-returns `false`.
-"""
-struct NoNeighborFinder end
-
-"""
     find_neighbors(system; n_threads=Threads.nthreads())
     find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0,
                    force_recompute=false; n_threads=Threads.nthreads())
@@ -235,6 +224,8 @@ Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
 and energy kernels build and cache their interacting tile list internally from
 the neighbor-finder metadata.
+It also returns `nothing` when the neighbor finder is `nothing`, meaning that no
+neighbor finder is used.
 
 A neighbor finder may reuse the device buffers behind `current_neighbors` for the
 list it returns, as [`GPUCellListNeighborFinder`](@ref) does, so the list passed in
@@ -242,7 +233,7 @@ should not be used afterwards.
 """
 find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
-find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
+find_neighbors(sys::System, ::Nothing, args...; kwargs...) = nothing
 
 #=
     uses_gpu_neighbor_finder(AT)
@@ -341,7 +332,8 @@ function dense_masks_to_pair_lists(eligible, special)
     return ineligible_pairs(eligible), true_pairs(special)
 end
 
-function neighbor_finder_masks(nf::NoNeighborFinder, n_atoms::Integer)
+# No neighbor finder, all pairs are eligible and none are special
+function neighbor_finder_masks(::Nothing, n_atoms::Integer)
     eligible = trues(n_atoms, n_atoms)
     special = falses(n_atoms, n_atoms)
     for i in 1:n_atoms
@@ -1758,7 +1750,7 @@ end
 # Dense masks, as for the other neighbor finders
 function neighbor_finder_masks(nf::GPUCellListNeighborFinder, n_atoms::Integer)
     # :ragged and :geometric_pairs ignore the exceptions, so all pairs are eligible
-    isnothing(nf.eligible) && return neighbor_finder_masks(NoNeighborFinder(), n_atoms)
+    isnothing(nf.eligible) && return neighbor_finder_masks(nothing, n_atoms)
     return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
 end
 
