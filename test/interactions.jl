@@ -785,10 +785,13 @@
             @test SetupCoulombReactionField().solute_dielectric === 1.0
         end
 
-        @testset "default solute dielectric is a float of the solvent dielectric type" begin
-            @test CoulombReactionField(dist_cutoff=1.0f0,
-                                       solvent_dielectric=78.3f0).solute_dielectric === 1.0f0
+        @testset "default dielectrics take the float type of the cutoff" begin
+            crf_f32 = CoulombReactionField(dist_cutoff=1.0f0u"nm")
+            @test crf_f32.solvent_dielectric === 78.3f0
+            @test crf_f32.solute_dielectric === 1.0f0
             @test CoulombReactionField(dist_cutoff=1.0).solute_dielectric === 1.0
+            @test CoulombReactionField(dist_cutoff=1.0f0,
+                                       solvent_dielectric=78.3).solvent_dielectric === 78.3
             @test Molly.CoulombReactionFieldScaled(dist_cutoff=1.0f0,
                                     solvent_dielectric=Inf32).solute_dielectric === 1.0f0
             @test CoulombSoftCoreBeutlerReactionField(dist_cutoff=1.0f0,

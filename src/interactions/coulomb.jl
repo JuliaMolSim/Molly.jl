@@ -826,7 +826,8 @@ struct CoulombReactionField{D, S, E, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombReactionField(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
+function CoulombReactionField(; dist_cutoff,
+                              solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                               solute_dielectric=one(solvent_dielectric),
                               use_neighbors=false, weight_special=1, coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
@@ -942,7 +943,7 @@ struct SetupCoulombReactionField{T, E, C}
 end
 
 function SetupCoulombReactionField(; solvent_dielectric=crf_solvent_dielectric,
-                                   solute_dielectric=one(solvent_dielectric),
+                                   solute_dielectric=one(crf_solvent_dielectric),
                                    coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
     return SetupCoulombReactionField(solvent_dielectric, solute_dielectric, coulomb_const)
@@ -987,7 +988,8 @@ struct CoulombReactionFieldScaled{D, S, E, LM, SCH, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombReactionFieldScaled(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
+function CoulombReactionFieldScaled(; dist_cutoff,
+                                    solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                     solute_dielectric=one(solvent_dielectric),
                                     use_neighbors=false, λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
@@ -1150,7 +1152,8 @@ struct CoulombSoftCoreBeutlerReactionField{D, S, E, A, SM, EM, LM, SCH, W, T} <:
     coulomb_const::T
 end
 
-function CoulombSoftCoreBeutlerReactionField(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
+function CoulombSoftCoreBeutlerReactionField(; dist_cutoff,
+                                              solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
                                               α=0.3, use_neighbors=false, σ_mixing=LorentzMixing(),
                                               ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
@@ -1388,7 +1391,8 @@ struct CoulombSoftCoreGapsysReactionField{D, S, E, A, SQ, LM, SCH, W, T} <: Pair
     coulomb_const::T 
 end
 
-function CoulombSoftCoreGapsysReactionField(; dist_cutoff, solvent_dielectric=crf_solvent_dielectric,
+function CoulombSoftCoreGapsysReactionField(; dist_cutoff,
+                                              solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
                                               α=0.3, σQ=1.0u"nm", use_neighbors=false,
                                               λ_mixing=MinimumMixing(),
