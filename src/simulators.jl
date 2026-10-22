@@ -137,6 +137,90 @@ function check_array_nans(svec_arrays, labels, step_n)
     end
 end
 
+function virial_schedule_from_steps(steps)
+    isempty(steps) && return false, Inf
+    smin = minimum(steps)
+    for s in steps
+        if s % smin != 0
+            throw(ArgumentError("incompatible virial step interval $steps, all must be " *
+                                "multiples of the minimum interval $smin"))
+        end
+    end
+    return true, smin
+end
+
+function needs_virial_schedule(coupling, loggers, run_loggers)
+    steps = Int[]
+    coupling_needs_virial, coupling_steps = needs_virial_schedule(coupling)
+    if coupling_needs_virial
+        push!(steps, coupling_steps)
+    end
+    if run_loggers != false
+        for logger in loggers
+            logger_steps = logger_virial_interval(logger)
+            if !isinf(logger_steps)
+                push!(steps, logger_steps)
+            end
+        end
+    end
+    return virial_schedule_from_steps(steps)
+end
+
+function needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer)
+    return needs_virial && (step_n % steps == 0)
+end
+
+may_recompute_forces_after_coupling(coupler) = true
+may_recompute_forces_after_coupling(::Nothing) = false
+may_recompute_forces_after_coupling(couplers::Union{Tuple, NamedTuple}) =
+    any(may_recompute_forces_after_coupling, couplers)
+
+function coupling_may_recompute_on_step(coupler, step_n::Integer)
+    may_recompute_forces_after_coupling(coupler) || return false
+    if hasproperty(coupler, :n_steps)
+        return step_n % getproperty(coupler, :n_steps) == 0
+    end
+    return true
+end
+
+coupling_may_recompute_on_step(couplers::Union{Tuple, NamedTuple}, step_n::Integer) =
+    any(coupler -> coupling_may_recompute_on_step(coupler, step_n), couplers)
+coupling_may_recompute_on_step(::Nothing, step_n::Integer) = false
+
+function save_pre_coupling_virial_for_loggers!(buffers, sys, coupling, step_n::Integer,
+                                               pressure_kin_tensor, run_loggers)
+    coupling_may_recompute_on_step(coupling, step_n) || return buffers
+    length(sys.constraints) > 0 || return buffers
+    has_total_virial(buffers, step_n) || return buffers
+    virial_logger_due_on_step(values(sys.loggers), step_n, run_loggers) || return buffers
+
+    save_pre_coupling_virial!(buffers, step_n)
+    if pressure_logger_due_on_step(values(sys.loggers), step_n, run_loggers)
+        save_pre_coupling_pressure!(buffers, sys, step_n, pressure_kin_tensor)
+    end
+    return buffers
+end
+
+function compute_initial_total_virial!(buffers, sys, neighbors, step_n::Integer;
+                                       n_threads::Integer=Threads.nthreads(),
+                                       strictness=default_strictness(), kwargs...)
+    fs = zero_forces(sys)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
+            strictness=strictness, kwargs...)
+    accels = calc_accels.(fs, masses(sys))
+    merge_initial_constraint_virial!(buffers, sys, step_n, true, accels; n_threads=n_threads,
+                                     strictness=strictness)
+    return fs, buffers
+end
+
+function recompute_forces_after_coupling!(forces_out, sys, neighbors, buffers, step_n::Integer,
+                                          needs_virial::Bool, n_threads::Integer, strictness)
+    needs_current_virial = needs_virial && length(sys.constraints) == 0
+    forces!(forces_out, sys, neighbors, step_n, buffers, Val(needs_current_virial);
+            n_threads=n_threads, strictness=strictness)
+    return forces_out
+end
+
 # The specific interaction lists to use during minimization, with constraints replaced
 #   by harmonic bonds since constraints are not applied during minimization
 @inline function minimizer_specific_inter_lists(sys, constraint_bond_constant, strictness)
@@ -771,261 +855,7 @@ function VelocityVerlet(; dt, coupling=nothing, remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
-function virial_schedule_from_steps(steps)
-    isempty(steps) && return false, Inf
-    smin = minimum(steps)
-    for s in steps
-        if s % smin != 0
-            throw(ArgumentError("incompatible virial step interval $steps, all must be " *
-                                "multiples of the minimum interval $smin"))
-        end
-    end
-    return true, smin
-end
-
-function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
-    run_loggers == false && return false
-    run_loggers == :skipstart && step_n == 0 && return false
-    return !isinf(logger_interval) && (step_n % logger_interval == 0)
-end
-
-function virial_logger_due_on_step(loggers, step_n::Integer, run_loggers)
-    return any(logger -> logger_due_on_step(logger_virial_interval(logger), step_n,
-                                            run_loggers), loggers)
-end
-
-function pressure_logger_due_on_step(loggers, step_n::Integer, run_loggers)
-    return any(logger -> logger_due_on_step(logger_pressure_interval(logger), step_n,
-                                            run_loggers), loggers)
-end
-
-function needs_virial_schedule(coupling, loggers, run_loggers)
-    steps = Int[]
-    coupling_needs_virial, coupling_steps = needs_virial_schedule(coupling)
-    if coupling_needs_virial
-        push!(steps, coupling_steps)
-    end
-    if run_loggers != false
-        for logger in loggers
-            logger_steps = logger_virial_interval(logger)
-            if !isinf(logger_steps)
-                push!(steps, logger_steps)
-            end
-        end
-    end
-    return virial_schedule_from_steps(steps)
-end
-
-function needs_virial_on_step(needs_virial::Bool, steps, step_n::Integer)
-    return needs_virial && (step_n % steps == 0)
-end
-
-may_recompute_forces_after_coupling(coupler) = true
-may_recompute_forces_after_coupling(::Nothing) = false
-may_recompute_forces_after_coupling(couplers::Union{Tuple, NamedTuple}) =
-    any(may_recompute_forces_after_coupling, couplers)
-
-function coupling_may_recompute_on_step(coupler, step_n::Integer)
-    may_recompute_forces_after_coupling(coupler) || return false
-    if hasproperty(coupler, :n_steps)
-        return step_n % getproperty(coupler, :n_steps) == 0
-    end
-    return true
-end
-
-coupling_may_recompute_on_step(couplers::Union{Tuple, NamedTuple}, step_n::Integer) =
-    any(coupler -> coupling_may_recompute_on_step(coupler, step_n), couplers)
-coupling_may_recompute_on_step(::Nothing, step_n::Integer) = false
-
-function save_pre_coupling_virial_for_loggers!(buffers, sys, coupling, step_n::Integer,
-                                               pressure_kin_tensor, run_loggers)
-    coupling_may_recompute_on_step(coupling, step_n) || return buffers
-    length(sys.constraints) > 0 || return buffers
-    has_total_virial(buffers, step_n) || return buffers
-    virial_logger_due_on_step(values(sys.loggers), step_n, run_loggers) || return buffers
-
-    save_pre_coupling_virial!(buffers, step_n)
-    if pressure_logger_due_on_step(values(sys.loggers), step_n, run_loggers)
-        save_pre_coupling_pressure!(buffers, sys, step_n, pressure_kin_tensor)
-    end
-    return buffers
-end
-
-constraint_virial_integrator_factor(sim) = 1
 constraint_virial_integrator_factor(sim::VelocityVerlet) = 2
-
-function position_constraint_virial_scale(sys, buffers, dt)
-    e_unit = unit(eltype(buffers.constraint_virial))
-    if e_unit == NoUnits
-        return inv(dt^2)
-    else
-        m_unit = unit(eltype(masses(sys)))
-        x_unit = unit(eltype(eltype(sys.coords)))
-        raw_unit = m_unit * x_unit^2
-        return uconvert(e_unit, raw_unit * inv(dt^2))
-    end
-end
-
-position_constraint_virial_scale(sys::System{D, AT, T}, buffers, dt, sim) where {D, AT, T} =
-    T(constraint_virial_integrator_factor(sim)) * position_constraint_virial_scale(sys, buffers, dt)
-
-function velocity_constraint_virial_scale(sys, buffers, dt)
-    e_unit = unit(eltype(buffers.constraint_virial))
-    if e_unit == NoUnits
-        return inv(dt)
-    else
-        m_unit = unit(eltype(masses(sys)))
-        x_unit = unit(eltype(eltype(sys.coords)))
-        v_unit = unit(eltype(eltype(sys.velocities)))
-        raw_unit = m_unit * x_unit * v_unit
-        return uconvert(e_unit, raw_unit * inv(dt))
-    end
-end
-
-velocity_constraint_virial_scale(sys::System{D, AT, T}, buffers, dt, sim) where {D, AT, T} =
-    T(constraint_virial_integrator_factor(sim)) * velocity_constraint_virial_scale(sys, buffers, dt)
-
-function position_constraint_context(buffers, sys, step_n::Integer, dt, needs_virial::Bool,
-                                     sim=nothing)
-    return ConstraintApplicationContext(
-        kind=PositionConstraintApplication(),
-        needs_virial=needs_virial,
-        step_n=Int(step_n),
-        atoms=sys.atoms,
-        dt=dt,
-        virial_scale=position_constraint_virial_scale(sys, buffers, dt, sim),
-        buffers=buffers,
-        coords_buffer=buffers.constraint_coords_buffer,
-    )
-end
-
-function velocity_constraint_context(buffers, sys, step_n::Integer, dt, needs_virial::Bool,
-                                     sim=nothing)
-    return ConstraintApplicationContext(
-        kind=VelocityConstraintApplication(),
-        needs_virial=needs_virial,
-        step_n=Int(step_n),
-        atoms=sys.atoms,
-        dt=dt,
-        virial_scale=velocity_constraint_virial_scale(sys, buffers, dt, sim),
-        buffers=buffers,
-        velocities_buffer=buffers.constraint_velocities_buffer,
-    )
-end
-
-function prepare_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool)
-    if needs_virial && length(sys.constraints) > 0
-        clear_constraint_virial!(buffers, sys, step_n)
-    end
-    return buffers
-end
-
-function merge_constraint_virial_if_needed!(buffers, sys, step_n::Integer,
-                                            needs_virial::Bool)
-    if needs_virial && length(sys.constraints) > 0
-        merge_constraint_virial!(buffers, sys, step_n)
-    end
-    return buffers
-end
-
-function default_constraint_preview_dt(sys::System{<:Any, <:Any, T}) where T
-    return (sys.energy_units == NoUnits ? T(0.0005) : T(0.0005)u"ps")
-end
-
-# Evaluate the constraint contribution to the virial when there is no running dynamics
-# step to accumulate it from (the initial state of a simulation and the public virial and
-# pressure functions). Both the position (SHAKE) and velocity (RATTLE) contributions are
-# captured using the same constraint solves a full dynamics step applies, so the result is
-# consistent with the per-step virial the integrators accumulate and independent of the
-# (arbitrary) preview time step. The velocities are first projected onto the constraint
-# manifold so the velocity contribution is well-defined even if the input velocities do not
-# satisfy the constraints. The system is advanced through a trial step and restored, leaving
-# only the accumulated constraint virial merged into buffers.virial. The generic constraint
-# interface means this works for any constraint algorithm.
-function merge_initial_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
-                                          accels; n_threads::Integer=Threads.nthreads(),
-                                          dt=default_constraint_preview_dt(sys),
-                                          strictness=default_strictness())
-    if needs_virial && length(sys.constraints) > 0
-        coords = copyto_constraint_scratch!(buffers.constraint_preview_coords_buffer, sys.coords)
-        velocities = copyto_constraint_scratch!(buffers.constraint_preview_velocities_buffer,
-                                                sys.velocities)
-
-        # Project onto the constraint manifold so the RATTLE contribution reflects only the
-        # force-induced velocity component rather than any pre-existing constraint violation
-        apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
-
-        clear_constraint_virial!(buffers, sys, step_n)
-        sys.velocities .+= accels .* dt
-        vel_context = velocity_constraint_context(buffers, sys, step_n, dt, true)
-        apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
-                                    strictness=strictness)
-
-        sys.coords .+= sys.velocities .* dt
-        pos_context = position_constraint_context(buffers, sys, step_n, dt, true)
-        apply_position_constraints!(sys, coords; context=pos_context, n_threads=n_threads,
-                                    strictness=strictness)
-        merge_constraint_virial!(buffers, sys, step_n)
-
-        sys.coords .= coords
-        sys.velocities .= velocities
-    end
-    return buffers
-end
-
-# Evaluate the constraint contribution to the virial at the current configuration using
-# the same position (SHAKE) and velocity (RATTLE) constraint solves that a full dynamics
-# step applies, so the barostat sees a constraint virial consistent with the integrator.
-# The system is advanced through a trial step and restored, leaving only the accumulated
-# constraint virial merged into buffers.virial. Unlike merge_initial_constraint_virial!,
-# this captures both the position and velocity constraint contributions.
-function merge_step_constraint_virial!(buffers, sys, step_n::Integer, needs_virial::Bool,
-                                       accels, sim, dt, coord_save, vel_save,
-                                       cons_coord_storage, cons_vel_storage;
-                                       n_threads::Integer=Threads.nthreads(),
-                                       strictness=default_strictness())
-    if needs_virial && length(sys.constraints) > 0
-        coord_save .= sys.coords
-        vel_save .= sys.velocities
-
-        sys.velocities .+= accels .* dt
-        prepare_constraint_virial!(buffers, sys, step_n, true)
-        vel_context = velocity_constraint_context(buffers, sys, step_n, dt, true, sim)
-        apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
-                                    strictness=strictness)
-
-        cons_coord_storage .= sys.coords
-        sys.coords .+= sys.velocities .* dt
-        pos_context = position_constraint_context(buffers, sys, step_n, dt, true, sim)
-        apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, dt;
-                                    context=pos_context, n_threads=n_threads, strictness=strictness)
-        merge_constraint_virial!(buffers, sys, step_n)
-
-        sys.coords .= coord_save
-        sys.velocities .= vel_save
-    end
-    return buffers
-end
-
-function compute_initial_total_virial!(buffers, sys, neighbors, step_n::Integer;
-                                       n_threads::Integer=Threads.nthreads(),
-                                       strictness=default_strictness(), kwargs...)
-    fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
-            strictness=strictness, kwargs...)
-    accels = calc_accels.(fs, masses(sys))
-    merge_initial_constraint_virial!(buffers, sys, step_n, true, accels; n_threads=n_threads,
-                                     strictness=strictness)
-    return fs, buffers
-end
-
-function recompute_forces_after_coupling!(forces_out, sys, neighbors, buffers, step_n::Integer,
-                                          needs_virial::Bool, n_threads::Integer, strictness)
-    needs_current_virial = needs_virial && length(sys.constraints) == 0
-    forces!(forces_out, sys, neighbors, step_n, buffers, Val(needs_current_virial);
-            n_threads=n_threads, strictness=strictness)
-    return forces_out
-end
 
 @inline function simulate!(sys,
                            sim::VelocityVerlet,

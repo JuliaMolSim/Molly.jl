@@ -62,6 +62,22 @@ end
 
 logger_collection_empty(loggers) = isnothing(loggers) || isempty(values(loggers))
 
+function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
+    run_loggers == false && return false
+    run_loggers == :skipstart && step_n == 0 && return false
+    return !isinf(logger_interval) && (step_n % logger_interval == 0)
+end
+
+function virial_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_virial_interval(logger), step_n,
+                                            run_loggers), loggers)
+end
+
+function pressure_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_pressure_interval(logger), step_n,
+                                            run_loggers), loggers)
+end
+
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
 
