@@ -369,12 +369,12 @@ function grid_bracket_dims(mem::GridHills, cv_sim)
         n = size(mem.values, d)
         if is_periodic(mem, d)
             offset = mod(cv_sim[d] - mem.grid_min[d], mem.period[d])
-            frac_bin = ustrip(offset / mem.bin_width[d])
+            frac_bin = ustrip(NoUnits, offset / mem.bin_width[d]) # NoUnits also converts e.g. Å/nm
             i0 = clamp(floor(Int, frac_bin) + 1, 1, n)
             (i0, mod1(i0 + 1, n), frac_bin - (i0 - 1))
         else
             clamped = clamp(cv_sim[d], mem.grid_min[d], mem.grid_max[d])
-            frac_bin = ustrip((clamped - mem.grid_min[d]) / mem.bin_width[d])
+            frac_bin = ustrip(NoUnits, (clamped - mem.grid_min[d]) / mem.bin_width[d])
             i0 = clamp(floor(Int, frac_bin) + 1, 1, n - 1)
             (i0, i0 + 1, frac_bin - (i0 - 1))
         end
@@ -466,8 +466,8 @@ function hill_index_range(mem::GridHills, d::Integer, cv_value)
         lo = clamp(lo, mem.grid_min[d], mem.grid_max[d])
         hi = clamp(hi, mem.grid_min[d], mem.grid_max[d])
     end
-    i_lo = floor(Int, ustrip((lo - mem.grid_min[d]) / mem.bin_width[d])) + 1
-    i_hi = ceil(Int, ustrip((hi - mem.grid_min[d]) / mem.bin_width[d])) + 1
+    i_lo = floor(Int, ustrip(NoUnits, (lo - mem.grid_min[d]) / mem.bin_width[d])) + 1
+    i_hi = ceil(Int, ustrip(NoUnits, (hi - mem.grid_min[d]) / mem.bin_width[d])) + 1
     if is_periodic(mem, d)
         return i_hi - i_lo + 1 >= n ? (1:n) : (i_lo:i_hi)
     else

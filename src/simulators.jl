@@ -2651,16 +2651,11 @@ function remd_unshared(items)
     end
 end
 
-# remd_unshared would copy a history-dependent interaction used in several states, losing its updates
+# The partition holds frozen copies of the interactions, so exchanges would ignore a changing bias
 function check_remd_history_inters(sys::ReplicaSystem)
-    seen = Base.IdSet{Any}()
-    for inters in sys.state_general_inters, inter in values(inters)
-        is_history_dependent(inter) || continue
-        if inter in seen
-            throw(ArgumentError("the same history-dependent general interaction (e.g. Metadynamics) " *
-                                "is used in more than one REMD state; give each state its own"))
-        end
-        push!(seen, inter)
+    if any(inters -> any(is_history_dependent, values(inters)), sys.state_general_inters)
+        throw(ArgumentError("history-dependent general interactions (e.g. Metadynamics) are not " *
+                            "supported with replica exchange yet"))
     end
 end
 

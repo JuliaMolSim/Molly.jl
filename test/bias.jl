@@ -968,6 +968,45 @@ end
     end
     @test errs[2] < errs[1] / 5
 
+    # 2D and 3D with a periodic CV: close to the exact ListHills bias, which catches mixed-up
+    #   stored derivatives that finite differences of the interpolant can't
+    setups = (
+        ((dist, tor), (0.1, 0.3), (0.0, -π), (2.0, π), (101, 120), [(0.8, 2.9), (1.1, -0.5)],
+         (stored=(5e-5, 1e-3), estimated=(7e-4, 3e-2))),
+        ((dist, dist, tor), (0.2, 0.2, 0.5), (0.0, 0.0, -π), (2.0, 2.0, π), (31, 31, 36),
+         [(0.8, 1.0, 3.0), (1.2, 0.9, -1.0)], (stored=(5e-4, 4e-3), estimated=(6e-3, 0.1))),
+    )
+    for (cvs, sig, gmin, gmax, n, hills, tols) in setups, derivatives in (:stored, :estimated)
+        lh = ListHills(cvs, 1.0, sig)
+        gh = GridHills(cvs, 1.0, sig, gmin, gmax, n; derivatives)
+        for h in hills
+            add_hill!(lh, h)
+            add_hill!(gh, h)
+        end
+        rng = Xoshiro(7)
+        n_cvs = length(cvs)
+        pts = [ntuple(d -> d < n_cvs ? 0.5 + rand(rng) : -π + 2π * rand(rng), n_cvs) for _ in 1:300]
+        V_max = maximum(p -> abs(potential_energy(lh, p)), pts)
+        G_max = maximum(p -> maximum(abs, Molly.bias_gradient(lh, p)), pts)
+        tol = tols[derivatives]
+        @test maximum(p -> abs(potential_energy(gh, p) - potential_energy(lh, p)), pts) / V_max <
+              tol[1]
+        @test maximum(p -> maximum(abs, Molly.bias_gradient(gh, p) .- Molly.bias_gradient(lh, p)),
+                      pts) / G_max < tol[2]
+    end
+
+    # Mixed units: CV values in Å on a grid in nm
+    for derivatives in (:stored, :estimated)
+        g_nm = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201; derivatives)
+        g_Å = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201; derivatives)
+        add_hill!(g_nm, 0.9u"nm")
+        add_hill!(g_Å, 9.0u"Å")
+        # Up to the Gaussian at the cutoff, exp(-18), where rounding can shift the footprint edge
+        @test all(isapprox.(g_nm.values, g_Å.values; atol=1e-7u"kJ * mol^-1"))
+        @test potential_energy(g_nm, 9.5u"Å") ≈ potential_energy(g_nm, 0.95u"nm")
+        @test Molly.bias_gradient(g_nm, 9.5u"Å") ≈ Molly.bias_gradient(g_nm, 0.95u"nm")
+    end
+
     # Continuous forces conserve energy in NVE with a fixed bias (zero-height deposits)
     for derivatives in (:estimated, :stored)
         mem = GridHills(dist, 0.0, 0.05, 0.5, 1.5, 51; derivatives)
@@ -1611,7 +1650,7 @@ end
 end
 
 @testset "Metadynamics REMD" begin
-    # Each state has its own bias, deposited into the user's objects
+    # Not supported yet: exchanges would use frozen copies of the bias
     atoms = [Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:2]
     coords = [SVector(4.5, 5.0, 5.0)u"nm", SVector(5.5, 5.0, 5.0)u"nm"]
     boundary = CubicBoundary(10.0u"nm")
@@ -1631,20 +1670,8 @@ end
 
     mds = [Metadynamics(ListHills(cv, 0.5u"kJ * mol^-1", 0.05u"nm"); n_steps=10) for _ in 1:2]
     repsys = remd_system(mds)
-    simulate!(repsys, simulator, 500; assign_velocities=true, n_threads=1)
-    @test all(md -> md.n_deposits == 51, mds)
-    # Pacing continues across calls
-    simulate!(repsys, simulator, 500; n_threads=1)
-    @test all(md -> md.n_deposits == 101, mds)
-    @test all(md -> length(md.memory.heights) == md.n_deposits, mds)
-    @test repsys.exchange_logger.n_attempts > 0
-    s = (1.0u"nm",)
-    @test Molly.potential_energy(mds[1].memory, s) != Molly.potential_energy(mds[2].memory, s)
-
-    # A bias shared between states would lose the hills of all but one state
-    md_shared = Metadynamics(ListHills(cv, 0.5u"kJ * mol^-1", 0.05u"nm"); n_steps=10)
-    @test_throws ArgumentError simulate!(remd_system([md_shared, md_shared]), simulator, 10;
-                                         n_threads=1)
+    @test_throws ArgumentError simulate!(repsys, simulator, 10; n_threads=1)
+    @test all(md -> md.n_deposits == 0, mds)
 end
 
 @testset "Metadynamics step pacing in simulation" begin
