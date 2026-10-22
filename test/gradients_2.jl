@@ -292,30 +292,7 @@ end
 end
 
 @testset "CV gradients" begin
-    function cv_gradient_enz(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
-        d_coords = zero(coords)
-        unit_arr = Any[u"nm"]
-
-        _, cv_val_ustrip = autodiff(
-            set_runtime_activity(ReverseWithPrimal), # set_runtime_activity necessary for units
-            Molly.calculate_cv_ustrip!,
-            Active,
-            Const(unit_arr),
-            Const(cv_type),
-            Duplicated(coords, d_coords),
-            Const(atoms),
-            Const(boundary),
-            Const(velocities),
-        )
-
-        # Correct the units after the ustrip
-        u = only(unit_arr)
-        d_coords = d_coords .* u ./ unit(d_coords[1][1])^2
-
-        return d_coords, cv_val_ustrip * u
-    end
-
-    function forces_test!(fs, sys, bias::BiasPotential; grad_cv=cv_gradient_enz, kwargs...)
+    function forces_test!(fs, sys, bias; grad_cv=Molly.cv_gradient_enzyme, kwargs...)
         if bias.cv_type.correction == :pbc
             coords = Molly.unwrap_molecules(sys)
         else
@@ -382,7 +359,7 @@ end
         fs_zero_enz = zero(fs)
         fs_zero_anl = zero(fs)
 
-        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
+        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=Molly.cv_gradient_enzyme)
         forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=Molly.cv_gradient)
         @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end

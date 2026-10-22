@@ -132,7 +132,8 @@ end
 
 # Calculate the gradient of a CV with respect to the input coordinates
 # Works for systems with and without units
-function Molly.cv_gradient(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
+function Molly.cv_gradient_enzyme(cv_type, coords, atoms=nothing, boundary=nothing,
+                                  velocities=nothing)
     d_coords = zero(coords)
     unit_arr = Any[u"nm"]
 
@@ -153,6 +154,11 @@ function Molly.cv_gradient(cv_type, coords, atoms=nothing, boundary=nothing, vel
     d_coords = d_coords .* u ./ unit(d_coords[1][1])^2
 
     return d_coords, cv_val_ustrip * u
+end
+
+# Fallback, analytic methods are defined for built-in collective variables
+function Molly.cv_gradient(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
+    return Molly.cv_gradient_enzyme(cv_type, coords, atoms, boundary, velocities)
 end
 
 # Optimisations for dict_get gradients
