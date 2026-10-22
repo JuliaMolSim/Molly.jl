@@ -70,6 +70,22 @@ autodiff(
 grads_enzyme # Contains gradients
 ```
 If the system is on GPU, this will run on GPU as well.
+Atom masses, σ and ϵ are keyed by atom type, for example `"atom_N_σ"`, so a value applies to every atom of that type.
+Charges are keyed by the `charge_type` of each [`AtomData`](@ref), for example `"atom_LEU/CT/CA_charge"`, since many force fields assign charges per residue template atom rather than per atom type.
+When the force field takes charges from the residue templates, the `charge_types` argument of [`System`](@ref) sets how atoms are grouped, otherwise the charge type is the atom type:
+
+- `:atom_type` groups by atom type, e.g. `"HC"`.
+- `:template_type` groups by residue template and atom type, e.g. `"ALA/HC"`, so equivalent atoms such as methyl hydrogens share a charge.
+- `:template_atom` groups by residue template and atom name, labelled with the atom type too, e.g. `"ALA/CT/CA"`.
+- `:auto`, the default, uses the atom type if every template atom of that type has the same charge, otherwise the template and atom type if every atom of that type in the template has the same charge, otherwise the template and atom name.
+
+An atom parameter whose atoms have different values, such as the masses of an atom type after hydrogen mass repartitioning, is left out of [`extract_parameters`](@ref), with a warning for charges, σ and ϵ, and is an error in [`ParameterPlan`](@ref).
+The same holds for an interaction parameter whose interactions have different values, such as a bond type that the two end states of a [`RelativeFESystem`](@ref) parametrise differently, which is left out with a warning.
+To group charges differently, give the atoms other charge types with `System(sys; atoms_data=...)`.
+
+Alchemical systems set up with [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) have the parameter keys of the systems they were built from: their λ interactions, such as `HarmonicBondλ` or [`Molly.LennardJones14Scaled`](@ref), take the keys of the interactions they replace, so `"inter_HB_CT/CT_k"` is the same parameter in the original and the alchemical system.
+The pairwise soft-core interactions add their own keys, e.g. `"inter_CO_α"`; the `α` of the 1-4 soft cores is not a parameter.
+Single topology [`RelativeFESystem`](@ref)s, whose atoms and λ interactions store the parameters of both end states, are not supported by these functions.
 A custom interaction becomes compatible with this interface by defining [`Molly.parameter_prefix`](@ref) and [`Molly.parameter_fields`](@ref).
 
 The same functions also work on systems with units, for example to put modified parameters into a system that is then simulated without gradients.

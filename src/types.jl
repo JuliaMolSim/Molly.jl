@@ -711,9 +711,13 @@ end
 
 """
     AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
-             chain_id="A", element="?", hetero_atom=false)
+             chain_id="A", element="?", hetero_atom=false, charge_type="")
 
 Data associated with an atom.
+
+`charge_type` labels the atoms that share a charge parameter in [`extract_parameters`](@ref)
+and [`inject_gradients`](@ref), see the `charge_types` argument of [`System`](@ref). If empty,
+the atom type is used.
 
 Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
@@ -726,6 +730,7 @@ work on the GPU.
     chain_id::String = "A"
     element::String = "?"
     hetero_atom::Bool = false
+    charge_type::String = ""
 end
 
 """

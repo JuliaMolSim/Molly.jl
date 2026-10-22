@@ -85,6 +85,9 @@ unique atom and ``p^A`` otherwise.
     scheduler::SCH = DefaultLambdaScheduler()
 end
 
+parameter_prefix(::CosineAngleλ, inter_type) = "inter_CA_$(inter_type)_"
+parameter_fields(::Type{<:CosineAngleλ}) = parameter_fields(CosineAngle)
+
 Base.zero(a::CosineAngleλ) = CosineAngleλ(k=zero.(a.k), θ0=zero.(a.θ0), λ_mixing=a.λ_mixing,
                                           scheduler=a.scheduler)
 

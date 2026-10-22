@@ -256,6 +256,17 @@ parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
     ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
 
+# The double exponential has one soft core, so the soft core chosen for Lennard-Jones does not
+#   apply to it
+function to_lambda_function(inter::DoubleExponential; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler())
+    return DoubleExponentialSoftCore(cutoff=inter.cutoff, use_neighbors=inter.use_neighbors,
+                                     α=inter.α, β=inter.β, shortcut=inter.shortcut,
+                                     σ_mixing=inter.σ_mixing, ϵ_mixing=inter.ϵ_mixing,
+                                     λ_mixing=λ_mixing, scheduler=scheduler,
+                                     weight_special=inter.weight_special)
+end
+
 # Energy prefactor, soft-core coupling and mixed σ/ϵ of a pair, from the scheduler as for the
 # Lennard-Jones soft cores
 @inline function dexp_lambda_params(inter::DoubleExponentialSoftCore{C, T}, atom_i, atom_j,
