@@ -547,8 +547,8 @@ The available CV types are:
 - [`CalcRg`](@ref), the radius of gyration of a set of atoms.
 - [`CalcRMSD`](@ref), the RMSD of a set of atoms to a target structure.
 - [`CalcTorsion`](@ref), the torsion angle defined by four atoms.
+- [`CalcAngle`](@ref), the angle defined by three atoms.
 
-Currently, CV calculation is always done on the CPU.
 Other CV functions can be added by the user.
 Every CV type needs to have its own struct, an associated method of the [`calculate_cv`](@ref) function and potentially a method for the [`Molly.cv_gradient`](@ref) function.
 
@@ -608,6 +608,8 @@ function Molly.bias_gradient(bias_fn::bias_type, cv_sim;  kwargs...)
     return bias_grad
 end
 ```
+On a GPU system, `bias_gradient` of a custom bias type runs on the host.
+To run it on the GPU without a host transfer, define `Molly.uses_device_bias_gradient(::MyBias) = true`; the method must then be GPU-compilable and must not read host memory, otherwise the GPU can fail with an illegal memory access and stay unusable for the rest of the Julia session.
 
 Once the CV and the bias function have been defined, a [`BiasPotential`](@ref) can be constructed and added as a general interaction in the system setup, e.g. `general_inters = (BiasPotential(cv_type, bias_type),)`.
 A system can be biased along multiple CVs simultaneously by adding several [`BiasPotential`](@ref)s to `general_inters`.
@@ -653,6 +655,15 @@ sys = System(
 simulate!(sys, simulator, 100_000)
 ```
 See also [this example](@ref "Protein bias potential").
+
+### GPU offload for biased simulations
+
+When the [`System`](@ref) is on the GPU:
+- [`CalcDist`](@ref), [`CalcRg`](@ref), [`CalcTorsion`](@ref) and [`CalcAngle`](@ref) are calculated on the GPU without any transfer to the host on steps without a virial, also with `correction=:pbc`.
+- [`CalcRMSD`](@ref) is calculated on the GPU apart from the Kabsch alignment, which is done on the host every step.
+- Other CV types, including custom ones, copy the coordinates and atoms to the host and the gradient back every step.
+- With the GPU CV types, `bias_gradient` of the built-in bias types also runs on the GPU; custom bias types run it on the host unless they opt in (see above).
+- For the GPU CV types, non-finite bias forces are detected on the GPU and reported every 20 steps, at the end of [`simulate!`](@ref) and when one-off calls such as [`forces`](@ref) return, with the step at which they first appeared. Until then such a force is applied as zero, so the coordinates stay finite.
 
 ## Monte Carlo sampling
 

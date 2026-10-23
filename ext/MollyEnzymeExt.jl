@@ -54,6 +54,7 @@ EnzymeRules.inactive(::typeof(Molly.setup_constraints!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_show_progress), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_check_nans), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_array_nans), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.check_bias_finite_flags!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.isnan_svec_array), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_progress), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.setup_progress_minimizer), args...) = nothing

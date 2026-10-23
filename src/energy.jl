@@ -123,7 +123,7 @@ function virial(sys, neighbors, step_n::Integer=0;
     if length(sys.constraints) > 0
         buffers = init_buffers!(sys, n_threads)
         compute_initial_total_virial!(buffers, sys, neighbors, step_n;
-                                      n_threads=n_threads, kwargs...)
+                                      n_threads=n_threads, kwargs..., check_flags=true)
         return buffers.virial
     else
         _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads, kwargs...)
@@ -269,7 +269,8 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness),
+                                              n_threads=n_threads, buffers=buffers,
+                                              strictness=strictness),
         )
     end
 
@@ -531,7 +532,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness),
+                                n_threads=n_threads, buffers=buffers,
+                                strictness=strictness),
         )
     end
 

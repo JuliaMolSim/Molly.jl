@@ -310,6 +310,17 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
+# Unwrapped coordinates on the device of sys.coords, computed at most once per forces! call and
+# cached on buffers so every attached BiasPotential with correction==:pbc shares it. Reset to
+# nothing at the top of each forces! call, since forces! can run more than once at the same
+# step_n (e.g. MTS substeps).
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
+        buffers.unwrapped_coords[] = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    end
+    return buffers.unwrapped_coords[]
+end
+
 function has_constraint_virial(buffers, step_n::Integer)
     return has_constraint_virial(buffers.validity, step_n)
 end
@@ -383,12 +394,13 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    bias_scratch::Any               # IdDict{BiasPotential, BiasScratch}, see bias_scratch
     fs_mat::FM
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat)
+                    kin_tensor, pres_tensor, fs_mat; bias_scratch=IdDict{BiasPotential, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -401,19 +413,19 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat)
+                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat; bias_scratch=IdDict{BiasPotential, BiasScratch}())
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      bias_scratch, fs_mat, BufferValidity())
 end
 
 function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH}
@@ -435,6 +447,9 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     # Use an empty matrix if no virtual sites to keep this function type stable
     n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
     fs_mat = zeros(TU, D, n_fs_mat_cols)
+
+    bias_scratch = IdDict{BiasPotential, BiasScratch}()
+
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
@@ -444,6 +459,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
         constraint_scratch_ref(),
+        bias_scratch,
         fs_mat,
         BufferValidity(),
     )
@@ -535,6 +551,8 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
+    bias_scratch::Any                      # IdDict{BiasPotential, BiasScratch}, see bias_scratch
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -572,7 +590,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                     interacting_tiles_diag, num_interacting_tiles,
                     interacting_tiles_overflow, coords_reordered,
                     velocities_reordered, atoms_reordered, fs_mat_reordered,
-                    step_n_preprocessed, sparse_pair_generation, num_pairs)
+                    step_n_preprocessed, sparse_pair_generation, num_pairs;
+                    bias_scratch=IdDict{BiasPotential, BiasScratch}())
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
@@ -581,6 +600,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch,
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -715,10 +735,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
         sys.neighbor_finder.initialized = false
     end
 
+    bias_scratch = IdDict{BiasPotential, BiasScratch}()
+
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(), bias_scratch,
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -748,7 +771,8 @@ end
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...)
+    forces!(fs, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads, kwargs...,
+            check_flags=true)
     return fs
 end
 
@@ -776,13 +800,13 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     buffers = init_buffers!(sys, n_threads)
     if length(sys.constraints) > 0
         fs, _ = compute_initial_total_virial!(buffers, sys, neighbors, step_n;
-                                              n_threads=n_threads, kwargs...)
-        return fs, buffers.virial
+                                              n_threads=n_threads, kwargs..., check_flags=true)
     else
         fs = zero_forces(sys)
-        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...)
-        return fs, buffers.virial
+        forces!(fs, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads, kwargs...,
+                check_flags=true)
     end
+    return fs, buffers.virial
 end
 
 function forces!(fs,
@@ -795,7 +819,8 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness()) where {T, TH, needs_vir}
+                 strictness=default_strictness(),
+                 check_flags::Bool=false) where {T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(TH) * sys.energy_units)
     else
@@ -1301,12 +1326,33 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness()) where needs_vir
+                 strictness=default_strictness(),
+                 # Reads the GPU bias flags at once; set by calls that drop their buffers
+                 check_flags::Bool=false) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
 
-    for inter in values(general_inters)
+    buffers.unwrapped_coords[] = nothing # Filled by the first BiasPotential that needs it
+    # BiasPotentials with built-in CV kernels take the sync-free path, see bias_batched_tail!
+    biases, others = split_biases(Tuple(values(general_inters)))
+    scratches = map(b -> bias_scratch(buffers, b), biases)
+    for (bias, scratch) in zip(biases, scratches)
+        bias_cv_step!(bias, scratch, sys, bias_coords(sys, bias.cv_type, buffers, step_n), fs)
+    end
+    bias_batched_tail!(fs, biases, scratches, step_n)
+    if needs_vir
+        for (bias, scratch) in zip(biases, scratches)
+            bias.cv_type.has_virial || continue
+            calculate_virial!(buffers.virial, bias.cv_type,
+                              bias_coords(sys, bias.cv_type, buffers, step_n), -scratch.fs_svec,
+                              sys.atoms, sys.boundary; scratch=scratch.dist_scratch)
+        end
+    end
+    if check_flags || step_n % BIAS_FINITE_CHECK_EVERY == 0
+        check_bias_finite_flags!(biases, buffers)
+    end
+    for inter in others
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
                                  strictness=strictness)
@@ -1319,6 +1365,9 @@ function forces!(fs,
             mark_total_virial!(buffers.validity, step_n)
         end
     end
+
+    # Enforce rewrap in each forces! call.
+    buffers.unwrapped_coords[] = nothing
 
     return fs, buffers
 end

@@ -34,6 +34,7 @@ const SUITE = BenchmarkGroup(
     "spatial"      => BenchmarkGroup(),
     "simulation"   => BenchmarkGroup(),
     "protein"      => BenchmarkGroup(),
+    "bias"         => BenchmarkGroup(),
 )
 
 c1 = SVector(1.0, 1.0, 1.0)u"nm"
@@ -156,3 +157,33 @@ n_steps = 25
 
 simulate!(sys, sim, n_steps; n_threads=Threads.nthreads())
 SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(sys), $(sim), $(n_steps); n_threads=Threads.nthreads())
+
+# Biased simulations of the protein system, on CPU and on GPU
+prot = findall(ad -> ad.res_name != "HOH", sys.atoms_data)
+g1, g2 = prot[1:(length(prot) ÷ 2)], prot[(length(prot) ÷ 2 + 1):end]
+# Measures the cost per step: the whole-protein :wrap groups may cross the boundary, which
+# makes the CV values meaningless but doesn't change the work done
+function bias_sets(FT)
+    sq = SquareBias(FT(300)u"kJ * mol^-1 * nm^-2", FT(1)u"nm")
+    return [
+        "SingleDist" => (BiasPotential(CalcDist([prot[1]], [prot[end]], CalcSingleDist(), :wrap), sq),),
+        "Rg"         => (BiasPotential(CalcRg(prot, :wrap), sq),),
+        "3 mixed"    => (BiasPotential(CalcDist(g1, g2, CalcCMDist(), :wrap), sq),
+                         BiasPotential(CalcRg(prot, :wrap), sq),
+                         BiasPotential(CalcDist(prot[1:50], prot[(end - 49):end], CalcMinDist(), :wrap), sq)),
+    ]
+end
+
+bias_runs = Any[("CPU parallel", sys, sim, Float64, Threads.nthreads())]
+if run_cuda_tests
+    velocities_f32 = [Float32.(v) for v in velocities]
+    sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities_f32,
+                     array_type=CuArray, float_type=Float32)
+    push!(bias_runs, ("CUDA f32", sys_gpu, VelocityVerlet(dt=0.0005f0u"ps"), Float32, 1))
+end
+for (bk, s, sim_b, FT, n_threads) in bias_runs, (name, biases) in bias_sets(FT)
+    sys_b = System(s; coords=copy(s.coords), velocities=copy(s.velocities), general_inters=biases)
+    simulate!(sys_b, sim_b, n_steps; n_threads=n_threads) # Run once for setup
+    SUITE["bias"]["$name $bk"] = @benchmarkable simulate!($(sys_b), $(sim_b), $(n_steps);
+                                                          n_threads=$(n_threads))
+end
