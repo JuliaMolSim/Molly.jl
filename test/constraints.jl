@@ -33,7 +33,7 @@ end
     @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
     boundary = CubicBoundary(200.0u"Å")
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
@@ -105,7 +105,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -164,7 +164,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -223,7 +223,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -300,7 +300,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder
     )
@@ -457,7 +457,7 @@ end
             for _ in 1:n_atoms
         ], AT)
         boundary = CubicBoundary(T(3.0)u"nm")
-        pairwise_inters = (LennardJones(use_neighbors=true),)
+        pairwise_inters = (LennardJones(),)
 
         constraints = (
             SHAKE_RATTLE(n_atoms=n_atoms, dist_tolerance=T(1e-6)u"nm",
@@ -1531,7 +1531,7 @@ end
                  vel_tolerance=T(1e-4)u"Å^2 * ps^-1", dist_constraints=dist_constraints)
 
     boundary = CubicBoundary(T(200.0)u"Å")
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
 
     for AT in array_list[2:end]
         if Molly.uses_gpu_neighbor_finder(AT)
@@ -1760,7 +1760,7 @@ end
         coords=full_coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )

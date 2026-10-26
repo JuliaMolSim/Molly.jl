@@ -94,7 +94,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
         end
-        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(cutoff=cutoff),)
     else
         neighbor_finder = nothing
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)

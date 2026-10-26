@@ -10,7 +10,8 @@
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 temperature=TemperatureLogger(10),
             ),
@@ -43,7 +44,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 temperature=TemperatureLogger(10),
             ),
@@ -76,7 +78,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 temperature=TemperatureLogger(10),
             ),
@@ -109,7 +112,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 temperature=TemperatureLogger(10),
             ),
@@ -145,7 +149,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -187,7 +192,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -239,7 +245,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -296,7 +303,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -338,7 +346,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -390,7 +399,8 @@ end
                              for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
             loggers=(
                 pressure=PressureLogger(10),
                 scalar_pressure=ScalarPressureLogger(10),
@@ -445,7 +455,7 @@ function get_argon_sys(AT)
         atoms=to_device(atoms, AT),
         coords=to_device(coords, AT),
         boundary=boundary,
-        pairwise_inters=(LennardJones(),),
+        pairwise_inters=(LennardJones(use_neighbors=false),),
         loggers=(
             temperature=TemperatureLogger(n_log_steps),
             total_energy=TotalEnergyLogger(n_log_steps),
@@ -636,8 +646,7 @@ end
                 atoms=atoms,
                 coords=to_device(coords, AT),
                 boundary=init_boundary,
-                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                              use_neighbors=true),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                 neighbor_finder=GPUCellListNeighborFinder(n_atoms=n_atoms, n_steps=10,
                                                           dist_cutoff=1.2u"nm", array_type=AT),
                 loggers=(volume=VolumeLogger(10),),

@@ -406,7 +406,8 @@
             atoms=[Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary_sc; min_dist=0.3u"nm"),
             boundary=boundary_sc,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm"),
+                                          use_neighbors=false),),
         )
         μ_ok = SMatrix{3, 3}(Diagonal(fill(0.99, 3))) # 3.96 nm sides, cutoff still fits
         μ_small = SMatrix{3, 3}(Diagonal(fill(0.7, 3))) # 2.8 nm sides, less than 2 * 1.5 nm
@@ -1830,7 +1831,7 @@ end
                         SVector{3,Float32}(2.0, 1.0, 1.0),
                     ], AT),
                     boundary=CubicBoundary(10.0f0),
-                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    pairwise_inters=(LennardJones(),),
                     neighbor_finder=automatic_finder,
                     force_units=NoUnits,
                     energy_units=NoUnits,
@@ -2066,7 +2067,7 @@ end
 
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    pairwise_inters = (LennardJones(use_neighbors=true),)
+    pairwise_inters = (LennardJones(),)
     n_replicas = 4
 
     eligible = trues(n_atoms, n_atoms)
@@ -2257,19 +2258,19 @@ end
     nf_wrong_size = DistanceNeighborFinder(eligible=trues(n_atoms + 1, n_atoms + 1),
                                            dist_cutoff=1.0u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    pairwise_inters=(LennardJones(),),
                     neighbor_finder=nf_wrong_size)
 
     # A neighbor finder cutoff smaller than the interaction cutoff misses pairs
     nf_small = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.5u"nm")
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                                  use_neighbors=true),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                     neighbor_finder=nf_small, strictness=:error)
 
     # An interaction cutoff more than half the box breaks the minimum image convention
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm")),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm"),
+                                                  use_neighbors=false),),
                     strictness=:error)
 
     # Specific interaction lists should refer to atoms in the system
@@ -2280,8 +2281,7 @@ end
 
     # A valid system with all of the above set correctly
     sys = System(atoms=atoms, coords=coords, boundary=boundary,
-                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                               use_neighbors=true),),
+                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                  neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),
                                                         dist_cutoff=1.2u"nm"),
                  specific_inter_lists=(InteractionList2Atoms([1], [2], [bond]),),
@@ -2506,7 +2506,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", use_neighbors=false)
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     # Suppress origin warning
@@ -2564,7 +2564,7 @@ end
                 TwoParticleAverageSite(12, 10, 9, 0.7, 0.3, 0.0 / LU),
                 OneParticleSite(13, 1, 0.0 / LU),
             ], AT)
-            pis = (LennardJones(use_neighbors=true),)
+            pis = (LennardJones(),)
             eligible = trues(length(atoms), length(atoms))
             eligible[1, 13] = false # Exclude OneParticleSite interaction
             eligible[13, 1] = false
@@ -2688,9 +2688,8 @@ end
                               SVector(1.21, 1.34, 1.16), SVector(0.0, 0.0, 0.0),
                               SVector(1.8, 1.5, 1.35)] * LU, AT),
             boundary=CubicBoundary(5.0 * LU),
-            pairwise_inters=(LennardJones(use_neighbors=true),
-                             Coulomb(use_neighbors=true,
-                                     coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
+            pairwise_inters=(LennardJones(),
+                             Coulomb(coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
             virtual_sites=to_device(
                 [LocalCoordinatesSite(4, 1, 2, 3, wo_s, wx_s, wy_s, p * LU)], AT),
             neighbor_finder=DistanceNeighborFinder(eligible=to_device(eligible, AT),

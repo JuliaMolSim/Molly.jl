@@ -51,12 +51,40 @@
     @test Molly.ϵ_mixing(geometric_mixing_static, a1, a3) ≈ 0.28284271247461906u"kJ * mol^-1"
     @test Molly.ϵ_mixing(geometric_mixing_static, a3, a3) ≈ 0.6u"kJ * mol^-1"
 
-    @test !use_neighbors(LennardJones())
-    @test  use_neighbors(LennardJones(use_neighbors=true))
-    @test !use_neighbors(DoubleExponential(; dexp_kwargs...))
-    @test  use_neighbors(DoubleExponential(; dexp_kwargs..., use_neighbors=true))
-    @test !use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs...))
-    @test  use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs..., use_neighbors=true))
+    @test  use_neighbors(LennardJones())
+    @test !use_neighbors(LennardJones(use_neighbors=false))
+    @test  use_neighbors(DoubleExponential(; dexp_kwargs...))
+    @test !use_neighbors(DoubleExponential(; dexp_kwargs..., use_neighbors=false))
+    @test  use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs...))
+    @test !use_neighbors(DoubleExponentialSoftCore(; dexp_kwargs..., use_neighbors=false))
+    for dexp in (DoubleExponential(; dexp_kwargs..., use_neighbors=false),
+                 DoubleExponentialSoftCore(; dexp_kwargs..., use_neighbors=false))
+        @test !use_neighbors(zero(dexp))
+        @test !use_neighbors(dexp + dexp)
+    end
+
+    # Every built-in pairwise interaction uses the neighbor list by default and has a zero
+    #   of the same type, which gradient shadows use
+    rc_default = 1.0u"nm"
+    for inter in (LennardJones(), Molly.LennardJonesScaled(), LennardJonesSoftCoreBeutler(),
+                  LennardJonesSoftCoreGapsys(), AshbaughHatch(), SoftSphere(), Mie(m=6, n=12),
+                  Buckingham(), DoubleExponential(; dexp_kwargs...),
+                  DoubleExponentialSoftCore(; dexp_kwargs...), Gravity(), DPDInteraction(),
+                  Coulomb(), Molly.CoulombScaled(), CoulombSoftCoreBeutler(),
+                  CoulombSoftCoreGapsys(), CoulombReactionField(dist_cutoff=rc_default),
+                  Molly.CoulombReactionFieldScaled(dist_cutoff=rc_default),
+                  CoulombSoftCoreBeutlerReactionField(dist_cutoff=rc_default),
+                  CoulombSoftCoreGapsysReactionField(dist_cutoff=rc_default),
+                  CoulombEwald(dist_cutoff=rc_default),
+                  Molly.CoulombEwaldScaled(dist_cutoff=rc_default),
+                  CoulombSoftCoreBeutlerEwald(dist_cutoff=rc_default),
+                  CoulombSoftCoreGapsysEwald(dist_cutoff=rc_default), Yukawa())
+        @test use_neighbors(inter)
+        @test zero(inter) isa typeof(inter)
+    end
+    # As do custom pairwise interactions that do not define use_neighbors
+    struct NeighborsByDefaultInter <: PairwiseInteraction end
+    @test use_neighbors(NeighborsByDefaultInter())
 
     for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCoreBeutler(α=1), LennardJonesSoftCoreGapsys(α=1))
         @test isapprox(
@@ -702,7 +730,7 @@
                     boundary=CubicBoundary(5.0),
                     pairwise_inters=(CoulombReactionField(dist_cutoff=rc_gmx,
                                         solvent_dielectric=ϵrf, solute_dielectric=ϵr,
-                                        coulomb_const=ke),),
+                                        use_neighbors=false, coulomb_const=ke),),
                     force_units=NoUnits,
                     energy_units=NoUnits,
                 )
@@ -995,14 +1023,15 @@
                 atoms=atoms_raw,
                 coords=coords_pme,
                 boundary=boundary_pme,
-                pairwise_inters=(Molly.CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
+                pairwise_inters=(Molly.CoulombEwaldScaled(dist_cutoff=rc, use_neighbors=false,
+                                                          scheduler=scheduler),),
                 general_inters=(PME(rc, atoms_raw, boundary_pme; scheduler=scheduler),),
             )
             sys_ref_full = System(
                 atoms=atoms_ref,
                 coords=coords_pme,
                 boundary=boundary_pme,
-                pairwise_inters=(CoulombEwald(dist_cutoff=rc),),
+                pairwise_inters=(CoulombEwald(dist_cutoff=rc, use_neighbors=false),),
                 general_inters=(PME(rc, atoms_ref, boundary_pme),),
             )
 
@@ -1063,21 +1092,23 @@
             atoms=atoms_l1,
             coords=coords_pme,
             boundary=boundary_pme,
-            pairwise_inters=(CoulombEwald(dist_cutoff=rc),),
+            pairwise_inters=(CoulombEwald(dist_cutoff=rc, use_neighbors=false),),
             general_inters=(PME(rc, atoms_l1, boundary_pme),),
         )
         sys_beutler_l1 = System(
             atoms=atoms_l1,
             coords=coords_pme,
             boundary=boundary_pme,
-            pairwise_inters=(CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3),),
+            pairwise_inters=(CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3,
+                                                         use_neighbors=false),),
             general_inters=(PME(rc, atoms_l1, boundary_pme),),
         )
         sys_gapsys_l1 = System(
             atoms=atoms_l1,
             coords=coords_pme,
             boundary=boundary_pme,
-            pairwise_inters=(CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm"),),
+            pairwise_inters=(CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm",
+                                                        use_neighbors=false),),
             general_inters=(PME(rc, atoms_l1, boundary_pme),),
         )
 
@@ -1091,8 +1122,8 @@
               1e-9u"kJ * mol^-1 * nm^-1"
 
         for pair_inter in (
-            CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3),
-            CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm"),
+            CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, use_neighbors=false),
+            CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm", use_neighbors=false),
         )
             sys_soft = System(
                 atoms=atoms_l05,
@@ -1181,16 +1212,15 @@
         end
 
         pme_states = thermo_states(
-            (LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true),
-             CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, use_neighbors=true)),
+            (LennardJonesSoftCoreBeutler(α=0.3),
+             CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3)),
             atoms -> PME(rc, atoms, boundary_pme),
         )
         test_partition_matches_direct(pme_states, PME)
 
         ewald_states = thermo_states(
-            (LennardJonesSoftCoreGapsys(α=0.85, use_neighbors=true),
-             CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm",
-                                        use_neighbors=true)),
+            (LennardJonesSoftCoreGapsys(α=0.85),
+             CoulombSoftCoreGapsysEwald(dist_cutoff=rc, α=0.3, σQ=1.0u"nm")),
             atoms -> Ewald(rc),
         )
         test_partition_matches_direct(ewald_states, Ewald)
@@ -1198,7 +1228,7 @@
         special = falses(3, 3)
         special[1, 2] = special[2, 1] = true
         exclusion_states = thermo_states(
-            (CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3, use_neighbors=true),),
+            (CoulombSoftCoreBeutlerEwald(dist_cutoff=rc, α=0.3),),
             atoms -> PME(rc, atoms, boundary_pme);
             specific_inter_lists=(ewald_exclusions(),),
             special=special,
@@ -1218,7 +1248,7 @@
                         VelocityVerlet(dt=0.001u"ps"); temperature=temp)
             for (pis, temp) in zip(inters_nf, (300.0u"K", 350.0u"K"))
         ]
-        lj_nf = LennardJones(cutoff=DistanceCutoff(1.0u"nm"))
+        lj_nf = LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=false)
 
         # Shared pairwise interactions need a neighbor finder to split the pairs, otherwise
         #   their energy would be counted twice
@@ -1227,7 +1257,8 @@
         @test_throws ArgumentError ReplicaSystem(shared_nf, [copy(coords_nf) for _ in 1:2])
 
         # Without shared pairwise interactions the energy of each state is counted once
-        for inters_nf in (((), ()), ((lj_nf,), (LennardJones(cutoff=DistanceCutoff(0.9u"nm")),)))
+        lj_nf_short = LennardJones(cutoff=DistanceCutoff(0.9u"nm"), use_neighbors=false)
+        for inters_nf in (((), ()), ((lj_nf,), (lj_nf_short,)))
             unshared_nf = states_nf(inters_nf)
             partition_nf = Molly.AlchemicalPartition(unshared_nf)
             @test isnothing(partition_nf.master_sys.neighbor_finder)
@@ -2247,7 +2278,7 @@ end
                      nonbonded_method=SetupPME(), center_coords=false, strictness=:nowarn)
         coul, excl, pme = sys.pairwise_inters[2], sys.specific_inter_lists[end], sys.general_inters[1]
         coul_ϵr = CoulombEwald(dist_cutoff=coul.dist_cutoff, error_tol=coul.error_tol, ϵr=2,
-                               use_neighbors=true, weight_special=coul.weight_special,
+                               weight_special=coul.weight_special,
                                coulomb_const=coul.coulomb_const)
         @test coul_ϵr.ϵr isa T
         excl_ϵr = InteractionList2Atoms(excl.is, excl.js, excl.inters, excl.types,
@@ -2287,8 +2318,8 @@ end
 
     inter = DPDInteraction(a=a_param, γ=γ_param, σ=σ_param, r_c=r_c, dt=dt, key=UInt64(1))
 
-    @test !use_neighbors(inter)
-    @test use_neighbors(DPDInteraction(use_neighbors=true))
+    @test use_neighbors(inter)
+    @test !use_neighbors(DPDInteraction(use_neighbors=false))
 
     a1 = Atom(index=1, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0)
     a2 = Atom(index=2, mass=1.0, charge=0.0, σ=0.0, ϵ=0.0)

@@ -51,8 +51,10 @@ vector(coords[1], coords[2], boundary)
 
 Now we can define our pairwise interactions, i.e. those between most or all atom pairs, as a tuple.
 Because we have defined the relevant parameters for the atoms, we can use the built-in [`LennardJones`](@ref) type.
+Pairwise interactions use a neighbor list by default, which needs a neighbor finder as shown in later examples.
+This small system does not need one, so we give `use_neighbors=false` to consider all pairs of atoms.
 ```julia
-pairwise_inters = (LennardJones(),) # Don't forget the trailing comma!
+pairwise_inters = (LennardJones(use_neighbors=false),) # Don't forget the trailing comma!
 ```
 Finally, we can define the system and run the simulation.
 We use an [`AndersenThermostat`](@ref) to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
@@ -185,7 +187,7 @@ sys = System(
     coords=coords,
     boundary=boundary,
     velocities=velocities,
-    pairwise_inters=(LennardJones(),),
+    pairwise_inters=(LennardJones(use_neighbors=false),),
     loggers=(
         temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
         coords=CoordinatesLogger(typeof(1.0f0u"nm"), 10),
@@ -243,8 +245,9 @@ neighbor_finder = DistanceNeighborFinder(
 )
 
 cutoff = DistanceCutoff(0.8u"nm") # Less than half the box side
-pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+pairwise_inters = (LennardJones(cutoff=cutoff),)
 ```
+Since there is a neighbor finder this time, we leave out `use_neighbors=false` so that the interaction uses the neighbor list.
 Now we can simulate as before.
 ```julia
 sys = System(
@@ -635,7 +638,7 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-pairwise_inters = (LennardJones(),)
+pairwise_inters = (LennardJones(use_neighbors=false),)
 
 # Bias distance between atoms 1 and 2
 define_cv = CalcDist([1], [2])
@@ -673,7 +676,7 @@ atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
 boundary = RectangularBoundary(4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
-pairwise_inters = (Coulomb(),)
+pairwise_inters = (Coulomb(use_neighbors=false),)
 
 temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
@@ -891,11 +894,10 @@ end
 ```
 You can also define a [`use_neighbors`](@ref) method, which determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`):
 ```julia
-Molly.use_neighbors(inter::MyPairwiseInter) = true
+Molly.use_neighbors(inter::MyPairwiseInter) = false
 ```
-This is `false` by default.
-If it is `true`, you must specify a neighbor finder when setting up the [`System`](@ref).
-For built-in interactions this function accesses the `use_neighbors` field of the struct.
+This is `true` by default, in which case you must specify a neighbor finder when setting up the [`System`](@ref).
+For built-in interactions this function accesses the `use_neighbors` field of the struct, which is set with the `use_neighbors` keyword argument and is `true` by default.
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
 Next, you need to define a method for the [`force`](@ref) and [`Molly.pairwise_force`](@ref) functions acting between a pair of atoms.
@@ -1595,7 +1597,7 @@ temp = 50.0u"K"
 velocities = [random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 
 # Interaction potentials
-pairwise_inters = (SoftSphere(use_neighbors=true, cutoff=DistanceCutoff(0.6u"nm")),)
+pairwise_inters = (SoftSphere(cutoff=DistanceCutoff(0.6u"nm")),)
 
 bonds = [HarmonicBond(k=10000u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for i in 1:(n_atoms ÷ 2)]
 specific_inter_lists = (InteractionList2Atoms(
@@ -1850,6 +1852,9 @@ The available neighbor finders are:
 - [`TreeNeighborFinder`](@ref)
 
 The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
+
+Pairwise interactions use the neighbor list by default, i.e. [`use_neighbors`](@ref) returns `true`, so a [`System`](@ref) with pairwise interactions needs a neighbor finder unless the interactions are given `use_neighbors=false`.
+A pairwise interaction with `use_neighbors=false` considers all pairs of atoms, without the excluded and special pairs of the neighbor finder.
 
 The pairs of atoms that interact are given to a neighbor finder as the number of atoms along with lists of the excluded pairs, which do not interact through the pairwise interactions, for example bonded atoms, and the special pairs, which have scaled interactions, for example 1-4 atoms:
 ```julia

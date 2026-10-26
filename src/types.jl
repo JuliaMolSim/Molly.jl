@@ -1253,7 +1253,8 @@ minimum box side, are reported according to `strictness`.
 - `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
     save on computation. `nothing` means that no neighbor finder is used and all pairs
     of atoms are considered, in which case [`use_neighbors`](@ref) should return `false`
-    for the pairwise interactions.
+    for the pairwise interactions, e.g. by giving `use_neighbors=false` to the
+    built-in pairwise interactions.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
@@ -1436,7 +1437,9 @@ function System(;
 
     if isnothing(neighbor_finder) && any(use_neighbors, values(pairwise_inters))
         throw(ArgumentError("neighbor_finder is nothing but one of pairwise_inters " *
-                            "uses the neighbor list"))
+                            "uses the neighbor list, which is the default for pairwise " *
+                            "interactions, so give a neighbor finder or give " *
+                            "use_neighbors=false to the pairwise interactions"))
     end
     if !isnothing(neighbor_finder) && !all(use_neighbors, values(pairwise_inters))
         err_str = "A neighbor finder is used but one of pairwise_inters does not use the " *
@@ -2394,7 +2397,8 @@ Not compatible with using atom properties such as `σ` and `ϵ`.
     implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
 - `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
     save on computation. `nothing` means that no neighbor finder is used and all pairs
-    of atoms are considered.
+    of atoms are considered, in which case [`use_neighbors`](@ref) should return `false`
+    for the pairwise interactions.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should

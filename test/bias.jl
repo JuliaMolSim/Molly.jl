@@ -632,7 +632,7 @@ end
         atoms = to_device([Atom(mass=atom_mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms], AT)
         coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3, rng=rng), AT)
         velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
-        pairwise_inters = (LennardJones(),)
+        pairwise_inters = (LennardJones(use_neighbors=false),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
         define_bias = SquareBias(400, 1.5)
@@ -685,7 +685,7 @@ end
         atoms = to_device([Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms], AT)
         coords = to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng), AT)
         velocities = to_device([random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms], AT)
-        pairwise_inters = (LennardJones(),)
+        pairwise_inters = (LennardJones(use_neighbors=false),)
 
         define_cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
         define_bias = SquareBias(400u"kJ * mol^-1 * nm^-2", 1.5u"nm")

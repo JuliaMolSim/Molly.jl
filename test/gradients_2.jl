@@ -229,10 +229,9 @@ end
     neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=1,
                                              dist_cutoff=T(1.5))
     pairwise_inters = (
-        LennardJones(cutoff=DistanceCutoff(T(1.2)), use_neighbors=true),
+        LennardJones(cutoff=DistanceCutoff(T(1.2))),
         CoulombReactionField(dist_cutoff=T(1.2),
                              solvent_dielectric=T(Molly.crf_solvent_dielectric),
-                             use_neighbors=true,
                              coulomb_const=T(ustrip(Molly.coulomb_const))),
     )
     bonds = InteractionList2Atoms(Int32.(collect(1:4)), Int32.(collect(5:8)),
@@ -461,16 +460,16 @@ end
     #   range where each interaction actually varies
     inters = [
         ("LennardJonesSCBeutler", LennardJonesSoftCoreBeutler(α=T(0.5),
-                                        cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true),
+                                        cutoff=DistanceCutoff(nb_cutoff)),
                                   T(0.4)),
         ("LennardJonesSCGapsys" , LennardJonesSoftCoreGapsys(α=T(0.85),
-                                        cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true),
+                                        cutoff=DistanceCutoff(nb_cutoff)),
                                   T(0.4)),
         ("CoulombSCBeutler"     , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                        use_neighbors=true, coulomb_const=cc),
+                                        coulomb_const=cc),
                                   T(0.7)),
         ("CoulombSCGapsys"      , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                        σQ=T(1.0), use_neighbors=true, coulomb_const=cc),
+                                        σQ=T(1.0), coulomb_const=cc),
                                   T(0.7)),
     ]
     for (name, inter, λ_start) in inters
@@ -586,11 +585,10 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng_setup)
     velocities = [random_velocity(atom_mass, temp; rng=rng_setup) for i in 1:n_atoms]
     nb_cutoff = T(1.2)
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
     crf = CoulombReactionField(
         dist_cutoff=nb_cutoff,
         solvent_dielectric=T(Molly.crf_solvent_dielectric),
-        use_neighbors=true,
         coulomb_const=cc,
     )
     neighbor_finder = DistanceNeighborFinder(
@@ -814,7 +812,7 @@ end
     @test frac_diff < 1e-5
 
     boundary_units = CubicBoundary(3.0u"nm")
-    lj_units = LennardJones(cutoff=DistanceCutoff(1.2u"nm"), use_neighbors=true)
+    lj_units = LennardJones(cutoff=DistanceCutoff(1.2u"nm"))
     neighbor_finder_units = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         n_steps=10,
@@ -1060,52 +1058,49 @@ end
     lost_wc = ("weight_14", "coulomb_const")
     pairwise_inters = [
         ("LennardJones"     , LennardJones(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("Mie"              , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("AshbaughHatch"    , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("DoubleExponential", DoubleExponential(α=T(16.766), β=T(4.427), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
-                                    weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), ()),
-        ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
+                                    weight_special=w, cutoff=DistanceCutoff(nb_cutoff)), ()),
+        ("Gravity"          , Gravity(G=T(1.0)), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
         ("LJSCGapsys"       , LennardJonesSoftCoreGapsys(α=T(0.85), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
-        ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
+        ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff),
                                     weight_special=w, coulomb_const=cc), ()),
         ("CoulombScaled"    , Molly.CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCGapsys"  , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                    σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), ()),
+                                    σQ=T(1.0), weight_special=w, coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CRFScaled"        , Molly.CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CRFSCGapsys"      , CoulombSoftCoreGapsysReactionField(dist_cutoff=nb_cutoff,
-                                    σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), ()),
-        ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
+                                    σQ=T(1.0), weight_special=w, coulomb_const=cc), ()),
+        ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CoulombEwaldScaled", Molly.CoulombEwaldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCGapsys"   , CoulombSoftCoreGapsysEwald(dist_cutoff=nb_cutoff, σQ=T(1.0),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
-        ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
+        ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff),
                                     weight_special=w, coulomb_const=cc, kappa=T(1.0)), ()),
     ]
     for (name, inter, broken) in pairwise_inters
@@ -1565,6 +1560,9 @@ end
 end
 
 @testset "Gradients of a converted system" begin
+    ff_dexp = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml"))
+    ff_water = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+
     sys_vac = System(joinpath(data_dir, "ethanol_vac.pdb"), ff_dexp; float_type=Float32,
                      nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
                      strictness=:nowarn)
@@ -1600,8 +1598,9 @@ end
     end
 
     # The PME of a gradient safe converted system can be differentiated
-    sys = System(builders[1][2](Float32, Array); float_type=Float64, units=false,
-                    grad_safe=true)
+    sys_water = System(joinpath(data_dir, "tip4pew.pdb"), ff_water; float_type=Float32,
+                       nonbonded_method=SetupPME(), center_coords=false)
+    sys = System(sys_water; float_type=Float64, units=false, grad_safe=true)
     pme = sys.general_inters[1]
     @test pme.grad_safe
     fs = zero(sys.coords)

@@ -12,7 +12,7 @@
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(5.0))),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=T(5.0),
@@ -26,7 +26,7 @@
                 atoms=atoms,
                 coords=coords,
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(5.0))),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(5.0))),),
                 neighbor_finder=DistanceNeighborFinder(
                     eligible=trues(n_atoms, n_atoms),
                     dist_cutoff=T(5.0),
@@ -73,7 +73,7 @@
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
@@ -87,7 +87,7 @@
                 atoms=atoms,
                 coords=coords,
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=DistanceNeighborFinder(
                     eligible=trues(n_atoms, n_atoms),
                     dist_cutoff=r_cut,
@@ -175,7 +175,6 @@
 
             pairwise_inters_gpu = (LennardJones(
                 cutoff=DistanceCutoff(3.0u"nm"),
-                use_neighbors=true,
             ),)
             
             sys_cpu = System(
@@ -219,7 +218,6 @@
             # Overflow test
             pairwise_inters_gpu_overflow = (LennardJones(
                 cutoff=DistanceCutoff(20.0u"nm"),
-                use_neighbors=true,
             ),)
 
             sys_gpu_overflow = System(
@@ -312,7 +310,7 @@
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
@@ -326,7 +324,7 @@
                 atoms=atoms,
                 coords=coords,
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=DistanceNeighborFinder(
                     eligible=trues(n_atoms, n_atoms),
                     dist_cutoff=r_cut,
@@ -365,7 +363,7 @@
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
@@ -381,7 +379,7 @@
                 atoms=atoms,
                 coords=coords,
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=DistanceNeighborFinder(
                     n_atoms=n_atoms,
                     excluded_pairs=excluded_pairs,
@@ -415,7 +413,7 @@
             coords = place_atoms(n_atoms, boundary; min_dist=T(0.1))
             atoms = [Atom(index=i, mass=T(10.0), charge=T(0.0), σ=T(0.2), ϵ=T(0.2))
                      for i in 1:n_atoms]
-            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),)
+            pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
 
             # Random exclusions and special pairs among close atoms, so that they matter
             sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
@@ -534,7 +532,7 @@
                 coords=CuArray(coords),
                 velocities=CuArray(velocities),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
@@ -574,7 +572,7 @@
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut)),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
@@ -619,7 +617,7 @@
                     atoms=CuArray(atoms_state),
                     coords=CuArray(coords),
                     boundary=boundary,
-                    pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(1.2u"nm")),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.2u"nm")),),
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=1.2u"nm",

@@ -34,7 +34,7 @@ The interaction between special pairs is scaled by `weight_special`.
 """
 @kwdef struct Coulomb{C, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
@@ -159,7 +159,7 @@ In single topology the charges are interpolated between the end states.
 """
 @kwdef struct CoulombScaled{C, LM, SCH, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
@@ -170,7 +170,7 @@ use_neighbors(inter::CoulombScaled) = inter.use_neighbors
 
 required_atom_fields(::CoulombScaled) = (:charge, :λ, :alch_role)
 
-function Base.zero(coul::CoulombScaled{C, SCH, W, T}) where {C, SCH, W, T}
+function Base.zero(coul::CoulombScaled{C, LM, SCH, W, T}) where {C, LM, SCH, W, T}
     return CoulombScaled(
         coul.cutoff,
         coul.use_neighbors,
@@ -370,7 +370,7 @@ struct CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=false,
+function CoulombSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=true,
                                     σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(), 
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
@@ -599,7 +599,7 @@ struct CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombSoftCoreGapsys(; cutoff=NoCutoff(), α=0.3, σQ=1.0u"nm", use_neighbors=false,
+function CoulombSoftCoreGapsys(; cutoff=NoCutoff(), α=0.3, σQ=1.0u"nm", use_neighbors=true,
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
                                     coulomb_const=coulomb_const)
@@ -858,7 +858,7 @@ end
 function CoulombReactionField(; dist_cutoff,
                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                               solute_dielectric=one(solvent_dielectric),
-                              use_neighbors=false, weight_special=1, coulomb_const=coulomb_const)
+                              use_neighbors=true, weight_special=1, coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
     return CoulombReactionField(dist_cutoff, solvent_dielectric, solute_dielectric,
                                 use_neighbors, weight_special, coulomb_const)
@@ -1020,7 +1020,7 @@ end
 function CoulombReactionFieldScaled(; dist_cutoff,
                                     solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                     solute_dielectric=one(solvent_dielectric),
-                                    use_neighbors=false, λ_mixing=MinimumMixing(),
+                                    use_neighbors=true, λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
                                     coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
@@ -1184,7 +1184,7 @@ end
 function CoulombSoftCoreBeutlerReactionField(; dist_cutoff,
                                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
-                                              α=0.3, use_neighbors=false, σ_mixing=LorentzMixing(),
+                                              α=0.3, use_neighbors=true, σ_mixing=LorentzMixing(),
                                               ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                               scheduler=DefaultLambdaScheduler(), weight_special=1,
                                               coulomb_const=coulomb_const)
@@ -1423,7 +1423,7 @@ end
 function CoulombSoftCoreGapsysReactionField(; dist_cutoff,
                                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
-                                              α=0.3, σQ=1.0u"nm", use_neighbors=false,
+                                              α=0.3, σQ=1.0u"nm", use_neighbors=true,
                                               λ_mixing=MinimumMixing(),
                                               scheduler=DefaultLambdaScheduler(), weight_special=1,
                                               coulomb_const=coulomb_const)
@@ -1621,7 +1621,7 @@ end
 end
 
 @doc raw"""
-    CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=false, weight_special=1,
+    CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true, weight_special=1,
                  coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short range Ewald electrostatic interaction between two atoms.
@@ -1653,7 +1653,7 @@ struct CoulombEwald{T, D, E, W, C, A} <: PairwiseInteraction
     approximate_erfc::Bool
 end
 
-function CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=false,
+function CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true,
                       weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
     α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
     ϵr_T = typeof(ustrip(dist_cutoff))(ϵr)
@@ -1756,7 +1756,7 @@ end
 end
 
 @doc raw"""
-    CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+    CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true,
                        λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler(),
                        weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
 
@@ -1783,7 +1783,7 @@ struct CoulombEwaldScaled{T, D, LM, SCH, W, C, A} <: PairwiseInteraction
     approximate_erfc::Bool
 end
 
-function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false, λ_mixing=MinimumMixing(),
+function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true, λ_mixing=MinimumMixing(),
                             scheduler=DefaultLambdaScheduler(), weight_special=1,
                             coulomb_const=coulomb_const, approximate_erfc=true)
     α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
@@ -1795,7 +1795,7 @@ use_neighbors(inter::CoulombEwaldScaled) = inter.use_neighbors
 
 required_atom_fields(::CoulombEwaldScaled) = (:charge, :λ, :alch_role)
 
-function Base.zero(coul::CoulombEwaldScaled{T, D, SCH, W, C, A}) where {T, D, SCH, W, C, A}
+function Base.zero(coul::CoulombEwaldScaled{T, D, LM, SCH, W, C, A}) where {T, D, LM, SCH, W, C, A}
     return CoulombEwaldScaled(
         zero(D),
         zero(T),
@@ -1938,7 +1938,7 @@ end
 
 @doc raw"""
     CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                use_neighbors=false, σ_mixing=LorentzMixing(),
+                                use_neighbors=true, σ_mixing=LorentzMixing(),
                                 ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                 scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                 coulomb_const=coulomb_const, approximate_erfc=true)
@@ -1970,7 +1970,7 @@ struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA} <: Pairw
 end
 
 function CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                     use_neighbors=false, σ_mixing=LorentzMixing(),
+                                     use_neighbors=true, σ_mixing=LorentzMixing(),
                                      ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                      scheduler=DefaultLambdaScheduler(), weight_special=1,
                                      coulomb_const=coulomb_const, approximate_erfc=true)
@@ -2140,7 +2140,7 @@ end
 
 @doc raw"""
     CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3, σQ=1.0u"nm",
-                               use_neighbors=false, λ_mixing=MinimumMixing(),
+                               use_neighbors=true, λ_mixing=MinimumMixing(),
                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                coulomb_const=coulomb_const, approximate_erfc=true)
 
@@ -2170,7 +2170,7 @@ struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA} <: PairwiseIn
 end
 
 function CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                    σQ=1.0u"nm", use_neighbors=false,
+                                    σQ=1.0u"nm", use_neighbors=true,
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(),
                                     weight_special=1, coulomb_const=coulomb_const,
@@ -2367,7 +2367,7 @@ where ``\kappa`` is `kappa`, the inverse of the screening length.
 """
 @kwdef struct Yukawa{C, W, T, K} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     weight_special::W = 1
     coulomb_const::T = coulomb_const
     kappa::K = 1.0*u"nm^-1"

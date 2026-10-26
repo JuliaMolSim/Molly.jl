@@ -949,7 +949,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing, " *
+                  "pairwise interactions used without a neighbor finder need " *
+                  "use_neighbors=false")
         end
         sqdist_cutoff = max_zero_beyond(pairwise_inters_nl)
         for ni in eachindex(neighbors)
@@ -1007,7 +1009,9 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
 
     @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing, " *
+                  "pairwise interactions used without a neighbor finder need " *
+                  "use_neighbors=false")
         end
         n_neighbors = length(neighbors)
         block_size = 512

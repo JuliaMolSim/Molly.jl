@@ -103,7 +103,8 @@ body_masses = [
 boundary = CubicBoundary(1e9u"km")
 
 # Convert the gravitational constant to the appropriate units
-inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
+inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G),
+                use_neighbors=false)
 
 sys = System(
     atoms=[Atom(mass=m) for m in body_masses],
@@ -163,6 +164,9 @@ struct SIRInteraction <: PairwiseInteraction
     prob_recovery::Float64
 end
 
+# Consider all pairs of people rather than only those in the neighbor list
+Molly.use_neighbors(::SIRInteraction) = false
+
 # Custom force function
 function Molly.force(inter::SIRInteraction,
                         vec_ij,
@@ -209,7 +213,7 @@ atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
+lj = LennardJones(cutoff=DistanceCutoff(1.6))
 sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
@@ -417,10 +421,7 @@ for pol_i in 1:n_polymers
     end
 end
 
-lj = LennardJones(
-    cutoff=DistanceCutoff(5.0u"nm"),
-    use_neighbors=true,
-)
+lj = LennardJones(cutoff=DistanceCutoff(5.0u"nm"))
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
     excluded_pairs=excluded_pairs,
@@ -820,8 +821,6 @@ struct BondableInteraction <: PairwiseInteraction
     r0::Float64
 end
 
-Molly.use_neighbors(::BondableInteraction) = true
-
 function Molly.force(inter::BondableInteraction,
                         dr,
                         atom_i,
@@ -869,7 +868,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(cutoff=DistanceCutoff(2.0), use_neighbors=true),
+    SoftSphere(cutoff=DistanceCutoff(2.0)),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
@@ -987,7 +986,7 @@ ab_sys = AtomsBase.AbstractSystem(
                     [0.0    , 0.0      , 1.7928950]]u"Å",
 )
 
-coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
+coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", use_neighbors=false)
 calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
 AtomsCalculators.potential_energy(ab_sys, calc)
@@ -1035,7 +1034,7 @@ function check_sim(n_atoms)
         dist_cutoff=1.0f0u"nm",
         array_type=CuArray,
     )
-    pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm"), use_neighbors=true),)
+    pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm")),)
     sys = System(
         atoms=atoms,
         coords=coords,
@@ -1278,7 +1277,7 @@ r_cut = 0.85u"nm"
 sys = System(
     fcc_crystal;
     velocities=velocities,
-    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
+    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut), use_neighbors=false),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
@@ -1328,10 +1327,9 @@ atom_mass = 1.00794u"g/mol"
 n_atoms_half = 200
 atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1")
          for i in 1:n_atoms_half]
-max_coord = 200.0u"Å"
-coords = max_coord .* rand(SVector{3, Float64}, n_atoms_half)
 boundary = CubicBoundary(200.0u"Å")
-lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+coords = place_atoms(n_atoms_half, boundary; min_dist=4.0u"Å")
+lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
 
 # Add bonded atoms
 bond_length = 0.74u"Å" # Hydrogen bond length

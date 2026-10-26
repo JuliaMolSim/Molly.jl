@@ -34,7 +34,7 @@ when the long-range correction to the potential energy is required.
 """
 @kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -647,7 +647,7 @@ between the end states instead.
 """
 @kwdef struct LennardJonesScaled{C, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -801,7 +801,7 @@ the interaction is turned off.
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.3
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -1040,7 +1040,7 @@ the interaction is turned off.
 @kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.85
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -1281,7 +1281,7 @@ If ``\lambda_{ij}`` is 1 this gives the standard [`LennardJones`](@ref) potentia
 """
 @kwdef struct AshbaughHatch{C, H, S, E, L, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = LorentzMixing()

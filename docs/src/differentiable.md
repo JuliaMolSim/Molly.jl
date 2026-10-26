@@ -135,7 +135,7 @@ simulator = VelocityVerlet(
 )
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-lj = LennardJones(cutoff=DistanceCutoff(1.5), use_neighbors=true)
+lj = LennardJones(cutoff=DistanceCutoff(1.5))
 pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,

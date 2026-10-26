@@ -30,10 +30,7 @@ function setup_benchmark_system(n_atoms;
     velocities = [zero(SVector{3, typeof(T(1.0)u"nm/ps")}) for _ in 1:n_atoms]
     atoms = [Atom(index=i, mass=atom_mass, charge=T(0.0), σ=σ, ϵ=ϵ) for i in 1:n_atoms]
 
-    pairwise_inters = (LennardJones(
-        cutoff=DistanceCutoff(r_cut),
-        use_neighbors=true,
-    ),)
+    pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
     
     sys_gpu = System(
         atoms=CuArray(atoms),

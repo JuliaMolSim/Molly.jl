@@ -17,13 +17,18 @@ export
 """
     use_neighbors(inter)
 
-Whether a pairwise interaction uses the neighbor list, default `false`.
+Whether a pairwise interaction uses the neighbor list, default `true`.
 
+If `true` only the pairs in the neighbor list are considered, which requires a
+neighbor finder in the [`System`](@ref).
+If `false` all pairs of atoms are considered, without the exclusions or special pairs
+of the neighbor finder.
 Custom pairwise interactions can define a method for this function.
 For built-in interactions such as [`LennardJones`](@ref) this function accesses
-the `use_neighbors` field of the struct.
+the `use_neighbors` field of the struct, set with the `use_neighbors` keyword
+argument, which is `true` by default.
 """
-use_neighbors(inter) = false
+use_neighbors(inter) = true
 
 """
     neighbor_pairs(neighbors)

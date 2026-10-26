@@ -27,8 +27,7 @@
             coords=coords,
             boundary=boundary,
             velocities=velocities,
-            pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),
-                             Coulomb(cutoff=cutoff, use_neighbors=true)),
+            pairwise_inters=(LennardJones(cutoff=cutoff), Coulomb(cutoff=cutoff)),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -141,7 +140,8 @@
             coords=coords,
             boundary=boundary,
             velocities=velocities,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
         )
         neighbors = find_neighbors(sys)
         JET.test_call(forces          , Base.typesof(sys, neighbors); jet_config...)
@@ -208,24 +208,24 @@
     #   interaction, since the analysis covers every element of the interaction tuple
     pairwise_inters_sets = [
         "pairwise" => (
-            LennardJones(cutoff=cutoff, use_neighbors=true),
-            AshbaughHatch(cutoff=cutoff, use_neighbors=true),
-            SoftSphere(cutoff=cutoff, use_neighbors=true),
-            Mie(m=6, n=12, cutoff=cutoff, use_neighbors=true),
-            Buckingham(cutoff=cutoff, use_neighbors=true),
-            DoubleExponential(α=16.766, β=4.427, cutoff=cutoff, use_neighbors=true),
-            Coulomb(cutoff=cutoff, use_neighbors=true),
-            CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
-            Yukawa(cutoff=cutoff, use_neighbors=true, kappa=1.0u"nm^-1"),
-            Gravity(use_neighbors=true),
+            LennardJones(cutoff=cutoff),
+            AshbaughHatch(cutoff=cutoff),
+            SoftSphere(cutoff=cutoff),
+            Mie(m=6, n=12, cutoff=cutoff),
+            Buckingham(cutoff=cutoff),
+            DoubleExponential(α=16.766, β=4.427, cutoff=cutoff),
+            Coulomb(cutoff=cutoff),
+            CoulombReactionField(dist_cutoff=1.0u"nm"),
+            Yukawa(cutoff=cutoff, kappa=1.0u"nm^-1"),
+            Gravity(),
         ),
         "cutoffs" => (
-            LennardJones(cutoff=NoCutoff(), use_neighbors=true),
-            LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=PolynomialCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+            LennardJones(cutoff=NoCutoff()),
+            LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+            LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+            LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+            LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
+            LennardJones(cutoff=PolynomialCutoff(0.6u"nm", 1.0u"nm")),
         ),
     ]
     for (pis_name, pairwise_inters) in pairwise_inters_sets
@@ -246,11 +246,10 @@
         boundary=boundary,
         velocities=velocities,
         pairwise_inters=(
-            LennardJonesSoftCoreBeutler(cutoff=cutoff, use_neighbors=true, α=0.3),
-            LennardJonesSoftCoreGapsys(cutoff=cutoff, use_neighbors=true, α=0.85),
-            CoulombSoftCoreBeutler(cutoff=cutoff, use_neighbors=true, α=0.3),
-            CoulombSoftCoreGapsys(cutoff=cutoff, use_neighbors=true, α=0.3,
-                                    σQ=1.0u"nm"),
+            LennardJonesSoftCoreBeutler(cutoff=cutoff, α=0.3),
+            LennardJonesSoftCoreGapsys(cutoff=cutoff, α=0.85),
+            CoulombSoftCoreBeutler(cutoff=cutoff, α=0.3),
+            CoulombSoftCoreGapsys(cutoff=cutoff, α=0.3, σQ=1.0u"nm"),
         ),
         neighbor_finder=neighbor_finder,
     )
@@ -453,7 +452,7 @@
         coords=coords,
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", 100.0u"K") for _ in 1:n_atoms],
-        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),),
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
         neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                 dist_cutoff=1.2u"nm"),
         loggers=(

@@ -308,7 +308,9 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
 
     @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing, " *
+                  "pairwise interactions used without a neighbor finder need " *
+                  "use_neighbors=false")
         end
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
@@ -345,7 +347,9 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
 
     @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing, " *
+                  "pairwise interactions used without a neighbor finder need " *
+                  "use_neighbors=false")
         end
         n_neighbors = length(neighbors)
         block_size = 512

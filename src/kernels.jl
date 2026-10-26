@@ -147,8 +147,10 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
                     step_n) where {D, needs_vir}
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
-              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
     if length(nbs) > 0
@@ -431,8 +433,10 @@ end
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
                                pairwise_inters, neighbors, step_n)
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
-              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
     if length(nbs) > 0

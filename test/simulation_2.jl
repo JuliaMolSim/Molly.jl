@@ -65,7 +65,7 @@ end
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
 
-    pairwise_inters = (LennardJones(use_neighbors=true),)
+    pairwise_inters = (LennardJones(),)
 
     eligible = trues(n_atoms, n_atoms)
 
@@ -179,7 +179,7 @@ end
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3,
                              scheduler=Molly.LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder
         )
@@ -234,7 +234,7 @@ end
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        pairwise_inters=(Coulomb(use_neighbors=true), ),
+        pairwise_inters=(Coulomb(), ),
         neighbor_finder=neighbor_finder,
         loggers=(
             coords=CoordinatesLogger(10),
@@ -296,7 +296,7 @@ end
     sys = System(
         fcc_crystal;
         velocities=velocities,
-        pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
+        pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut), use_neighbors=false),),
         loggers=(tot_eng=TotalEnergyLogger(100),),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
@@ -506,7 +506,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(DPDInteraction(a=a, γ=γ, σ=σ, r_c=r_c, dt=dt, use_neighbors=true),),
+        pairwise_inters=(DPDInteraction(a=a, γ=γ, σ=σ, r_c=r_c, dt=dt),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -690,7 +690,7 @@ end
             atoms=atoms_λ,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3,
                              scheduler=Molly.LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
@@ -837,6 +837,9 @@ end
         prob_recovery::Float64
     end
 
+    # Consider all pairs of people rather than only those in the neighbor list
+    Molly.use_neighbors(::SIRInteraction) = false
+
     # Custom logger
     struct SIRLogger
         n_steps::Int
@@ -892,7 +895,7 @@ end
     coords = place_atoms(n_people, boundary; min_dist=0.1, rng=rng)
     velocities = [random_velocity(1.0, temp; dims=2, rng=rng) for i in 1:n_people]
 
-    lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(1.6))
     sir = SIRInteraction(0.5, 0.06, 0.01)
     @test !use_neighbors(sir)
     pairwise_inters = (LennardJones=lj, SIR=sir)

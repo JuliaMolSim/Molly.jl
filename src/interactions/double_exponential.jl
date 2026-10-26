@@ -40,7 +40,7 @@ struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
     weight_special::W
 end
 
-function DoubleExponential(; cutoff=NoCutoff(), use_neighbors=false, α, β,
+function DoubleExponential(; cutoff=NoCutoff(), use_neighbors=true, α, β,
                            shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
                            ϵ_mixing=GeometricMixing(), weight_special=1)
     return DoubleExponential(cutoff, use_neighbors, α, β, shortcut, σ_mixing, ϵ_mixing,
@@ -55,7 +55,7 @@ required_atom_fields(inter::DoubleExponential) = (:σ, :ϵ, :λ,
 function Base.zero(i::DoubleExponential{C, T, SC, S, E, W}) where {C, T, SC, S, E, W}
     return DoubleExponential(
         i.cutoff,
-        false,
+        i.use_neighbors,
         zero(T),
         zero(T),
         i.shortcut,
@@ -68,7 +68,7 @@ end
 function Base.:+(i1::DoubleExponential, i2::DoubleExponential)
     return DoubleExponential(
         i1.cutoff,
-        false,
+        i1.use_neighbors,
         i1.α + i2.α,
         i1.β + i2.β,
         i1.shortcut,
@@ -207,7 +207,7 @@ struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteract
     weight_special::W
 end
 
-function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=false, α, β,
+function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=true, α, β,
                                    shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
                                    ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                    scheduler=DefaultLambdaScheduler(), weight_special=1)
@@ -224,7 +224,7 @@ required_atom_fields(inter::DoubleExponentialSoftCore) = (:σ, :ϵ, :λ, :alch_r
 function Base.zero(i::DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W}) where {C, T, SC, S, E, LM, SCH, W}
     return DoubleExponentialSoftCore(
         i.cutoff,
-        false,
+        i.use_neighbors,
         i.λ_mixing,
         i.scheduler,
         zero(T),
@@ -239,7 +239,7 @@ end
 function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     return DoubleExponentialSoftCore(
         i1.cutoff,
-        false,
+        i1.use_neighbors,
         i1.λ_mixing,
         i1.scheduler,
         i1.α + i2.α,

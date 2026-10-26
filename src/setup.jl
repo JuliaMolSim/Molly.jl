@@ -1685,8 +1685,8 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         min_box_side = minimum(box_sides(boundary))
         if !has_infinite_boundary(boundary) && min_box_side < (2 * dist_neighbors)
             throw(ArgumentError("the minimum box side ($min_box_side) is less than " *
-                    "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which the " *
-                    "cell list neighbor finder does not support. Reduce dist_cutoff or " *
+                    "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which " *
+                    "CellListMapNeighborFinder does not support. Reduce dist_cutoff or " *
                     "dist_buffer, use a larger box, or pass " *
                     "neighbor_finder_type=DistanceNeighborFinder."))
         end

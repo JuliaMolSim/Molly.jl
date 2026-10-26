@@ -131,7 +131,8 @@ end
             atoms=atoms,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJones(cutoff=ShiftedPotentialCutoff(rc*L)),),
+            pairwise_inters=(LennardJones(cutoff=ShiftedPotentialCutoff(rc*L),
+                                          use_neighbors=false),),
             energy_units=E,
             force_units=E/L,
         )
