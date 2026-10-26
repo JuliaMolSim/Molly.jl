@@ -268,12 +268,13 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
     end
 
     for inter in values(general_inters)
-        evaluate_before_pairwise(inter) && continue
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness),
-        )
+        if !evaluate_before_pairwise(inter)
+            pe += uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, strictness=strictness),
+            )
+        end
     end
 
     return pe
@@ -542,12 +543,13 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                               specific_inter_lists, n_threads)
 
     for inter in values(general_inters)
-        evaluate_before_pairwise(inter) && continue
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness),
-        )
+        if !evaluate_before_pairwise(inter)
+            pe += uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, strictness=strictness),
+            )
+        end
     end
 
     return pe

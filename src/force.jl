@@ -867,10 +867,11 @@ function forces!(fs,
     end
 
     for inter in values(general_inters)
-        evaluate_before_pairwise(inter) && continue
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 strictness=strictness)
+        if !evaluate_before_pairwise(inter)
+            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                     strictness=strictness)
+        end
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1334,10 +1335,11 @@ function forces!(fs,
                 specific_inter_lists, n_threads, Val(has_early_interactions))
 
     for inter in values(general_inters)
-        evaluate_before_pairwise(inter) && continue
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 strictness=strictness)
+        if !evaluate_before_pairwise(inter)
+            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
+                                     strictness=strictness)
+        end
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 

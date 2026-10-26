@@ -14,14 +14,7 @@ abstract type AbstractEEMCoupling end
 # This function should be implemented by all general interactions that wish to use charge equilibration
 # Must return the coulomb energy of an off-diagonal pair (i,j) in eV
 # `r` can be larger than the interaction cutoff due to skin distance: should implement a check for this
-@inline function eem_hij(
-    coupling::AbstractEEMCoupling,
-    r,
-    type_i,
-    type_j,
-)
-    error("eem_hij not implemented for $(typeof(coupling))")
-end
+function eem_hij end
 
 # Specifies the units for the distance r passed to eem_hij by QEq solver
 function eem_length_unit(coupling::AbstractEEMCoupling)

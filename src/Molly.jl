@@ -32,7 +32,6 @@ using SpecialFunctions
 using Unitful
 using UnitfulAtomic
 using StructArrays
-import TimerOutputs
 
 using LinearAlgebra
 using Random
