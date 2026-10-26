@@ -203,10 +203,11 @@ end
     potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                      specific_inter_lists=system.specific_inter_lists,
-                     general_inters=system.general_inters, strictness=:warn)
+                     general_inters=system.general_inters, strictness=:warn,
+                     visit_state=false)
 
 Calculate the potential energy of a system using the pairwise, specific and
-general interactions.
+general interactions. `visit_state` is as for [`forces`](@ref).
 
     potential_energy(inter, vec_ij, atom_i, atom_j, energy_units, special, coord_i, coord_j,
                      boundary, velocity_i, velocity_j, step_n)
@@ -242,7 +243,8 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness()) where TH
+                          strictness=default_strictness(),
+                          visit_state::Bool=false) where TH
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
         pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
@@ -265,11 +267,13 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           Val(TH), step_n)
     end
 
+    # visit_state lets history-dependent interactions (e.g. Metadynamics) update at this state
     for inter in values(general_inters)
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness),
+                                              n_threads=n_threads, strictness=strictness,
+                                              visit_state=visit_state),
         )
     end
 
@@ -522,7 +526,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness())
+                          strictness=default_strictness(),
+                          visit_state::Bool=false)
     # Allow an Enzyme reverse rule
     pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
@@ -531,7 +536,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
         pe += uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness),
+                                n_threads=n_threads, strictness=strictness,
+                                visit_state=visit_state),
         )
     end
 
