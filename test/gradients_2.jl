@@ -1383,7 +1383,9 @@ end
         )
     end
 
-    nonbonded_methods = (("RF", SetupCoulombReactionField()), ("PME", SetupPME()))
+    nonbonded_methods = (("RF", SetupCoulombReactionField()),
+                         ("RF exclusions", SetupCoulombReactionField(exclusion_correction=true)),
+                         ("PME", SetupPME()))
     @testset "Injection $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
         sys = ethanol_solv_sys(garnet_file, nonbonded_method)
         params_dic = extract_parameters(sys)
@@ -1413,6 +1415,18 @@ end
         @test !isapprox(pe(sys_mod), pe(sys); rtol=1e-6)
         @test pe(sys_mod) ≈ pe(sys_rebuilt) rtol=1e-12
         @test fs(sys_mod) ≈ fs(sys_rebuilt) rtol=1e-12
+
+        # The reaction field exclusions take the injected reaction field parameters
+        if nonbonded_method isa SetupCoulombReactionField
+            sys_ϵ = inject_gradients(sys, merge(params_dic, Dict(
+                        "inter_CO_solvent_dielectric" => 10.0,
+                        "inter_CO_solute_dielectric" => 2.0)), plan)
+            sys_ϵ_rebuilt = ethanol_solv_sys(garnet_file, SetupCoulombReactionField(
+                        solvent_dielectric=10.0, solute_dielectric=2.0,
+                        exclusion_correction=nonbonded_method.exclusion_correction))
+            @test pe(sys_ϵ) ≈ pe(sys_ϵ_rebuilt) rtol=1e-12
+            @test fs(sys_ϵ) ≈ fs(sys_ϵ_rebuilt) rtol=1e-12
+        end
     end
 
     # Enzyme against finite differencing, with every parameter of the system in the
@@ -1446,13 +1460,23 @@ end
             Const(neighbors),
             Duplicated(gis, Enzyme.make_zero(gis)),
         )
+        is_rf = nonbonded_method isa SetupCoulombReactionField
         for key in ("atom_O2_charge", "atom_H7_charge", "atom_O1_charge", "atom_C1_σ",
-                    "atom_C1_ϵ")
+                    "atom_C1_ϵ", (is_rf ? ("inter_CO_solute_dielectric",) : ())...)
             grad_fd = central_fdm(6, 1)(params_dic[key]) do val
                 pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
                             copy(sys.coords), neighbors, gis)
             end
             @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+        end
+        # A small gradient relative to the energy, so a higher order is needed
+        if is_rf
+            key = "inter_CO_solvent_dielectric"
+            grad_fd = central_fdm(10, 1)(params_dic[key]) do val
+                pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
+                            copy(sys.coords), neighbors, gis)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-5 * abs(grad_fd)
         end
     end
 

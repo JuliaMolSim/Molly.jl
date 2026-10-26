@@ -807,6 +807,8 @@ The schedulers scale the sterics and electrostatics of each role differently (se
 
 An alchemical system keeps the parameter keys of the system it was built from (see [`extract_parameters`](@ref)), so force field parameters can be differentiated through an [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) like through the original system. Single topology systems, which store two values per parameter, are not supported by the parameter functions.
 
+The reaction field correction of excluded pairs and self terms, [`CoulombReactionFieldExclusion`](@ref), takes the charges of alchemical atoms from the scheduler in the same way as [`EwaldExclusion`](@ref) and has no soft core. With [`Molly.GROMACSLambdaABFEScheduler`](@ref) and [`Molly.GROMACSLambdaRBFEScheduler`](@ref) the charge products of the two end states are mixed linearly in $\lambda$. [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) keep these terms if the input system has them.
+
 ### Matching OpenFE default settings
 
 Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:

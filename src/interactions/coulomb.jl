@@ -5,6 +5,9 @@ export
     CoulombSoftCoreGapsys,
     CoulombReactionField,
     SetupCoulombReactionField,
+    CoulombReactionFieldExclusion,
+    CoulombReactionFieldExclusionData,
+    reaction_field_exclusions,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
     CoulombEwald,
@@ -957,25 +960,32 @@ end
 end
 
 """
-    SetupCoulombReactionField(; solvent_dielectric, solute_dielectric, coulomb_const)
+    SetupCoulombReactionField(; solvent_dielectric, solute_dielectric, coulomb_const,
+                              exclusion_correction=false)
 
 Set up the Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
 
 Passed to the [`System`](@ref) constructor from files, where it creates a
 [`CoulombReactionField`](@ref) pairwise interaction.
+If `exclusion_correction` is `true`, the reaction field is also applied to the excluded and
+special pairs and to each atom with itself, using the [`CoulombReactionFieldExclusion`](@ref)
+specific interaction, which requires a neighbor finder.
 """
 struct SetupCoulombReactionField{T, E, C}
     solvent_dielectric::T
     solute_dielectric::E
     coulomb_const::C
+    exclusion_correction::Bool
 end
 
 function SetupCoulombReactionField(; solvent_dielectric=crf_solvent_dielectric,
                                    solute_dielectric=one(crf_solvent_dielectric),
-                                   coulomb_const=coulomb_const)
+                                   coulomb_const=coulomb_const,
+                                   exclusion_correction::Bool=false)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
-    return SetupCoulombReactionField(solvent_dielectric, solute_dielectric, coulomb_const)
+    return SetupCoulombReactionField(solvent_dielectric, solute_dielectric, coulomb_const,
+                                     exclusion_correction)
 end
 
 function setup_coulomb_pairwise(scrf::SetupCoulombReactionField, dist_cutoff,
@@ -1618,6 +1628,202 @@ end
     else
         return pe * (r <= rc)
     end
+end
+
+const ReactionFieldInteraction = Union{CoulombReactionField, CoulombReactionFieldScaled,
+                                       CoulombSoftCoreBeutlerReactionField,
+                                       CoulombSoftCoreGapsysReactionField}
+
+@doc raw"""
+    CoulombReactionFieldExclusion(; self=false)
+
+The reaction field correction for an excluded atom pair, or for an atom with itself if
+`self` is `true`.
+
+The dielectric continuum beyond the cutoff responds to all charges within the cutoff,
+including those of excluded pairs, so the reaction field is applied to excluded pairs and to
+each atom with itself, without the direct Coulomb term.
+For an excluded pair within the cutoff the potential energy is
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 \varepsilon_\mathrm{r}} \left( k_\mathrm{rf} r_{ij}^2 - c_\mathrm{rf} \right)
+```
+and for each atom it is
+```math
+V_\mathrm{self} = -\frac{q_i^2}{4 \pi \varepsilon_0 \varepsilon_\mathrm{r}} \frac{c_\mathrm{rf}}{2}
+```
+which gives no force.
+``k_\mathrm{rf}`` and ``c_\mathrm{rf}`` are as for [`CoulombReactionField`](@ref).
+Excluded pairs beyond the cutoff contribute nothing, so the energy of an excluded pair jumps
+by ``q_i q_j / (4 \pi \varepsilon_0 \varepsilon_\mathrm{r} r_\mathrm{c})`` at the cutoff.
+This matches GROMACS, whereas OpenMM does not apply the correction.
+
+Since the properties of the interaction are the same for all pairs, they are stored once
+in the `data` field of the [`InteractionList2Atoms`](@ref) with
+[`CoulombReactionFieldExclusionData`](@ref).
+[`reaction_field_exclusions`](@ref) sets up the list of excluded pairs and atoms.
+"""
+@kwdef struct CoulombReactionFieldExclusion
+    self::Bool = false
+end
+
+Base.zero(e::CoulombReactionFieldExclusion) = e
+Base.:+(e1::CoulombReactionFieldExclusion, ::CoulombReactionFieldExclusion) = e1
+
+"""
+    CoulombReactionFieldExclusionData(; dist_cutoff, solvent_dielectric, solute_dielectric,
+                                      coulomb_const, scheduler)
+    CoulombReactionFieldExclusionData(inter; scheduler)
+
+The parameters of the [`CoulombReactionFieldExclusion`](@ref) interactions, stored in the
+`data` field of their [`InteractionList2Atoms`](@ref).
+
+The parameters should match the reaction field pairwise interaction, `inter`, from which they
+can be taken.
+`scheduler`, a [`Molly.LambdaScheduler`](@ref), gives the charges of alchemical atoms as for
+[`EwaldExclusion`](@ref) and defaults to that of `inter`, if any.
+"""
+struct CoulombReactionFieldExclusionData{D, S, E, C, SCH}
+    dist_cutoff::D
+    solvent_dielectric::S
+    solute_dielectric::E
+    coulomb_const::C
+    scheduler::SCH
+end
+
+function CoulombReactionFieldExclusionData(; dist_cutoff,
+                                           solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
+                                           solute_dielectric=one(solvent_dielectric),
+                                           coulomb_const=coulomb_const,
+                                           scheduler=DefaultLambdaScheduler())
+    check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
+    return CoulombReactionFieldExclusionData(dist_cutoff, solvent_dielectric, solute_dielectric,
+                                             coulomb_const, scheduler)
+end
+
+function CoulombReactionFieldExclusionData(inter::ReactionFieldInteraction;
+                                           scheduler=(hasproperty(inter, :scheduler) ?
+                                                inter.scheduler : DefaultLambdaScheduler()))
+    return CoulombReactionFieldExclusionData(
+        dist_cutoff=inter.dist_cutoff,
+        solvent_dielectric=inter.solvent_dielectric,
+        solute_dielectric=inter.solute_dielectric,
+        coulomb_const=inter.coulomb_const,
+        scheduler=scheduler,
+    )
+end
+
+function Base.zero(d::CoulombReactionFieldExclusionData{D, S, E, C}) where {D, S, E, C}
+    return CoulombReactionFieldExclusionData(zero(D), zero(S), zero(E), zero(C), d.scheduler)
+end
+
+function Base.:+(d1::CoulombReactionFieldExclusionData, d2::CoulombReactionFieldExclusionData)
+    return CoulombReactionFieldExclusionData(
+        d1.dist_cutoff + d2.dist_cutoff,
+        d1.solvent_dielectric + d2.solvent_dielectric,
+        d1.solute_dielectric + d2.solute_dielectric,
+        d1.coulomb_const + d2.coulomb_const,
+        d1.scheduler,
+    )
+end
+
+to_device(x::CoulombReactionFieldExclusionData, ::Type{AT}) where AT = x
+
+# The same charge product as the Ewald exclusions
+@inline function reaction_field_exclusion_qq(data, atom_i, atom_j)
+    T = float(typeof(ustrip(data.dist_cutoff)))
+    return ewald_pair_qq(data.scheduler, atom_i, atom_j, Val(T))
+end
+
+@inline function force(inter::CoulombReactionFieldExclusion, coord_i, coord_j, boundary,
+                       atom_i, atom_j, force_units, velocities_i, velocities_j, step_n,
+                       data::CoulombReactionFieldExclusionData)
+    vec_ij = vector(coord_i, coord_j, boundary)
+    ke = data.coulomb_const / data.solute_dielectric
+    if inter.self
+        F0 = zero(vec_ij) * (ke / data.dist_cutoff^3)
+        return SpecificForce2Atoms(F0, F0)
+    end
+    r2 = sum(abs2, vec_ij)
+    krf, _ = reaction_field_constants(data.dist_cutoff, data.solvent_dielectric,
+                                      data.solute_dielectric)
+    qq = reaction_field_exclusion_qq(data, atom_i, atom_j)
+    F = 2 * ke * qq * krf * (r2 <= data.dist_cutoff^2) * vec_ij
+    return SpecificForce2Atoms(F, -F)
+end
+
+@inline function potential_energy(inter::CoulombReactionFieldExclusion, coord_i, coord_j,
+                                  boundary, atom_i, atom_j, energy_units, velocities_i,
+                                  velocities_j, step_n, data::CoulombReactionFieldExclusionData)
+    vec_ij = vector(coord_i, coord_j, boundary)
+    r2 = sum(abs2, vec_ij)
+    ke = data.coulomb_const / data.solute_dielectric
+    krf, crf = reaction_field_constants(data.dist_cutoff, data.solvent_dielectric,
+                                        data.solute_dielectric)
+    qq = reaction_field_exclusion_qq(data, atom_i, atom_j)
+    pe = ke * qq * (krf * r2 - crf) * (r2 <= data.dist_cutoff^2)
+    return inter.self ? pe / 2 : pe
+end
+
+"""
+    reaction_field_exclusions(inter, eligible, special=nothing; self=true, scheduler,
+                              array_type=Array)
+    reaction_field_exclusions(inter, n_atoms, excluded_pairs; self=true, scheduler,
+                              array_type=Array)
+
+Set up an [`InteractionList2Atoms`](@ref) of [`CoulombReactionFieldExclusion`](@ref)
+interactions that applies the reaction field correction to excluded pairs and,
+if `self` is `true`, to each atom with itself.
+
+`inter` is the reaction field pairwise interaction of the system, from which the parameters
+are taken with [`CoulombReactionFieldExclusionData`](@ref).
+The excluded pairs are either given as `excluded_pairs`, a list of atom index pairs, or are
+the pairs that are not `eligible` or are `special`, the matrices given to the neighbor
+finder.
+Special (1-4) pairs get the correction with their full charges, whereas
+`weight_special` only scales their direct Coulomb interaction.
+"""
+function reaction_field_exclusions(inter::ReactionFieldInteraction, eligible, special=nothing;
+                                   kwargs...)
+    return reaction_field_exclusions(inter, size(eligible, 1),
+                                     find_excluded_pairs(eligible, special); kwargs...)
+end
+
+function reaction_field_exclusions(inter::ReactionFieldInteraction, n_atoms::Integer,
+                                   excluded_pairs; self::Bool=true, array_type=Array,
+                                   kwargs...)
+    data = CoulombReactionFieldExclusionData(inter; kwargs...)
+    return reaction_field_exclusions(data, n_atoms, excluded_pairs, self, array_type)
+end
+
+function reaction_field_exclusions(data::CoulombReactionFieldExclusionData, n_atoms,
+                                   excluded_pairs, self, array_type)
+    pairs = normalize_pairs(excluded_pairs; n_atoms=n_atoms)
+    self_inds = (self ? (1:n_atoms) : (1:0))
+    is = Int32[[p[1] for p in pairs]; self_inds]
+    js = Int32[[p[2] for p in pairs]; self_inds]
+    inters = [fill(CoulombReactionFieldExclusion(false), length(pairs));
+              fill(CoulombReactionFieldExclusion(true), length(self_inds))]
+    return InteractionList2Atoms(
+        to_device(is, array_type),
+        to_device(js, array_type),
+        to_device(inters, array_type),
+        fill("", length(is)),
+        data,
+    )
+end
+
+has_self_exclusions(inter_list) = any(inter -> inter.self, from_device(inter_list.inters))
+
+@inline function inject_list_data(il::InteractionList2Atoms{<:Any, <:Any,
+                                                           <:CoulombReactionFieldExclusionData},
+                                  pis)
+    rfs = filter(inter -> inter isa ReactionFieldInteraction, pis)
+    isempty(rfs) && return il
+    inter = first(rfs)
+    data = CoulombReactionFieldExclusionData(inter.dist_cutoff, inter.solvent_dielectric,
+                                             inter.solute_dielectric, inter.coulomb_const,
+                                             il.data.scheduler)
+    return InteractionList2Atoms(il.is, il.js, il.inters, il.types, data)
 end
 
 @doc raw"""

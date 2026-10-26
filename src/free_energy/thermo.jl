@@ -48,13 +48,13 @@ end
 
 keep_master_general_inter(inter, λ_atoms) = !(inter isa AbstractEwald && effective_charges_vary(inter, λ_atoms))
 
-function ewald_exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
-    inter_list.data isa EwaldExclusionData || return false
+function exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
+    inter_list.data isa Union{EwaldExclusionData, CoulombReactionFieldExclusionData} || return false
 
     inds = unique!(vcat(Int.(from_device(inter_list.is)), Int.(from_device(inter_list.js))))
     isempty(inds) && return false
 
-    T = typeof(inter_list.data.error_tol)
+    T = float(typeof(ustrip(inter_list.data.dist_cutoff)))
     scheduler = inter_list.data.scheduler
     ref_atoms = from_device(first(λ_atoms))
     ref_charges = [effective_charge(scheduler, ref_atoms[i], Val(T)) for i in inds]
@@ -69,7 +69,7 @@ end
 
 keep_master_specific_inter(inter_list, λ_atoms) = true
 keep_master_specific_inter(inter_list::InteractionList2Atoms, λ_atoms) =
-    !ewald_exclusion_charges_vary(inter_list, λ_atoms)
+    !exclusion_charges_vary(inter_list, λ_atoms)
 
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)

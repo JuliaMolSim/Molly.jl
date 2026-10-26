@@ -20,7 +20,8 @@ function end_state_map(mapping, core_mapAB, n_end, dual, state)
 end
 
 function real_terms(il, real)
-    eltype(il.inters) <: Union{EwaldExclusion, Molly.LennardJones14λ} && return il
+    eltype(il.inters) <: Union{EwaldExclusion, CoulombReactionFieldExclusion,
+                               Molly.LennardJones14λ} && return il
     atom_fields = fieldnames(typeof(il))[1:(end - 3)]
     keep = [all(real[getfield(il, f)[n]] for f in atom_fields) for n in eachindex(il.inters)]
     return typeof(il).name.wrapper((getfield(il, f)[keep] for f in atom_fields)...,
@@ -318,7 +319,8 @@ end
     is_disp(g) = g isa LJDispersionCorrection || g isa Molly.LJDispersionCorrectionλ
     without_disp(s) = Tuple(g for g in s.general_inters if !is_disp(g))
 
-    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true))
         sys = System(joinpath(data_dir, "benzene_solv.pdb"), ff_solv; nonbonded_method=nonbonded,
                      dist_cutoff=1.0u"nm", center_coords=false)
         E_ref = potential_energy(sys; general_inters=without_disp(sys))
@@ -383,7 +385,8 @@ end
                      center_coords=false)
         return AbsoluteFESystem(sys, 0.5, collect(1:12); Csoftcore=Csoftcore)
     end
-    for nonbonded in (SetupPME(), SetupCoulombReactionField()), Csoftcore in softcores
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true)), Csoftcore in softcores
         E_units = potential_energy(benzene_λ(true, nonbonded, Csoftcore); n_threads=1)
         E_nounits = potential_energy(benzene_λ(false, nonbonded, Csoftcore); n_threads=1)
         @test E_nounits ≈ ustrip(u"kJ * mol^-1", E_units) rtol=1e-12
@@ -506,7 +509,8 @@ end
     mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
     core_mapAB = Dict(i => i for i in 1:8)
 
-    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true))
         build(file) = System(
             joinpath(data_dir, "ethanol_solv.pdb"),
             MolecularForceField(file;
@@ -532,6 +536,19 @@ end
             @test dE < 1e-6u"kJ * mol^-1"
             @test dF < 1e-6u"kJ * mol^-1 * nm^-1"
             @test iszero(F_dummy)
+        end
+        if nonbonded isa SetupCoulombReactionField && nonbonded.exclusion_correction
+            sysB_off = System(
+                joinpath(data_dir, "ethanol_solv.pdb"),
+                MolecularForceField(garnet_B;
+                    custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
+                nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
+                strictness=:nowarn,
+            )
+            @test_throws ArgumentError RelativeFESystem(sysA, sysB_off, 0.0, deepcopy(mapping),
+                                                        core_mapAB)
+            @test_throws ArgumentError RelativeFESystem(sysB_off, sysA, 0.0, deepcopy(mapping),
+                                                        core_mapAB)
         end
     end
 end
