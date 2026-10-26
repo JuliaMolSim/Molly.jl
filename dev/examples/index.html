@@ -83,7 +83,8 @@ body_masses = [
 boundary = CubicBoundary(1e9u&quot;km&quot;)
 
 # Convert the gravitational constant to the appropriate units
-inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G))
+inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G),
+                use_neighbors=false)
 
 sys = System(
     atoms=[Atom(mass=m) for m in body_masses],
@@ -132,6 +133,9 @@ struct SIRInteraction &lt;: PairwiseInteraction
     prob_recovery::Float64
 end
 
+# Consider all pairs of people rather than only those in the neighbor list
+Molly.use_neighbors(::SIRInteraction) = false
+
 # Custom force function
 function Molly.force(inter::SIRInteraction,
                         vec_ij,
@@ -178,7 +182,7 @@ atoms = [Person(i, i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) 
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
+lj = LennardJones(cutoff=DistanceCutoff(1.6))
 sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
@@ -361,10 +365,7 @@ for pol_i in 1:n_polymers
     end
 end
 
-lj = LennardJones(
-    cutoff=DistanceCutoff(5.0u&quot;nm&quot;),
-    use_neighbors=true,
-)
+lj = LennardJones(cutoff=DistanceCutoff(5.0u&quot;nm&quot;))
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
     excluded_pairs=excluded_pairs,
@@ -467,7 +468,7 @@ forces(sys)</code></pre><p>For larger or periodic systems, attach a neighbor fin
     n_atoms     = length(sys),
     dist_cutoff = (Float64(pot.cutoff) + 1.0)u&quot;Å&quot;,
 )
-sys = System(sys; neighbor_finder=neighbor_finder)</code></pre><p>(<code>CellListMapNeighborFinder</code> works too.) An NVE trajectory can be written to a DCD file with a <a href="../api/#Molly.TrajectoryWriter"><code>TrajectoryWriter</code></a>:</p><pre><code class="language-julia hljs">sys = System(sys; loggers=(writer=TrajectoryWriter(10, &quot;water_ani.dcd&quot;),))
+sys = System(sys; neighbor_finder=neighbor_finder)</code></pre><p>(<a href="../api/#Molly.CellListMapNeighborFinder"><code>CellListMapNeighborFinder</code></a> works too.) An NVE trajectory can be written to a DCD file with a <a href="../api/#Molly.TrajectoryWriter"><code>TrajectoryWriter</code></a>:</p><pre><code class="language-julia hljs">sys = System(sys; loggers=(writer=TrajectoryWriter(10, &quot;water_ani.dcd&quot;),))
 random_velocities!(sys, 300.0u&quot;K&quot;)
 simulate!(sys, VelocityVerlet(dt=0.5u&quot;fs&quot;), 1000)</code></pre><p>The same energy and forces run on the GPU: put the system&#39;s device arrays on a GPU array type (<code>CuArray</code> for CUDA, <code>MtlArray</code> for Metal, <code>ROCArray</code> for ROCm) and the KernelAbstractions kernels run on that device.</p><pre><code class="language-julia hljs">using CUDA
 sys_gpu = System(sys; atoms=CuArray(sys.atoms), coords=CuArray(sys.coords),
@@ -553,31 +554,31 @@ sys = System(
 potential_energy(sys) # -2080.2391023908813 eV</code></pre><h2 id="Lux.jl-machine-learning-potential"><a class="docs-heading-anchor" href="#Lux.jl-machine-learning-potential">Lux.jl machine learning potential</a><a id="Lux.jl-machine-learning-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Lux.jl-machine-learning-potential" title="Permalink"></a></h2><p><a href="https://lux.csail.mit.edu">Lux.jl</a> models can be integrated into Molly simulations as explicit-parameter neural network potentials. This approach separates the network architecture from its parameters and state (<code>model</code>, <code>ps</code>, <code>st</code>), which ensures type-stability and facilitates high-performance scientific machine learning.</p><pre><code class="language-julia hljs">using Molly
 using Lux
 using Random
-using StaticArrays
 using Zygote
+import AtomsCalculators
 
 # 1. Define the custom interaction struct
 struct MachineLearningPotential{M, P, S}
-    model::M      
-    ps::P         
-    st::S         
+    model::M
+    ps::P
+    st::S
 end
 
-# 2. Implement the potential energy function
-function Molly.potential_energy(s::System, inter::MachineLearningPotential, neighbors=nothing)
-    flat_coords = Float32.(reduce(vcat, s.coords)) 
+# 2. Implement the potential energy function of the general interaction
+function AtomsCalculators.potential_energy(sys, inter::MachineLearningPotential; kwargs...)
+    flat_coords = Float32.(reduce(vcat, sys.coords))
     energy, _ = inter.model(flat_coords, inter.ps, inter.st)
-    return energy[1] 
+    return energy[1]
 end
 
-# 3. Implement analytical forces via Zygote
-function Molly.forces(s::System, inter::MachineLearningPotential, neighbors=nothing)
-    flat_coords = Float32.(reduce(vcat, s.coords))
+# 3. Implement the forces via Zygote, adding them to fs
+function AtomsCalculators.forces!(fs, sys, inter::MachineLearningPotential; kwargs...)
+    flat_coords = Float32.(reduce(vcat, sys.coords))
     grad = Zygote.gradient(c -&gt; first(inter.model(c, inter.ps, inter.st)[1]), flat_coords)[1]
-    
-    n_atoms = length(s.coords)
-    neg_grad = -grad
-    return [SVector{3}(neg_grad[3i-2], neg_grad[3i-1], neg_grad[3i]) for i in 1:n_atoms]
+    for i in eachindex(fs)
+        fs[i] -= SVector(grad[3i-2], grad[3i-1], grad[3i])
+    end
+    return fs
 end
 
 # Setup a dummy 3-atom system
@@ -602,11 +603,13 @@ sys = System(
     boundary=boundary,
     general_inters=(inter,),
     energy_units=NoUnits,
-    force_units=NoUnits
+    force_units=NoUnits,
 )
 
-println(&quot;System Energy: &quot;, Molly.potential_energy(sys, inter))
-println(&quot;System Forces: &quot;, Molly.forces(sys, inter))</code></pre><h2 id="Density-functional-theory"><a class="docs-heading-anchor" href="#Density-functional-theory">Density functional theory</a><a id="Density-functional-theory-1"></a><a class="docs-heading-anchor-permalink" href="#Density-functional-theory" title="Permalink"></a></h2><p><a href="https://github.com/JuliaMolSim/DFTK.jl">DFTK.jl</a> can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly. This example uses the <a href="https://docs.dftk.org/stable/guide/tutorial">DFTK.jl tutorial</a> to simulate two silicon atoms with atomic units. A general interaction is used since the whole force calculation is offloaded to DFTK.jl.</p><pre><code class="language-julia hljs">using Molly
+println(&quot;System Energy: &quot;, potential_energy(sys))
+println(&quot;System Forces: &quot;, forces(sys))
+
+simulate!(sys, VelocityVerlet(dt=0.001), 100)</code></pre><h2 id="Density-functional-theory"><a class="docs-heading-anchor" href="#Density-functional-theory">Density functional theory</a><a id="Density-functional-theory-1"></a><a class="docs-heading-anchor-permalink" href="#Density-functional-theory" title="Permalink"></a></h2><p><a href="https://github.com/JuliaMolSim/DFTK.jl">DFTK.jl</a> can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly. This example uses the <a href="https://docs.dftk.org/stable/guide/tutorial">DFTK.jl tutorial</a> to simulate two silicon atoms with atomic units. A general interaction is used since the whole force calculation is offloaded to DFTK.jl.</p><pre><code class="language-julia hljs">using Molly
 using DFTK
 import AtomsCalculators
 
@@ -687,8 +690,6 @@ struct BondableInteraction &lt;: PairwiseInteraction
     r0::Float64
 end
 
-Molly.use_neighbors(::BondableInteraction) = true
-
 function Molly.force(inter::BondableInteraction,
                         dr,
                         atom_i,
@@ -736,7 +737,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(cutoff=DistanceCutoff(2.0), use_neighbors=true),
+    SoftSphere(cutoff=DistanceCutoff(2.0)),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
@@ -834,7 +835,7 @@ ab_sys = AtomsBase.AbstractSystem(
                     [0.0    , 0.0      , 1.7928950]]u&quot;Å&quot;,
 )
 
-coul = Coulomb(coulomb_const=2.307e-21u&quot;kJ*Å&quot;)
+coul = Coulomb(coulomb_const=2.307e-21u&quot;kJ*Å&quot;, use_neighbors=false)
 calc = MollyCalculator(pairwise_inters=(coul,), force_units=u&quot;kJ/Å&quot;, energy_units=u&quot;kJ&quot;)
 
 AtomsCalculators.potential_energy(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">9.112207692184968e-21 kJ</code></pre><pre><code class="language-julia hljs">AtomsCalculators.forces(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">5-element Vector{SVector{3, Quantity{Float64, 𝐋 𝐌 𝐓^-2, Unitful.FreeUnits{(Å^-1, kJ), 𝐋 𝐌 𝐓^-2, nothing}}}}:
@@ -859,7 +860,7 @@ function check_sim(n_atoms)
         dist_cutoff=1.0f0u&quot;nm&quot;,
         array_type=CuArray,
     )
-    pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u&quot;nm&quot;), use_neighbors=true),)
+    pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u&quot;nm&quot;)),)
     sys = System(
         atoms=atoms,
         coords=coords,
@@ -955,27 +956,33 @@ end
 xlims!(ax, low=0.2)
 ylims!(ax, -0.6, 0.3)
 axislegend(position=:rb)
-save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p><h2 id="Different-soft-core-potentials"><a class="docs-heading-anchor" href="#Different-soft-core-potentials">Different soft-core potentials</a><a id="Different-soft-core-potentials-1"></a><a class="docs-heading-anchor-permalink" href="#Different-soft-core-potentials" title="Permalink"></a></h2><p>The soft-core Lennard-Jones and Coulomb potentials are parameterised by <span>$\alpha$</span> and <span>$\lambda$</span>, in addition to the standard potential parameters. The soft-core potential proposed by <a href="https://doi.org/10.1021/ct300220p">Gapsys et al. 2012</a> includes an additional parameter <span>$\sigma_Q$</span>.</p><p>These parameters shift the value of <span>$r_{ij}$</span> to <span>$(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}$</span> for the <a href="https://doi.org/10.1016/0009-2614(94)00397-1">Beutler et al. 1994</a> soft-core potential, which prevents the potential from diverging as <span>$r_{ij} \rightarrow 0$</span>. In the case of the <a href="https://doi.org/10.1021/ct300220p">Gapsys et al. 2012</a> soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of <span>$\lambda$</span>.</p><pre><code class="language-julia hljs">using Molly
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p><h2 id="Different-soft-core-potentials"><a class="docs-heading-anchor" href="#Different-soft-core-potentials">Different soft-core potentials</a><a id="Different-soft-core-potentials-1"></a><a class="docs-heading-anchor-permalink" href="#Different-soft-core-potentials" title="Permalink"></a></h2><p>The soft-core Lennard-Jones and Coulomb potentials are parameterised by <span>$\alpha$</span> and <span>$\lambda$</span>, in addition to the standard potential parameters. The interactions take <span>$\lambda$</span> from the atoms, and how it is applied depends on the alchemical role of the atoms and the λ scheduler of the interaction (see <a href="../free_energy/#Alchemical-roles">Alchemical roles</a>). The soft-core potential proposed by <a href="https://doi.org/10.1021/ct300220p">Gapsys et al. 2012</a> includes an additional parameter <span>$\sigma_Q$</span>.</p><p>These parameters shift the value of <span>$r_{ij}$</span> to <span>$(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}$</span> for the <a href="https://doi.org/10.1016/0009-2614(94)00397-1">Beutler et al. 1994</a> soft-core potential, which prevents the potential from diverging as <span>$r_{ij} \rightarrow 0$</span>. In the case of the <a href="https://doi.org/10.1021/ct300220p">Gapsys et al. 2012</a> soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of <span>$\lambda$</span>.</p><pre><code class="language-julia hljs">using Molly
 using GLMakie
 
 boundary = CubicBoundary(5.0u&quot;nm&quot;)
-a1 = Atom(charge=0.5, σ=0.3u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;)
-a2 = Atom(charge=-0.5, σ=0.3u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;)
 dists = 0.01:0.005:0.8
 
-energies(inter) = map(dists) do dist
-    c1 = SVector(1.0, 1.0, 1.0)u&quot;nm&quot;
-    c2 = SVector(dist + 1.0, 1.0, 1.0)u&quot;nm&quot;
-    vec = vector(c1, c2, boundary)
-    potential_energy(inter, vec, a1, a2, NoUnits)
+# The first atom is inserted, so it is decoupled at λ=0 and fully coupled at λ=1
+# The linear scheduler scales the sterics and electrostatics in the same way
+scheduler = Molly.LinearLambdaScheduler()
+
+function energies(inter, λ)
+    a1 = Atom(charge=0.5, σ=0.3u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;, λ=λ, alch_role=Molly.InsertRole)
+    a2 = Atom(charge=-0.5, σ=0.3u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)u&quot;nm&quot;
+        c2 = SVector(dist + 1.0, 1.0, 1.0)u&quot;nm&quot;
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, u&quot;kJ * mol^-1&quot;)
+    end
 end
 
 function plot_interactions(ax, title, xlabel, ylabel, data, ylims_range)
     ax.title = title
     ax.xlabel = xlabel
     ax.ylabel = ylabel
-    for (label, inter) in data
-        lines!(ax, dists, ustrip.(energies(inter)), label=label)
+    for (label, inter, λ) in data
+        lines!(ax, dists, ustrip.(energies(inter, λ)), label=label)
     end
     ylims!(ax, ylims_range)
     axislegend(ax, position=:rt)
@@ -984,31 +991,31 @@ end
 f = Figure(size=(1200, 800))
 ax1, ax2, ax3, ax4 = Axis(f[1, 1]), Axis(f[1, 2]), Axis(f[2, 1]), Axis(f[2, 2])
 
-LJ = Dict(
-    &quot;LJ&quot; =&gt; LennardJones(),
-    &quot;LJ-Beutler&quot; =&gt; LennardJonesSoftCoreBeutler(α=0.3, λ=0.5),
-    &quot;LJ-Gapsys&quot; =&gt; LennardJonesSoftCoreGapsys(α=0.85, λ=0.5),
-)
+LJ = [
+    (&quot;LJ&quot;, LennardJones(), 1.0),
+    (&quot;LJ-Beutler&quot;, LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler), 0.5),
+    (&quot;LJ-Gapsys&quot;, LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler), 0.5),
+]
 plot_interactions(
     ax1,
     &quot;Soft-core Lennard-Jones potentials \nin comparison to standard LJ for λ=0.5&quot;,
     &quot;Distance / nm&quot;,
     &quot;Potential Energy / kJ * mol^-1&quot;,
-    sort(LJ),
+    LJ,
     (-5, 400),
 )
 
-Cou = Dict(
-    &quot;Coulomb&quot; =&gt; Coulomb(),
-    &quot;Coulomb-Beutler&quot; =&gt; CoulombSoftCoreBeutler(α=0.3, λ=0.5),
-    &quot;Coulomb-Gapsys&quot; =&gt; CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u&quot;nm&quot;),
-)
+Cou = [
+    (&quot;Coulomb&quot;, Coulomb(), 1.0),
+    (&quot;Coulomb-Beutler&quot;, CoulombSoftCoreBeutler(α=0.3, scheduler=scheduler), 0.5),
+    (&quot;Coulomb-Gapsys&quot;, CoulombSoftCoreGapsys(α=0.3, σQ=1u&quot;nm&quot;, scheduler=scheduler), 0.5),
+]
 plot_interactions(
     ax2,
     &quot;Soft-core Coulomb potentials \nin comparison to standard Coulomb for λ=0.5&quot;,
     &quot;Distance / nm&quot;,
     &quot;Potential Energy / kJ * mol^-1&quot;,
-    sort(Cou),
+    Cou,
     (-400, 0),
 )
 
@@ -1017,16 +1024,16 @@ plot_interactions(
     &quot;Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)&quot;,
     &quot;Distance / nm&quot;,
     &quot;Potential Energy / kJ * mol^-1&quot;,
-    [(string(&quot;λ=$λ&quot;), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    [(&quot;λ=$λ&quot;, LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler), λ) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
 
 plot_interactions(
     ax4,
-    &quot;Effect of λ on soft-core Coulomb potential (Gapsys et al.)&quot;,
+    &quot;Effect of λ on soft-core Lennard-Jones potential (Gapsys et al.)&quot;,
     &quot;Distance / nm&quot;,
     &quot;Potential Energy / kJ * mol^-1&quot;,
-    [(string(&quot;λ=$λ&quot;), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    [(&quot;λ=$λ&quot;, LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler), λ) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
 
@@ -1045,14 +1052,14 @@ r_cut = 0.85u&quot;nm&quot;
 sys = System(
     fcc_crystal;
     velocities=velocities,
-    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
+    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut), use_neighbors=false),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
     ),
     energy_units=u&quot;kJ * mol^-1&quot;,
     force_units=u&quot;kJ * mol^-1 * nm^-1&quot;,
-)</code></pre><p>Certain potentials such as <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> and <a href="../api/#Molly.Buckingham"><code>Buckingham</code></a> require extra atomic paramaters (e.g. <code>σ</code>) that are not implemented by the SimpleCrystals API. These paramaters must be added to the <a href="../api/#Molly.System"><code>System</code></a> manually by making use of the copy constructor:</p><pre><code class="language-julia hljs">σ = 0.34u&quot;nm&quot;
+)</code></pre><p>Certain potentials such as <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> and <a href="../api/#Molly.Buckingham"><code>Buckingham</code></a> require extra atomic parameters (e.g. <code>σ</code>) that are not implemented by the SimpleCrystals API. These parameters must be added to the <a href="../api/#Molly.System"><code>System</code></a> manually by making use of the copy constructor:</p><pre><code class="language-julia hljs">σ = 0.34u&quot;nm&quot;
 ϵ = (4.184 * 0.24037)u&quot;kJ * mol^-1&quot;
 updated_atoms = []
 
@@ -1077,10 +1084,9 @@ atom_mass = 1.00794u&quot;g/mol&quot;
 n_atoms_half = 200
 atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u&quot;Å&quot;, ϵ=0.074u&quot;kcal* mol^-1&quot;)
          for i in 1:n_atoms_half]
-max_coord = 200.0u&quot;Å&quot;
-coords = max_coord .* rand(SVector{3, Float64}, n_atoms_half)
 boundary = CubicBoundary(200.0u&quot;Å&quot;)
-lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+coords = place_atoms(n_atoms_half, boundary; min_dist=4.0u&quot;Å&quot;)
+lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
 
 # Add bonded atoms
 bond_length = 0.74u&quot;Å&quot; # Hydrogen bond length
@@ -1201,4 +1207,4 @@ simulator = VelocityVerlet(
 simulate!(sys, simulator, 10_000)
 
 using GLMakie
-visualize(sys.loggers.coords, boundary, &quot;Si_SW_KIM.gif&quot;; markersize=0.4)</code></pre><p><img src="../images/Si_SW_KIM.gif" alt="Silicon SW KIM"/></p><p>Because the calculator builds on the KIM API, you can change the <code>&quot;SW_StillingerWeber_1985_Si__MO_405512056662_006&quot;</code> identifier to any other model published on OpenKIM and immediately drive the same Molly simulation pipeline. For more details on <code>KIM_API</code>, please consult the <a href="https://openkim.github.io/KIM_API.jl/dev/">documentation</a>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../free_energy/">« Free energy</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Monday 26 October 2026 15:28">Monday 26 October 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+visualize(sys.loggers.coords, boundary, &quot;Si_SW_KIM.gif&quot;; markersize=0.4)</code></pre><p><img src="../images/Si_SW_KIM.gif" alt="Silicon SW KIM"/></p><p>Because the calculator builds on the KIM API, you can change the <code>&quot;SW_StillingerWeber_1985_Si__MO_405512056662_006&quot;</code> identifier to any other model published on OpenKIM and immediately drive the same Molly simulation pipeline. For more details on <code>KIM_API</code>, please consult the <a href="https://openkim.github.io/KIM_API.jl/dev/">documentation</a>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../free_energy/">« Free energy</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Monday 26 October 2026 15:47">Monday 26 October 2026</span>. Using Julia version 1.13.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
