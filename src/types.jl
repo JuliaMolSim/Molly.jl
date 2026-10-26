@@ -1,5 +1,4 @@
 # Types
-import Base: ==, hash
 
 export
     PairwiseInteraction,
@@ -374,14 +373,14 @@ function Base.:+(il1::InteractionList5Atoms, il2::InteractionList5Atoms)
     )
 end
 
-function ==(a::InteractionList1Atoms, b::InteractionList1Atoms)
+function Base.:(==)(a::InteractionList1Atoms, b::InteractionList1Atoms)
     return a.is == b.is && 
            a.inters == b.inters && 
            a.types == b.types && 
            a.data == b.data
 end
 
-function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
+function Base.:(==)(a::InteractionList2Atoms, b::InteractionList2Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.inters == b.inters && 
@@ -389,7 +388,7 @@ function ==(a::InteractionList2Atoms, b::InteractionList2Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
+function Base.:(==)(a::InteractionList3Atoms, b::InteractionList3Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -398,7 +397,7 @@ function ==(a::InteractionList3Atoms, b::InteractionList3Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
+function Base.:(==)(a::InteractionList4Atoms, b::InteractionList4Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -408,7 +407,7 @@ function ==(a::InteractionList4Atoms, b::InteractionList4Atoms)
            a.data == b.data
 end
 
-function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
+function Base.:(==)(a::InteractionList5Atoms, b::InteractionList5Atoms)
     return a.is == b.is && 
            a.js == b.js && 
            a.ks == b.ks && 
@@ -419,14 +418,14 @@ function ==(a::InteractionList5Atoms, b::InteractionList5Atoms)
            a.data == b.data
 end
 
-function hash(a::InteractionList1Atoms, h::UInt)
+function Base.hash(a::InteractionList1Atoms, h::UInt)
     is     = from_device(a.is)
     inters = from_device(a.inters)
     types  = from_device(a.types)
     return hash(is, hash(inters, hash(types, hash(a.data, h))))
 end
 
-function hash(a::InteractionList2Atoms, h::UInt)
+function Base.hash(a::InteractionList2Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     inters = from_device(a.inters)
@@ -434,7 +433,7 @@ function hash(a::InteractionList2Atoms, h::UInt)
     return hash(is, hash(js, hash(inters, hash(types, hash(a.data, h)))))
 end
 
-function hash(a::InteractionList3Atoms, h::UInt)
+function Base.hash(a::InteractionList3Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -443,7 +442,7 @@ function hash(a::InteractionList3Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(inters, hash(types, hash(a.data, h))))))
 end
 
-function hash(a::InteractionList4Atoms, h::UInt)
+function Base.hash(a::InteractionList4Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -453,7 +452,7 @@ function hash(a::InteractionList4Atoms, h::UInt)
     return hash(is, hash(js, hash(ks, hash(ls, hash(inters, hash(types, hash(a.data, h)))))))
 end
 
-function hash(a::InteractionList5Atoms, h::UInt)
+function Base.hash(a::InteractionList5Atoms, h::UInt)
     is     = from_device(a.is)
     js     = from_device(a.js)
     ks     = from_device(a.ks)
@@ -475,7 +474,7 @@ function merge_interactions(interactions)
     cache = []
     for (i,inter) in enumerate(interactions)
         i in cache && continue
-        idx = findall(x->typeof(x)==typeof(inter), interactions)
+        idx = findall(x->typeof(x) == typeof(inter), interactions)
         inters = interactions[idx[1]]
         for j in idx[2:end]
             inters = append!(inters,interactions[j])
@@ -618,11 +617,13 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `λ::L=1.0`: scaling parameter of non-bonded interactions, used for alchemical 
-    transformations.
-- `alch_role::Int32=EnvRole`: role of the atom in an alchemical transformation. `EnvRole`, the
-    default, is an atom that is not alchemical. The other roles are set by
-    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref).
+- `λ::L=1.0`: the λ of the atom. In an alchemical system the alchemical atoms carry the
+    global λ, which the λ interactions combine with the alchemical roles to scale the
+    interactions, and other atoms keep 1.
+- `alch_role::Int32=Molly.EnvRole`: role of the atom in an alchemical transformation.
+    `EnvRole`, the default, is an atom that is not alchemical. The other roles are set by
+    [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref), see
+    [Alchemical roles](@ref).
 """
 struct Atom{T, M, C, S, E, L} # With Float32 numeric fields this fits into 32 bytes
     index::Int32
@@ -681,7 +682,7 @@ unless they have a `charge` field defined, which the function accesses by defaul
 """
     lambda(atom)
 
-The lambda of an [`Atom`](@ref).
+The `λ` of an [`Atom`](@ref).
 """
 lambda(atom) = atom.λ
 
@@ -713,9 +714,13 @@ end
 
 """
     AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
-             chain_id="A", element="?", hetero_atom=false)
+             chain_id="A", element="?", hetero_atom=false, charge_type="")
 
 Data associated with an atom.
+
+`charge_type` labels the atoms that share a charge parameter in [`extract_parameters`](@ref)
+and [`inject_gradients`](@ref), see the `charge_types` argument of [`System`](@ref). If empty,
+the atom type is used.
 
 Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
@@ -728,6 +733,7 @@ work on the GPU.
     chain_id::String = "A"
     element::String = "?"
     hetero_atom::Bool = false
+    charge_type::String = ""
 end
 
 """
@@ -807,7 +813,7 @@ struct GPUCellListNeighborList{C,R,L,S}
 
         n_int = Int(n)
 
-        if list === nothing
+        if isnothing(list)
             iszero(n_int) || throw(
                 ArgumentError("n must be zero when list is nothing"),
             )
@@ -853,7 +859,11 @@ Base.eachindex(neighbors::GPUCellListNeighborList) =
     NeighborList(n, list)
     NeighborList()
 
-Structure to contain neighbor lists.
+Structure to contain neighbor lists, as returned by [`find_neighbors`](@ref) for most
+neighbor finders.
+
+The first `n` entries of `list` are the `(i, j, special)` pairs, see
+[`neighbor_pairs`](@ref).
 """
 mutable struct NeighborList{T}
     n::Int # Number of neighbors in list (n <= length(list))
@@ -1028,6 +1038,12 @@ function default_float_type_high(::Type{AT}, ::Type{T}) where {AT <: AbstractGPU
     return default_float_type_high(get_backend(AT{Float32}(undef, 0)), T)
 end
 
+# The float type of a system with float type T moved to arrays of type AT, which is Float32
+#   instead of Float64 on backends that do not support Float64 such as Metal
+function default_float_type(::Type{AT}, ::Type{T}) where {AT, T}
+    return ((T == Float64 && default_float_type_high(AT, Float32) != Float64) ? Float32 : T)
+end
+
 function check_n_dims(coords::AbstractVector{SVector{DC, C}},
                       vels::AbstractVector{SVector{DV, V}},
                       D) where {DC, C, DV, V}
@@ -1064,12 +1080,12 @@ function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, bounda
     neighbor_finder isa NoNeighborFinder && return nothing
 
     if neighbor_finder isa GPUCellListNeighborFinder
-        if neighbor_finder.output === :ragged && any(use_neighbors, values(pairwise_inters))
+        if neighbor_finder.output == :ragged && any(use_neighbors, values(pairwise_inters))
             throw(ArgumentError("the neighbor finder has output=:ragged, which does not " *
                                 "produce the pair list that the pairwise interactions " *
                                 "need, use output=:molly_pairs"))
         end
-        if neighbor_finder.output === :molly_pairs && neighbor_finder.n_atoms != n_atoms
+        if neighbor_finder.output == :molly_pairs && neighbor_finder.n_atoms != n_atoms
             throw(ArgumentError("the neighbor finder was set up for " *
                                 "$(neighbor_finder.n_atoms) atoms but the system has " *
                                 "$n_atoms atoms"))
@@ -1195,7 +1211,7 @@ minimum box side, are reported according to `strictness`.
     atoms are in the same molecule.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
+    Should be a `Tuple` or `NamedTuple` of [`PairwiseInteraction`](@ref)s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles.
     Should be a `Tuple` or `NamedTuple`.
@@ -1461,8 +1477,21 @@ Convenience constructor for changing properties in a `System`.
 
 The `System` is returned with the provided keyword arguments modified.
 Give `deepcopy(sys)` as the argument to make a new copy of the system.
+
+Changing `float_type`, `units`, `array_type` or `grad_safe` converts the system, for example
+`System(sys; float_type=Float64, units=false, array_type=Array)` gives a unitless `Float64`
+copy on the CPU.
+On a device without Float64 support, such as Metal, `float_type` defaults to `Float32`.
+Everything except `atoms_data`, `topology` and `data` is converted, including values given
+as keyword arguments.
+Units are stripped without conversion and can not be added.
+When the float type, units or device change, loggers are dropped with a warning unless given
+with the `loggers` keyword argument.
+On a new device, or with `grad_safe=true`, the neighbor finder is the one setup would choose.
+Custom types that can not be rebuilt from their converted fields should define a method of
+`Molly.convert_component(conversion, x)`.
 """
-function System(sys::System{<:Any, <:Any, T, TH};
+function System(sys::System{<:Any, AT, T, TH};
                 atoms=sys.atoms,
                 coords=sys.coords,
                 boundary=sys.boundary,
@@ -1479,12 +1508,23 @@ function System(sys::System{<:Any, <:Any, T, TH};
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
                 k=sys.k,
-                float_type=T,
-                float_type_high=TH,
+                array_type=AT,
+                float_type=(array_type === AT ? T : default_float_type(array_type, T)),
+                units::Bool=(sys.energy_units != NoUnits),
+                float_type_high=(array_type === AT ? promote_type(float_type, TH) :
+                                 default_float_type_high(array_type, float_type)),
                 data=sys.data,
                 grad_safe=sys.grad_safe,
                 strictness=default_strictness(),
-                launch_config=sys.launch_config) where {T, TH}
+                launch_config=sys.launch_config) where {AT, T, TH}
+    if float_type !== T || array_type !== AT || units != (sys.energy_units != NoUnits) ||
+            grad_safe != sys.grad_safe
+        args = (; atoms, coords, boundary, velocities, atoms_data, topology, pairwise_inters,
+                specific_inter_lists, general_inters, constraints, virtual_sites,
+                neighbor_finder, loggers, force_units, energy_units, k)
+        return convert_system(sys, args, float_type, float_type_high, array_type, units,
+                              data, grad_safe, strictness, launch_config)
+    end
     return System(
         atoms=atoms,
         coords=coords,
@@ -1520,7 +1560,7 @@ Properties unused in the simulation or in analysis can be left with their
 default values.
 `atoms`, `atoms_data`, `coords` and `boundary` are automatically calculated from
 the `Crystal` struct.
-Extra atom paramaters like `σ` have to be added manually after construction using
+Extra atom parameters like `σ` have to be added manually after construction using
 the convenience constructor `System(sys; <keyword arguments>)`.
 """
 function System(crystal::Crystal{D};
@@ -1719,7 +1759,8 @@ end
 @doc raw"""
     ReplicaSystem(thermo_states, replica_coords; <keyword arguments>)
 
-A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD).
+A wrapper for replicas in a generalized ensemble or replica exchange simulation (REMD),
+for example with [`ReplicaExchangeMD`](@ref).
 
 Instead of instantiating completely disjoint [`System`](@ref) objects, `ReplicaSystem` automatically compiles 
 an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This isolates shared, unperturbed
@@ -1727,7 +1768,7 @@ topological and interactive components (e.g., bulk solvent) from state-specific 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
 
-Furthermore, upon a successful exchange, coordinates and velocities are no longer physically swapped in memory; 
+Furthermore, upon a successful exchange, coordinates and velocities are not physically swapped in memory; 
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
 
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the interface described there, 
@@ -1735,23 +1776,24 @@ routing standard atomic property queries back to the unperturbed master system.
 
 When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for
 both the simulation of replicas and the neighbor finder should be set to be the same.
-This can be done by passing `nbatches=(min(n, 8), n)` to [`CellListMapNeighborFinder`](@ref) during
-construction where `n` is the number of threads to be used per replica.
+This can be done by passing `number_of_batches=(min(n, 8), n)` to
+[`CellListMapNeighborFinder`](@ref) during construction where `n` is the number of threads to
+be used per replica.
 
 # Arguments
 - `thermo_states::AbstractArray{<:ThermoState}`: An array of thermodynamic states defining the 
-    replica ladder. Each state encapsulates its specific `System` interactions, integrator, 
+    replica ladder. Each state encapsulates its specific [`System`](@ref) interactions, integrator, 
     inverse temperature (`beta`), and pressure (`p`). The number of states dictates `n_replicas`.
 - `replica_coords`: The coordinates of the atoms in each replica. The number of elements 
     must equal the length of `thermo_states`.
 - `replica_velocities=nothing`: The velocities of the atoms in each replica. If not provided, 
     they default to zero velocities using the system's units.
 - `replica_boundaries=nothing`: The bounding box for each replica. If not provided, it defaults 
-    to duplicating the boundary of the reference system (the first `ThermoState`).
+    to duplicating the boundary of the reference system (the first [`ThermoState`](@ref)).
 - `replica_neighbor_finders=nothing`: The neighbor finder of each thermodynamic state. If not
     provided, each state gets a copy of the neighbor finder of its system.
 - `replica_loggers=nothing`: Logger collections for each thermodynamic state, recording the replica
-    currently in that state. Stateful logger objects and `TrajectoryWriter` file paths cannot be
+    currently in that state. Stateful logger objects and [`TrajectoryWriter`](@ref) file paths cannot be
     shared between states.
 - `exchange_logger=nothing`: The logger used to record replica exchange attempts. If `nothing`,
     a default [`ReplicaExchangeLogger`](@ref) is used.
@@ -2321,7 +2363,7 @@ Not compatible with using atom properties such as `σ` and `ϵ`.
 # Arguments
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
+    Should be a `Tuple` or `NamedTuple` of [`PairwiseInteraction`](@ref)s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles.
     Should be a `Tuple` or `NamedTuple`.

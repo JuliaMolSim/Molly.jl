@@ -5,9 +5,10 @@ export MullerBrown
 
 The Müller-Brown potential energy surface implemented as an AtomsCalculators.jl calculator.
 
+See [Müller and Brown 1979](https://doi.org/10.1007/BF00547608).
 The potential energy is defined as
 ```math
-V(x,y) = \sum_{n=1}^{4} A_k \exp[a_k(x-x_k^0)^2 + b_k(x-x_k^0)(y-y_k^0) + c_k(y-y_k^0)^2]
+V(x,y) = \sum_{k=1}^{4} A_k \exp[a_k(x-x_k^0)^2 + b_k(x-x_k^0)(y-y_k^0) + c_k(y-y_k^0)^2]
 ```
 where `A`, `a`, `b`, `c`, `x0`, `y0` are 4-element `SVector`s with standard defaults.
 

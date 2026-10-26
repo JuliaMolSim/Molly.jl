@@ -3,9 +3,7 @@
 export
     use_neighbors,
     neighbor_pairs,
-    has_ragged_neighbors,
     ragged_neighbors,
-    ragged_counts,
     NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
@@ -13,6 +11,9 @@ export
     DistanceNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
+
+@public has_ragged_neighbors,
+    ragged_counts
 
 """
     use_neighbors(inter)
@@ -73,9 +74,9 @@ end
 The neighbors of each atom in a neighbor list, as a padded matrix.
 
 The neighbors of atom `i` are `ragged_neighbors(nl)[1:ragged_counts(nl)[i], i]`, with
-the entries past `ragged_counts(nl)[i]` undefined. Only some neighbor lists store
-this, which [`has_ragged_neighbors`](@ref) reports. The matrix belongs to the list, so
-it should not be used after the list is passed back to [`find_neighbors`](@ref), which
+the entries past `ragged_counts(nl)[i]` undefined, see [`Molly.ragged_counts`](@ref).
+Only some neighbor lists store this, which [`Molly.has_ragged_neighbors`](@ref) reports. The matrix belongs to the list,
+so it should not be used after the list is passed back to [`find_neighbors`](@ref), which
 may overwrite it.
 """
 ragged_neighbors(nl) = no_ragged_neighbors(nl)
@@ -259,8 +260,9 @@ uses_gpu_neighbor_finder(AT) = false
     GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
                       array_type=nothing, initialized=false, strictness=:warn)
 
-Neighbor finder for CUDA systems that uses Molly's tiled pairwise kernels.
+Neighbor finder for CUDA systems that uses tiled pairwise kernels.
 
+See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
 Instead, the CUDA pairwise force and energy paths reorder atoms on a Morton
 curve and build a compact list of interacting 32x32 tiles directly on the device.
@@ -2194,8 +2196,8 @@ The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` an
 [`DistanceNeighborFinder`](@ref).
 The pairs are stored on the CPU.
 
-Can not be used if one or more dimensions has infinite boundaries.
-Can not be used with [`TriclinicBoundary`](@ref).
+Cannot be used if one or more dimensions has infinite boundaries.
+Cannot be used with [`TriclinicBoundary`](@ref).
 """
 struct TreeNeighborFinder{D, B, S}
     eligible::B
@@ -2283,7 +2285,7 @@ first approximation of the cell list structure.
 The number of dimensions `dims` is inferred from the boundary or `x0`, or assumed
 to be 3 otherwise.
 
-The `boundary` parameter is required, and must be an `AbstractBoundary`. 
+The `boundary` parameter is required, and must be a [`Molly.AbstractBoundary`](@ref). 
 Infinite boundaries are only accepted in all dimensions.
 
 CellListMap.jl chooses how many batches to split the work over from the number of Julia
@@ -2469,4 +2471,62 @@ function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder, DistanceNei
     println(io, "  n_special = " , n_true_pairs(neighbor_finder.special))
     println(io, "  n_steps = " , neighbor_finder.n_steps)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
+end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Neighbor finders are rebuilt from their eligible and special matrices, which are passed on
+#   as they are stored, sparse or dense. On the same device the type of neighbor finder is
+#   kept if it can be used by the new system. Otherwise the neighbor finder that system setup
+#   would choose for the new device, gradient safety and boundary is used, so that moving a
+#   system to another device and back gives the original type of neighbor finder.
+function convert_component(c::SystemConversion{<:Any, AT},
+                           nf::Union{DistanceNeighborFinder, TreeNeighborFinder,
+                                     CellListMapNeighborFinder, GPUNeighborFinder,
+                                     GPUCellListNeighborFinder}) where AT
+    dist_cutoff = convert_component(c, nf.dist_cutoff)
+    if isnothing(nf.eligible)
+        # The output modes of GPUCellListNeighborFinder that ignore the exceptions store no
+        #   matrices, which is the same as every pair being eligible and none special
+        matrices = (n_atoms=nf.n_atoms,)
+    else
+        matrices = (eligible=from_device(nf.eligible), special=from_device(nf.special))
+    end
+    on_gpu = AT <: AbstractGPUArray
+    gpu_nf_allowed = on_gpu && uses_gpu_neighbor_finder(AT) && !c.grad_safe
+    if c.same_device
+        if nf isa GPUNeighborFinder && gpu_nf_allowed
+            return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                     n_steps=nf.n_steps, array_type=AT)
+        elseif nf isa GPUCellListNeighborFinder && on_gpu
+            return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                             n_steps=nf.n_steps, array_type=AT,
+                                             max_neighbors=nf.max_neighbors,
+                                             output=nf.output, ragged=nf.ragged)
+        elseif nf isa TreeNeighborFinder && !on_gpu
+            return TreeNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                      n_steps=nf.n_steps)
+        elseif nf isa CellListMapNeighborFinder && !on_gpu
+            return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                             n_steps=nf.n_steps, x0=c.coords,
+                                             boundary=c.boundary)
+        elseif nf isa DistanceNeighborFinder
+            return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                          n_steps=nf.n_steps, array_type=AT)
+        end
+    end
+    # The choice made by system setup
+    if gpu_nf_allowed
+        return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+                                 array_type=AT)
+    elseif on_gpu && gpu_cell_list_suitable(c.boundary, dist_cutoff)
+        return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                         n_steps=nf.n_steps, array_type=AT, ragged=false)
+    elseif !on_gpu && !has_infinite_boundary(c.boundary) &&
+                minimum(box_sides(c.boundary)) >= 2 * dist_cutoff
+        return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
+                                         n_steps=nf.n_steps, x0=c.coords,
+                                         boundary=c.boundary)
+    end
+    return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+                                  array_type=AT)
 end

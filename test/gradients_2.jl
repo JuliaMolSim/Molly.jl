@@ -332,7 +332,7 @@ end
         )
 
         # Gradient of bias function with respect to CV
-        d_bias = bias_gradient(bias.bias_type, cv_sim)
+        d_bias = Molly.bias_gradient(bias.bias_type, cv_sim)
 
         fs_svec = d_bias .* d_coords
 
@@ -383,7 +383,7 @@ end
         fs_zero_anl = zero(fs)
 
         forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
-        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=Molly.cv_gradient)
         @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end
 end
@@ -1092,7 +1092,7 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
                                     weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), lost_w),
+                                    use_neighbors=true), ()),
         ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
@@ -1100,7 +1100,7 @@ end
                                     cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
         ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
                                     weight_special=w, coulomb_const=cc), ()),
-        ("CoulombScaled"    , CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
+        ("CoulombScaled"    , Molly.CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
@@ -1109,7 +1109,7 @@ end
                                     coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
-        ("CRFScaled"        , CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
+        ("CRFScaled"        , Molly.CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
@@ -1119,7 +1119,7 @@ end
         ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
-        ("CoulombEwaldScaled", CoulombEwaldScaled(dist_cutoff=nb_cutoff,
+        ("CoulombEwaldScaled", Molly.CoulombEwaldScaled(dist_cutoff=nb_cutoff,
                                     use_neighbors=true, weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
@@ -1134,9 +1134,22 @@ end
     for (name, inter, broken) in pairwise_inters
         sys_ref = pairwise_sys(inter)
         params_dic = Dict{String, Float64}()
-        Molly.extract_block!(params_dic, parameter_prefix(inter), Molly.parameter_keys(inter),
-                             Molly.parameter_values(inter))
+        Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                             Molly.parameter_keys(inter), Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
+    end
+
+    # A λ interaction followed by another one, as an alchemical system has them; the layout
+    #   of the first must not drop the gradients of the second
+    let inters = Dict(name => inter for (name, inter, _) in pairwise_inters),
+            sys_ref = System(pairwise_sys(inters["DoubleExponentialSC"]);
+                             pairwise_inters=(inters["DoubleExponentialSC"], inters["CoulombScaled"]))
+        params_dic = Dict{String, Float64}()
+        for inter in sys_ref.pairwise_inters
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                                 Molly.parameter_keys(inter), Molly.parameter_values(inter))
+        end
+        test_params("DoubleExponentialSC + CoulombScaled", sys_ref, params_dic)
     end
 
     specific_inters = [
@@ -1172,11 +1185,52 @@ end
         sys_ref = specific_sys(inter_list)
         params_dic = Dict{String, Float64}()
         for (inter, inter_type) in zip(inter_list.inters, inter_list.types)
-            Molly.extract_block!(params_dic, parameter_prefix(inter, inter_type),
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter, inter_type),
                                  Molly.parameter_keys(inter), Molly.parameter_values(inter))
         end
         test_params(name, sys_ref, params_dic)
     end
+
+    # The λ versions that alchemical systems use have the keys of the interactions they
+    #   replace. Dual topology keeps the bonded terms of deleted atoms at full strength, so
+    #   the A copies of core atoms are used, whose bonded terms are scaled by 1 - λ
+    atoms_λ = [Atom(index=i, mass=T(10.0), charge=T(0.1), σ=T(0.3), ϵ=T(0.4), λ=T(0.6),
+                    alch_role=(i <= 2 ? Molly.CoreDRole : Molly.EnvRole))
+               for i in eachindex(coords_spec)]
+    scheduler = Molly.DefaultLambdaScheduler(dual=true)
+    to_λ(inter) = Molly.to_lambda_function(inter; scheduler=scheduler)
+    to_λ(inter::Molly.LennardJones14) = Molly.to_lambda_function(inter, Molly.GapsysSoftCore();
+                                                                 scheduler=scheduler, float_type=T)
+    to_λ(inter::Molly.LennardJones14, softcore) =
+        Molly.to_lambda_function(inter, softcore; scheduler=scheduler, float_type=T)
+    λ_inters = Any[(name, il, to_λ) for (name, il) in specific_inters if name != "FENEBond" &&
+                                                     name != "HarmonicPositionRestraint"]
+    for softcore in (Molly.BeutlerSoftCore(), Molly.ScaledSoftCore())
+        lj14 = specific_inters[findfirst(x -> first(x) == "LennardJones14", specific_inters)][2]
+        push!(λ_inters, ("LennardJones14 $(nameof(typeof(softcore)))", lj14,
+                         inter -> to_λ(inter, softcore)))
+    end
+    for (name, inter_list, convert) in λ_inters
+        il_λ = typeof(inter_list).name.wrapper(
+            (getfield(inter_list, f) for f in fieldnames(typeof(inter_list))[1:(end - 3)])...,
+            convert.(inter_list.inters), ["t"], inter_list.data)
+        sys_ref = System(specific_sys(il_λ); atoms=atoms_λ)
+        # The coupling must change the energy, or the λ part would go untested
+        @test !(potential_energy(sys_ref) ≈ potential_energy(specific_sys(inter_list)))
+        params_dic = extract_parameters(sys_ref)
+        keys_base = [Molly.parameter_prefix(inter_list.inters[1], "t") * k
+                     for k in Molly.parameter_keys(inter_list.inters[1])]
+        @test all(k -> haskey(params_dic, k), keys_base)
+        inter_params = Dict(k => params_dic[k] for k in keys_base)
+        test_params("$(name)λ", sys_ref, inter_params)
+    end
+
+    # Single topology λ interactions store the parameters of both end states
+    hb_single = Molly.to_lambda_function_single(HarmonicBond(k=T(100.0), r0=T(0.5)), nothing;
+                    scheduler=Molly.DefaultLambdaScheduler(dual=false))
+    sys_single = specific_sys(InteractionList2Atoms(is, js, [hb_single], ["t"]))
+    @test_throws "single topology" extract_parameters(sys_single)
+    @test_throws "single topology" ParameterPlan(sys_single, Dict("inter_HB_t_k" => T(100.0)))
 end
 
 @testset "Parameters with units" begin
@@ -1252,6 +1306,7 @@ end
         bond_key        => params_dic[bond_key] * 0.8,
         torsion_key     => params_dic[torsion_key] + 1.0,
         "inter_DEXP_alpha" => params_dic["inter_DEXP_alpha"] * 1.1,
+        "atom_O1_charge" => params_dic["atom_O1_charge"] * 1.1,
     )
     params_mod = merge(params_dic, modified)
     sys_mod = inject_gradients(sys_units, params_mod, plan)
@@ -1281,5 +1336,253 @@ end
         @test sys_mod_gpu.atoms isa AT
         @test extract_parameters(sys_mod_gpu) == params_mod
         @test pe(sys_mod_gpu) ≈ E_mod rtol=1e-10
+    end
+end
+
+@testset "Charge parameters" begin
+    # A copy of a force field file with the residue template charges of some atom types
+    #   changed, to compare injected charges with building the system again
+    function ff_file_with_charges(ff_file, charges)
+        xml = read(ff_file, String)
+        for (atom_type, q) in charges
+            pattern = Regex("(type=\"$atom_type\" charge=\")[^\"]*")
+            @test occursin(pattern, xml)
+            xml = replace(xml, pattern => SubstitutionString("\\g<1>$q"))
+        end
+        path = joinpath(mktempdir(), basename(ff_file))
+        write(path, xml)
+        return path
+    end
+
+    pe(sys) = potential_energy(sys; n_threads=1)
+    fs(sys) = from_device(forces(sys; n_threads=1))
+    pme_of(sys) = only(inter for inter in values(sys.general_inters) if inter isa PME)
+
+    garnet_file = joinpath(ff_dir, "ethanol_garnet.xml")
+    # O2 is the water oxygen, O1 the ethanol oxygen
+    charges_mod = ("O2" => -0.95, "O1" => -0.6)
+    garnet_file_mod = ff_file_with_charges(garnet_file, charges_mod)
+    function ethanol_solv_sys(ff_file, nonbonded_method; grad_safe=false)
+        ff = MolecularForceField(
+            ff_file;
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=false,
+        )
+        return System(
+            joinpath(data_dir, "ethanol_solv.pdb"),
+            ff;
+            units=false,
+            float_type=Float64,
+            nonbonded_method=nonbonded_method,
+            dist_cutoff=1.0,
+            grad_safe=grad_safe,
+            strictness=:nowarn,
+        )
+    end
+
+    nonbonded_methods = (("RF", SetupCoulombReactionField()), ("PME", SetupPME()))
+    @testset "Injection $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        sys = ethanol_solv_sys(garnet_file, nonbonded_method)
+        params_dic = extract_parameters(sys)
+        i_O2 = findfirst(ad -> ad.atom_type == "O2", sys.atoms_data)
+        @test params_dic["atom_O2_charge"] == sys.atoms[i_O2].charge
+        @test count(k -> endswith(k, "_charge"), keys(params_dic)) == 12
+
+        # Injecting unchanged values leaves the system unchanged
+        plan = ParameterPlan(sys, params_dic)
+        sys_rt = inject_gradients(sys, params_dic, plan)
+        @test sys_rt.atoms == sys.atoms
+        @test pe(sys_rt) == pe(sys)
+
+        # Changed charges give the system built with those charges, including the charge
+        #   sums cached by a PME with fixed charges
+        sys_mod = inject_gradients(sys, merge(params_dic,
+                        Dict("atom_$(t)_charge" => q for (t, q) in charges_mod)), plan)
+        sys_rebuilt = ethanol_solv_sys(garnet_file_mod, nonbonded_method)
+        @test sys_mod.atoms == sys_rebuilt.atoms
+        @test extract_parameters(sys_mod) == extract_parameters(sys_rebuilt)
+        if nb_name == "PME"
+            @test !isnothing(pme_of(sys_mod).pc_sum)
+            @test pme_of(sys_mod).pc_sum != pme_of(sys).pc_sum
+            @test pme_of(sys_mod).pc_sum == pme_of(sys_rebuilt).pc_sum
+            @test pme_of(sys_mod).pc_abs2_sum == pme_of(sys_rebuilt).pc_abs2_sum
+        end
+        @test !isapprox(pe(sys_mod), pe(sys); rtol=1e-6)
+        @test pe(sys_mod) ≈ pe(sys_rebuilt) rtol=1e-12
+        @test fs(sys_mod) ≈ fs(sys_rebuilt) rtol=1e-12
+    end
+
+    # Enzyme against finite differencing, with every parameter of the system in the
+    #   dictionary; σ and ϵ are checked too since they share the atom injection
+    # A PME has to be passed as Duplicated, so the general interactions are passed
+    #   separately; a grad-safe PME caches no charges, so injection leaves them unchanged
+    function pe_injected(params_dic, sys_ref, plan, coords, neighbors, general_inters)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
+        return potential_energy(sys, neighbors; n_threads=1, general_inters=general_inters)
+    end
+
+    @testset "Gradients $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        sys = ethanol_solv_sys(garnet_file, nonbonded_method; grad_safe=true)
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        gis = sys.general_inters
+        @test isempty(gis) || only(gis).grad_safe
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Const(sys),
+            Const(plan),
+            Duplicated(copy(sys.coords), zero(sys.coords)),
+            Const(neighbors),
+            isempty(gis) ? Const(gis) : Duplicated(gis, Enzyme.make_zero(gis)),
+        )
+        for key in ("atom_O2_charge", "atom_H7_charge", "atom_O1_charge", "atom_C1_σ",
+                    "atom_C1_ϵ")
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+                pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
+                            copy(sys.coords), neighbors, gis)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+        end
+    end
+
+    # The alchemical atoms keep their λ and role, so their charges are still scaled by λ
+    @testset "Alchemical $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        ff_files = joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"])
+        ff_files_mod = [ff_file_with_charges(ff_files[1], ("tip3p-O" => -0.9,)),
+                        ff_file_with_charges(ff_files[2], ("BZNC1" => -0.2,))]
+        benzene_sys(files) = System(joinpath(data_dir, "benzene_solv.pdb"),
+                                    MolecularForceField(files...; units=true);
+                                    nonbonded_method=nonbonded_method, dist_cutoff=1.0u"nm",
+                                    center_coords=false)
+        sys, sys_rebuilt = benzene_sys(ff_files), benzene_sys(ff_files_mod)
+        solute = collect(1:12)
+        for S in (Molly.DefaultLambdaScheduler, Molly.GROMACSLambdaABFEScheduler)
+            # Partly decoupled, so the charges of the solute are partly scaled
+            sys_λ = AbsoluteFESystem(sys, 0.25, solute; scheduler=S(dual=true))
+            sys_λ_rebuilt = AbsoluteFESystem(sys_rebuilt, 0.25, solute; scheduler=S(dual=true))
+            params_dic = extract_parameters(sys_λ)
+            params_mod = merge(params_dic, Dict("atom_tip3p-O_charge" => -0.9,
+                                                "atom_BZNC1_charge" => -0.2))
+            sys_λ_mod = inject_gradients(sys_λ, params_mod)
+            @test sys_λ_mod.atoms == sys_λ_rebuilt.atoms
+            @test any(a -> a.λ != 1, sys_λ_mod.atoms[solute])
+            E_mod = ustrip(pe(sys_λ_mod))
+            @test !isapprox(E_mod, ustrip(pe(sys_λ)); rtol=1e-6)
+            @test E_mod ≈ ustrip(pe(sys_λ_rebuilt)) rtol=1e-12
+        end
+    end
+
+    @testset "Charge types" begin
+        # One atom type, XX, with two charges told apart by their charge types, and a mass
+        #   that differs between its atoms
+        atoms = [Atom(index=i, mass=m, charge=q, σ=0.3, ϵ=0.4)
+                 for (i, (m, q)) in enumerate(((10.0, -0.2), (10.0, 0.2), (12.0, 0.2)))]
+        function sys_with(atoms, charge_types)
+            return System(
+                atoms=atoms,
+                coords=[SVector(x, 1.0, 1.0) for x in (0.5, 1.0, 1.5)],
+                boundary=CubicBoundary(4.0),
+                atoms_data=[AtomData(atom_type="XX", charge_type=t) for t in charge_types],
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+        end
+        sys = sys_with(atoms, ("XX-", "XX+", "XX+"))
+        params_dic = extract_parameters(sys)
+        @test params_dic["atom_XX-_charge"] == -0.2
+        @test params_dic["atom_XX+_charge"] == 0.2
+        @test !haskey(params_dic, "atom_XX_charge")
+        @test haskey(params_dic, "atom_XX_σ")
+        @test !haskey(params_dic, "atom_XX_mass") # The masses differ
+        @test inject_gradients(sys, params_dic).atoms == sys.atoms
+        sys_mod = inject_gradients(sys, merge(params_dic, Dict("atom_XX+_charge" => 0.3)))
+        @test charges(sys_mod) == [-0.2, 0.3, 0.3]
+        @test_throws ArgumentError ParameterPlan(sys, merge(params_dic, Dict("atom_XX_mass" => 10.0)))
+
+        # Masses that differ are left out silently, other parameters are reported
+        @test_logs extract_parameters(sys)
+
+        # Without charge types, the atom type groups charges that differ
+        sys_type = sys_with(atoms, ("", "", ""))
+        @test !haskey(extract_parameters(sys_type; strictness=:nowarn), "atom_XX_charge")
+        @test_logs (:warn, r"atom_XX_charge") extract_parameters(sys_type; strictness=:warn)
+        @test_throws ErrorException extract_parameters(sys_type; strictness=:error)
+        @test_logs extract_parameters(sys_type; strictness=:nowarn)
+        @test_throws ArgumentError ParameterPlan(sys_type, Dict("atom_XX_charge" => 0.0))
+
+        # Atoms with two end states, as in single topology, are not supported
+        atoms_two = [Atom(a.index, a.atom_type, a.mass, (a.charge, a.charge), a.σ, a.ϵ, a.λ,
+                          a.alch_role) for a in atoms]
+        sys_two = sys_with(atoms_two, ("", "", ""))
+        @test_throws ArgumentError extract_parameters(sys_two)
+        @test_throws ArgumentError ParameterPlan(sys_two, Dict{String, Float64}())
+    end
+
+    @testset "Protein charge types" begin
+        # LEU CA shares its atom type with atoms of other charges, so it has its own
+        #   charge type
+        ff99_file = joinpath(ff_dir, "ff99SBildn.xml")
+        xml = read(ff99_file, String)
+        pattern = r"(<Residue name=\"LEU\">.*?<Atom name=\"CA\" type=\"CT\" charge=\")[^\"]*"s
+        @test occursin(pattern, xml)
+        ff99_file_mod = joinpath(mktempdir(), "ff99SBildn.xml")
+        write(ff99_file_mod, replace(xml, pattern => s"\g<1>-0.1"))
+        key = "atom_LEU/CT/CA_charge"
+        protein_sys(ff_file, nonbonded_method; grad_safe=false) = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            MolecularForceField(ff_file; units=false);
+            units=false,
+            nonbonded_method=nonbonded_method,
+            dispersion_correction=false,
+            grad_safe=grad_safe,
+            strictness=:nowarn,
+        )
+
+        for (nb_name, nonbonded_method) in nonbonded_methods
+            sys = protein_sys(ff99_file, nonbonded_method)
+            params_dic = extract_parameters(sys)
+            # Every charge type is a parameter
+            @test count(k -> endswith(k, "_charge"), keys(params_dic)) ==
+                    length(unique(ad.charge_type for ad in sys.atoms_data))
+            @test params_dic[key] == -0.0518
+            plan = ParameterPlan(sys, params_dic)
+            @test inject_gradients(sys, params_dic, plan).atoms == sys.atoms
+
+            sys_mod = inject_gradients(sys, merge(params_dic, Dict(key => -0.1)), plan)
+            sys_rebuilt = protein_sys(ff99_file_mod, nonbonded_method)
+            @test sys_mod.atoms == sys_rebuilt.atoms
+            @test !isapprox(pe(sys_mod), pe(sys); rtol=1e-8)
+            @test pe(sys_mod) ≈ pe(sys_rebuilt) rtol=1e-12
+            @test fs(sys_mod) ≈ fs(sys_rebuilt) rtol=1e-12
+        end
+
+        # Enzyme against finite differencing with PME, passed as Duplicated
+        sys = protein_sys(ff99_file, SetupPME(); grad_safe=true)
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        gis = sys.general_inters
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Const(sys),
+            Const(plan),
+            Duplicated(copy(sys.coords), zero(sys.coords)),
+            Const(neighbors),
+            Duplicated(gis, Enzyme.make_zero(gis)),
+        )
+        grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+            pe_injected(merge(params_dic, Dict(key => val)), sys, plan, copy(sys.coords),
+                        neighbors, gis)
+        end
+        @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
     end
 end

@@ -1,5 +1,7 @@
 export HarmonicBond
 
+@public HarmonicBondλ
+
 @doc raw"""
     HarmonicBond(; k, r0)
 
@@ -37,13 +39,40 @@ end
     return (b.k / 2) * (r - b.r0) ^ 2
 end
 
-# λ version of `HarmonicBond` for alchemical systems, built by `to_lambda_function`.
+@doc raw"""
+    HarmonicBondλ(; k, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+
+A harmonic bond between two atoms in an alchemical system, the λ version of
+[`HarmonicBond`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`HarmonicBond`](@ref)
+to this type.
+The potential energy is defined as
+```math
+V(r) = \frac{w}{2} k (r - r_0)^2
+```
+where the weight ``w`` and the parameters depend on the alchemical roles of the atoms and on
+``\lambda``, the `λ` of the atoms mixed with `λ_mixing`.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
+
+In dual topology `k` and `r0` are single values.
+``w = 1`` if the bond involves an atom unique to one state or only environment atoms,
+otherwise ``w = 1 - \lambda`` if it involves a core atom with the parameters of state A and
+``w = \lambda`` if it involves a core atom with the parameters of state B.
+
+In single topology ``w = 1`` and `k` and `r0` are tuples of the values in states A and B.
+Each parameter ``p`` is ``(1 - \lambda) p^A + \lambda p^B`` if the bond involves a core or
+unique atom and ``p^A`` otherwise.
+"""
 @kwdef struct HarmonicBondλ{K, D, LM, SCH} <: AlchemicalBondedInteraction
     k::K
     r0::D
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+parameter_prefix(::HarmonicBondλ, inter_type) = "inter_HB_$(inter_type)_"
+parameter_fields(::Type{<:HarmonicBondλ}) = parameter_fields(HarmonicBond)
 
 Base.zero(b::HarmonicBondλ) = HarmonicBondλ(k=zero.(b.k), r0=zero.(b.r0), λ_mixing=b.λ_mixing,
                                             scheduler=b.scheduler)

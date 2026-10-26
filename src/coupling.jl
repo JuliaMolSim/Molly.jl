@@ -1,7 +1,6 @@
 # Temperature and pressure coupling methods
 
 export
-    apply_coupling!,
     ImmediateThermostat,
     VelocityRescaleThermostat,
     AndersenThermostat,
@@ -9,6 +8,8 @@ export
     BerendsenBarostat,
     CRescaleBarostat,
     MonteCarloBarostat
+
+@public apply_coupling!
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
@@ -71,7 +72,7 @@ end
 
 The immediate velocity rescaling thermostat for controlling temperature.
 
-Velocities are immediately rescaled to match a target temperature.
+Velocities are immediately rescaled to match a target temperature (isokinetic ensemble).
 The scaling factor for the velocities each step is
 ```math
 \lambda = \sqrt{\frac{T_0}{T}}
@@ -97,15 +98,17 @@ end
 The stochastic velocity rescaling thermostat.
 
 See [Bussi et al. 2007](https://doi.org/10.1063/1.2408420).
-In brief, acts like the [`BerendsenThermostat`](@ref) but adds an
+In brief, acts like the [`BerendsenThermostat`](@ref) but adds a
 stochastic term, allowing correct sampling of isothermal ensembles.
 
-Let `Δt` be the simulation timestep, `Nf` the kinetic DOFs used to calculate the instantaneous
-temperature of the system. Then, ``K = \frac{1}{2} \cdot \sum m \cdot v^2`` is the current
-kinetic energy, and ``K̄ = \frac{1}{2} Nf k_B T_0`` is the target kinetic energy for
-a reference temperature `T_0`.
+Let ``\Delta t`` be the simulation time step multiplied by `n_steps`, ``\tau`` the coupling
+constant and ``N_f`` the number of degrees of freedom used to calculate the instantaneous
+temperature of the system. Then ``K = \frac{1}{2} \sum_i m_i v_i^2`` is the current
+kinetic energy and ``\bar{K} = \frac{1}{2} N_f k_B T_0`` is the target kinetic energy for
+the reference temperature ``T_0``.
 
-Define ``c = e^{-Δt/τ}``. Draw ``R \sim 𝒩(0,1)`` and ``S \sim \chi^{2}_{Nf-1}``. Then
+Define ``c = e^{-\Delta t/\tau}``. Draw ``R \sim \mathcal{N}(0, 1)`` and
+``S \sim \chi^{2}_{N_f-1}``. Then
 ```math
 \lambda^2 = c + (1-c) \cdot \frac{\bar K}{N_f K} \cdot (R^2 + S)\;+\;
             2 \cdot \sqrt{c(1-c) \frac{\bar K}{N_f K}} \cdot R,
@@ -230,6 +233,7 @@ end
 
 The Berendsen thermostat for controlling temperature.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the velocities each step is
 ```math
 \lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
@@ -259,6 +263,7 @@ end
 
 The Berendsen barostat for controlling pressure.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the box every `n_steps` steps is
 ```math
 \mu_{ij} = \delta_{ij} - \frac{\Delta t}{3\, \tau_p} \kappa_{ij} \left(P_{0ij} - P_{ij}(t) \right).
@@ -267,9 +272,9 @@ with the fractional change limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix and ``\delta`` is a Kronecker delta,
 allowing non-isotropic pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 
-This barostat should be used with caution as it known not to properly sample
+This barostat should be used with caution as it is known not to properly sample
 isobaric ensembles and therefore can lead to simulation artifacts.
 """
 struct BerendsenBarostat{P, C, S, IC, T} <: AbstractBarostat
@@ -404,13 +409,13 @@ virial_incompatible_sites(vs::AbstractVector{<:VirtualSite}) =
     any(v -> v.type == 4 || v.type == 5, from_device(vs))
 virial_incompatible_sites(vs) = false
 
-function warn_virial_sites(sys, barostat)
+function warn_virial_sites(sys, barostat, strictness)
     if virial_incompatible_sites(sys.virtual_sites)
-        report_issue("the system has virtual sites that are not compatible with the virial, so " *
-                     "the pressure $(nameof(typeof(barostat))) uses is wrong; " *
-                     "MonteCarloBarostat needs no virial", :warn; maxlog=1)
+        err_msg = "the system has virtual sites that are not compatible with the virial, so " *
+                  "the pressure used by $(nameof(typeof(barostat))) is wrong; " *
+                  "MonteCarloBarostat needs no virial"
+        report_issue(err_msg, strictness; maxlog=1)
     end
-    return nothing
 end
 
 function apply_coupling!(sys::System{D},
@@ -426,7 +431,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -499,21 +504,22 @@ end
 
 The stochastic cell rescale barostat.
 
-See [Bernetti and Bussi 2020] (https://doi.org/10.1063/5.0020514)
-and [Del Tatto et al. 2022] (https://doi.org/10.3390/app12031139).
-In brief, this is an extension of the Berendsen barostat that includes a
+See [Bernetti and Bussi 2020](https://doi.org/10.1063/5.0020514)
+and [Del Tatto et al. 2022](https://doi.org/10.3390/app12031139).
+In brief, this is an extension of the [`BerendsenBarostat`](@ref) that includes a
 stochastic term to the scaling matrix.
 This allows proper sampling of isobaric ensembles.
 
 ```math
-\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot dt}{V(t) \cdot \tau_P}} \cdot dW \right]
+\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot \Delta t}{V(t) \cdot \tau_P}} \cdot dW \right]
 ```
 where ``\kappa_T`` is the isothermal compressibility, ``\tau_P`` is the barostat coupling constant
 and ``\rm{dW}`` represents a Wiener process.
+The fractional change is limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 """
 struct CRescaleBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P
@@ -647,7 +653,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,

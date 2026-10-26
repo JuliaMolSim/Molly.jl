@@ -256,6 +256,17 @@ function EnzymeRules.reverse(config::RevConfig, ofn::Const{typeof(GPUArrays._map
     return (nothing, nothing, nothing)
 end
 
+# From Enzyme.jl 0.13.212 the Enzyme reverse rule for `sum` takes any return activity,
+# though it still has no augmented primal for a constant one, so the method above is
+# ambiguous with it for `sum` and this more specific method is required
+function EnzymeRules.reverse(config::RevConfig, ofn::Const{typeof(GPUArrays._mapreduce)},
+                             ::Type{RT}, tape, f::Const{typeof(identity)},
+                             op::Const{typeof(Base.add_sum)},
+                             A::Annotation{<:AbstractGPUArray{T}};
+                             dims, init) where {RT <: Const, T}
+    return (nothing, nothing, nothing)
+end
+
 # Shadow of a field of an annotated argument, or `nothing` when there is no gradient to
 # accumulate. Under runtime activity Enzyme may hand back a shadow that aliases the
 # primal for an inactive value; writing to that would corrupt the primal, so it is

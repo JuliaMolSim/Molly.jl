@@ -174,7 +174,7 @@ Random.seed!(RNG_SEED + 1)
 simulate!(awh_sim, TOTAL_STEPS)
 
 ##
-pmf_result = pmf(awh_sim.pmf)
+pmf_result = Molly.pmf(awh_sim.pmf)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 

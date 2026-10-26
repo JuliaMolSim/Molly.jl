@@ -90,7 +90,8 @@ The masses and constraints should always be on the CPU, even for a GPU system; t
 [`System`](@ref) constructor moves the constraint data to the device of the system.
 [`SetupLINCS`](@ref) provides LINCS parameters when setting up a system from a file.
 
-Velocity constraints are applied implicitly through position constraint correction.
+Velocity constraints are applied by projecting out the velocity components along the
+constraints, see `iter_vel_correction`.
 See [Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)
 for the original LINCS paper.
 
@@ -225,7 +226,8 @@ end
 
 """
     SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
-               n_rec=4, n_iter=1, iter_vel_correction::Bool=false, gpu_block_size::Integer=128)
+               n_rec=4, n_iter=1, iter_vel_correction::Bool=false,
+               gpu_block_size::Integer=128)
 
 Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
 
@@ -1417,4 +1419,28 @@ function move_constraints_to_device(lincs::LINCS, ::Type{AT}) where {AT <: Abstr
     return LINCS(clusters_gpu, data_gpu, ws_gpu, lincs.dist_constraints,
                  lincs.angle_constraints, lincs.dist_tolerance, lincs.vel_tolerance,
                  lincs.iter_vel_correction, lincs.gpu_block_size, delta_buf, ca_gpu)
+end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(c::SystemConversion, lincs::LINCS)
+    # The distance constraints from the angle constraints are added at the end
+    n_angle = (isnothing(lincs.angle_constraints) ? 0 : length(lincs.angle_constraints))
+    n_dist = length(lincs.dist_constraints) - 3 * n_angle
+    dist_constraints = [convert_component(c, dc) for dc in lincs.dist_constraints[1:n_dist]]
+    if n_angle > 0
+        angle_constraints = [convert_component(c, ac) for ac in lincs.angle_constraints]
+    else
+        angle_constraints = nothing
+    end
+    return LINCS(
+        masses=mass.(from_device(c.atoms)),
+        dist_tolerance=convert_component(c, lincs.dist_tolerance),
+        vel_tolerance=convert_component(c, lincs.vel_tolerance),
+        dist_constraints=dist_constraints,
+        angle_constraints=angle_constraints,
+        n_rec=lincs.lincs_data.n_rec,
+        n_iter=lincs.lincs_data.n_iter,
+        iter_vel_correction=lincs.iter_vel_correction,
+        gpu_block_size=lincs.gpu_block_size,
+    )
 end

@@ -565,12 +565,12 @@ states = ThermoState[ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)
 target_state = ThermoState("target", βi, pres, sys_nobias)
 ```
 
-We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`assemble_mbar_inputs`](@ref) method:
+We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`Molly.assemble_mbar_inputs`](@ref) method:
 
 ```julia
 # MBAR.jl
 
-mbar_gen = assemble_mbar_inputs(
+mbar_gen = Molly.assemble_mbar_inputs(
     C, B, states; # Coordinates, boundaries and thermodynamic states
     target_state=target_state, # The target state, in our case the unbiased system
     energy_units=energy_units,
@@ -583,30 +583,31 @@ win_of   = mbar_gen.win_of   # Indexing helper that tells which k state was used
 shifts   = mbar_gen.shifts   # Numerical shifts, if used, for stability reasons when building the reduced energy matrix
 ```
 
-This generates the necessary inputs to use the self-consistent iteration method to solve the MBAR equations. Of course, Molly provides the [`iterate_mbar`](@ref) method to do so:
+This generates the necessary inputs to use the self-consistent iteration method to solve the MBAR equations. Of course, Molly provides the [`Molly.iterate_mbar`](@ref) method to do so:
 
 ```julia
 # MBAR.jl
 
 # Returns the relative free energy of each k state and log.(N_counts), needed for downstream computations
-F_k, logN = iterate_mbar(u, win_of, N_counts)
+F_k, logN = Molly.iterate_mbar(u, win_of, N_counts)
 ```
 
-With this, we can also produce a weight matrix and a vector of target weights, using the  [`mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
+With this, we can also produce a weight matrix and a vector of target weights, using the  [`Molly.mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
 
 ```julia
 # MBAR.jl
 
 # Returns the weights matrix and the target weights
-W_s, w_target = mbar_weights(u, u_target, F_k, N_counts, logN; check=true, shifts=shifts)
+W_s, w_target = Molly.mbar_weights(u, u_target, F_k, N_counts, logN; check=true, shifts=shifts)
 ```
 
-And finally, we can estimate the PMF using the output of the previous step by calling the [`pmf_with_uncertainty`](@ref) method:
+And finally, we can estimate the PMF using the output of the previous step by calling the [`Molly.pmf_with_uncertainty`](@ref) method:
 
 ```julia
 # MBAR.jl
 
-pmf_result = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
+pmf_result = Molly.pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV;
+                                        shifts=shifts, kBT=kBT)
 
 centers   = pmf_result.centers        # The collective variable
 PMF       = pmf_result.F              # PMF in kBT
@@ -615,11 +616,11 @@ sigma     = pmf_result.sigma_F        # Standard deviation in kBT
 sigma_enr = pmf_result.sigma_F_energy # Standard deviation in energy units
 ```
 
-But what about the short path? Well, we also provide an overload of the [`pmf_with_uncertainty`](@ref) method that allows to get the PMF in a single call by doing:
+But what about the short path? Well, we also provide an overload of the [`Molly.pmf_with_uncertainty`](@ref) method that allows to get the PMF in a single call by doing:
 
 ```julia
 # MBAR.jl
-pmf_result = pmf_with_uncertainty(
+pmf_result = Molly.pmf_with_uncertainty(
     C,            # Coordinates
     B,            # Boundaries
     states,       # Themodynamic states
@@ -690,6 +691,49 @@ The relative binding free energy is calculated using the thermodynamic cycle clo
 
 $$\Delta\Delta G = \Delta G_{bind}(B) - \Delta G_{bind}(A) = \Delta G_{bound}(A \to B) - \Delta G_{solv}(A \to B)$$
 
+## Thermodynamic cycles
+
+A [`ThermodynamicCycle`](@ref) composes the free-energy differences of several legs, such as the solvated and vacuum legs of a solvation free energy, into one free energy with an uncertainty. Each [`ThermodynamicCycleLeg`](@ref) takes a source, the two states, by index or by [`ThermoState`](@ref) name, and a coefficient, usually ±1. A leg contributes $c_i (F_\text{to} - F_\text{from})$, and [`Molly.free_energy`](@ref) returns
+
+$$\Delta G = \sum_i c_i \Delta F_i + \Delta G_\text{correction}$$
+
+where the correction is an analytic term: a standard-state correction, the release of restraints or a long-range correction. [`Molly.free_energy_uncertainty`](@ref) returns $\sqrt{\sum_i c_i^2 \sigma_i^2}$, which assumes that the legs are independent, e.g. that they come from separate simulations. Both are in energy units.
+
+For the benzene hydration free energy of the TSS example below, where state 1 is decoupled and the last state is coupled, the annihilation free energy of each leg is $F_1 - F_\text{end}$:
+
+```julia
+ΔG_hyd = ThermodynamicCycle(
+    ThermodynamicCycleLeg(tss_state_vac,  N_LAMBDA_STATES => 1; coefficient=+1, name=:vacuum),
+    ThermodynamicCycleLeg(tss_state_solv, N_LAMBDA_STATES => 1; coefficient=-1, name=:solvated),
+)
+Molly.free_energy(ΔG_hyd)             # kJ mol^-1
+Molly.free_energy_uncertainty(ΔG_hyd) # Jackknife standard errors of the legs, combined
+```
+
+The alchemical cycle gives the transfer free energy at equal concentrations in the gas and in the solution. [`Molly.standard_state_correction`](@ref) converts it to a gas at pressure $P$ and a solution at concentration $c$ (1 M by default), adding $k_B T \ln(v_\text{gas} / v_\text{std})$ with $v_\text{gas} = k_B T / P$ and $v_\text{std} = 1 / (c N_A)$:
+
+```julia
+ΔG_hyd° = ThermodynamicCycle(ΔG_hyd.legs...; correction=Molly.standard_state_correction(T0, P0))
+```
+
+A leg source implements [`Molly.free_energy_difference`](@ref)`(source, i, j)`, which returns $F_j - F_i$ in energy units, and [`Molly.free_energy_difference_uncertainty`](@ref)`(source, i, j)`. Molly implements them for:
+- [`TSSState`](@ref): the free energies of [`Molly.tss_free_energies`](@ref), with the jackknife standard errors of [`Molly.tss_free_energy_uncertainties`](@ref);
+- [`AWHState`](@ref): the free energies `f`. AWH has no uncertainty estimate, so [`Molly.free_energy_uncertainty`](@ref) raises an error for a cycle with an AWH leg;
+- [`Molly.MBARResult`](@ref): MBAR free energies with their asymptotic standard errors, for umbrella sampling, REMD or any other set of samples, e.g. `Molly.MBARResult(Molly.assemble_mbar_inputs(coords_k, boundaries_k, thermo_states), thermo_states)`;
+- a PMF from [`Molly.pmf_with_uncertainty`](@ref) or [`Molly.pmf`](@ref), computed with `kBT`, between two bins given by index. The uncertainty treats the two bins as independent, an approximation that can be too large or too small since the bins share the normalisation.
+
+The dimensionless free energies of these sources are converted with $k_B T$ of the leg's states. The two states of a leg must therefore have the same temperature, otherwise an error is raised; legs at different temperatures can be combined in one cycle. Any other object can be a leg source by adding methods to the two functions:
+
+```julia
+struct MyEstimate
+    F::Vector{typeof(1.0u"kJ/mol")}
+    σ::Vector{typeof(1.0u"kJ/mol")}
+end
+
+Molly.free_energy_difference(e::MyEstimate, i, j) = e.F[j] - e.F[i]
+Molly.free_energy_difference_uncertainty(e::MyEstimate, i, j) = hypot(e.σ[i], e.σ[j])
+```
+
 ## Hybrid System Setup
 
 Molly allows for two setup options: single topology (parameter scaling) and dual topology (energy scaling). In a single topology for RBFE, shared atoms between ligands (Core atoms) retain their physical identity, with parameters (charges, vdW, bonds, angles) interpolated along an alchemical coupling parameter $\lambda \in [0, 1]$. Atoms present in only one ligand (Unique atoms) are smoothly created or decoupled using soft-core potentials for electrostatic and van der Waals interactions to prevent numerical singularities at $\lambda \to 0$ and $\lambda \to 1$. In a dual topology for RBFE, virtual atoms are added for the core atoms, these represent the core atoms in ligand B. Unique atoms for ligand B are added as atoms. For ABFE simulations, dual topology is most commonly used where the whole solute is annihilated/decoupled along an alchemical coupling parameter $\lambda \in [0, 1]$, but Molly could run ABFE simulations with single topology.
@@ -723,11 +767,11 @@ The only exception in a single topology setup are the torsion potentials. These 
 
 $$E_{torsion} = (1-\lambda)E^A_{torsion} + \lambda E^B_{torsion}$$
 
-In Molly, a topology is chosen together with the lambda scheduler, see [`DefaultLambdaScheduler`](@ref):
+In Molly, a topology is chosen together with the lambda scheduler, see [`Molly.DefaultLambdaScheduler`](@ref):
 ```julia
 # Default lambda scheduler, where electrostatics are turned off before sterics are turned off.
 # The defaults are shown. With dual topology only the intraLJ option is used.
-DefaultLambdaScheduler(
+Molly.DefaultLambdaScheduler(
     dual=true,          # Dual topology (true) or single topology (false)
     LJindividual=false, # State (false) or individual (true) param scaling for LJ
     LJspecial=false,    # State (false) or individual (true) param scaling for LJ 1-4 inter.
@@ -738,7 +782,7 @@ DefaultLambdaScheduler(
 ```
 the default is dual topology while in OpenFE single topology is used, OpenFE also uses other settings during set up and the differences between default and OpenFE are outlined below.
 
-All schedulers are a [`LambdaScheduler`](@ref) with a different schedule, e.g. `DefaultLambdaScheduler()` is `LambdaScheduler(Molly.DefaultSchedule())`, so they take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`LinearLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) and [`GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`NAMDLambdaScheduler`](@ref), [`QuartersLambdaScheduler`](@ref) and [`EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
+All schedulers are a [`Molly.LambdaScheduler`](@ref) with a different schedule, e.g. `Molly.DefaultLambdaScheduler()` is `Molly.LambdaScheduler(Molly.DefaultSchedule())`, so they take the same options and differ in how the electrostatics and sterics are staged along $\lambda$: [`Molly.LinearLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) and [`Molly.GROMACSLambdaRBFEScheduler`](@ref) (which use two PME grids and scale linearly in between, rather than depositing a scaled charge on the grid, similar to GROMACS approach), [`Molly.NAMDLambdaScheduler`](@ref), [`Molly.QuartersLambdaScheduler`](@ref) and [`Molly.EleScaledLambdaScheduler`](@ref). Below shows how global λ is scaled for the sterics per scheduler and role. 
 
 ![All lambda schedulers with the specific lambda scaling for each role (dual=true)](images/scheduler_plots.png)
 
@@ -757,13 +801,15 @@ Every [`Atom`](@ref) has an `alch_role` that tells the λ interactions how the a
 
 An interaction between several atoms takes one role from its atoms, the first present in the order `InsertRole`, `DeleteRole`, `CoreRole`, `CoreIRole`, `CoreDRole`, `EnvRole`. A Lennard-Jones pair between an inserted and an environment atom therefore follows the insertion schedule, and an interaction between environment atoms is never scaled. With `intraLJ=true` the Lennard-Jones interactions within the inserted atoms, or within the deleted atoms, count as environment and stay on at every $\lambda$.
 
-The torsions take their role the other way round: a torsion of inserted, deleted or environment atoms only is never scaled, so the atoms that appear or disappear keep their own torsions at both end states, while a torsion that also has a core atom follows that core atom. Only the torsions of one end state then act on the core at a time. This is what `Tscaled=true`, the default of every scheduler apart from [`OpenFEScheduler`](@ref), does. OpenFE leaves these torsions on at every $\lambda$, so `OpenFEScheduler` uses `Tscaled=false` and Molly reproduces OpenFE exactly; pass `Tscaled=true` to scale them with an OpenFE setup as well.
+The torsions take their role the other way round: a torsion of inserted, deleted or environment atoms only is never scaled, so the atoms that appear or disappear keep their own torsions at both end states, while a torsion that also has a core atom follows that core atom. Only the torsions of one end state then act on the core at a time. This is what `Tscaled=true`, the default of every scheduler apart from [`Molly.OpenFEScheduler`](@ref), does. OpenFE leaves these torsions on at every $\lambda$, so [`Molly.OpenFEScheduler`](@ref) uses `Tscaled=false` and Molly reproduces OpenFE exactly; pass `Tscaled=true` to scale them with an OpenFE setup as well.
 
 The schedulers scale the sterics and electrostatics of each role differently (see the plot above). In dual topology the bonded terms of inserted and deleted atoms stay at full strength at every $\lambda$, only their non-bonded interactions are scaled, so these atoms keep their geometry when decoupled; the bonded terms of the core copies are scaled by $\lambda$ and $1-\lambda$. In single topology the bonded parameters are interpolated.
 
+An alchemical system keeps the parameter keys of the system it was built from (see [`extract_parameters`](@ref)), so force field parameters can be differentiated through an [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) like through the original system. Single topology systems, which store two values per parameter, are not supported by the parameter functions.
+
 ### Matching OpenFE default settings
 
-Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the `OpenFEScheduler`. When using `OpenFEScheduler(), LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
+Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
 
 - Only using a softcore potential for the LennardJones potential, the CoulombEwald direct space is scaled by lambda directly without using a softcore.
 - In CoulombEwald potential, the charges are individually scaled for the regular interactions: 
@@ -781,22 +827,19 @@ So to run with OpenFE settings:
 ```julia
 # OpenFE lambda scheduler with its defaults: single topology, state parameter scaling for LJ,
 # LJ 1-4 and Coulomb 1-4 interactions, and individual parameter scaling for Coulomb.
-scheduler = OpenFEScheduler(
-                dual=false,          # Single topology
-                LJindividual=false,  # State parameter scaling for LJ
-                LJspecial=false,     # State parameter scaling for LJ 1-4 interactions
-                Cindividual=true,    # Individual parameter scaling for Coulomb
-                Cspecial=false,      # State parameter scaling for Coulomb 1-4 interactions
-                intraLJ=false,       # LJ between alchemical atoms is decoupled
-                            )
+scheduler = Molly.OpenFEScheduler(
+    dual=false,          # Single topology
+    LJindividual=false,  # State parameter scaling for LJ
+    LJspecial=false,     # State parameter scaling for LJ 1-4 interactions
+    Cindividual=true,    # Individual parameter scaling for Coulomb
+    Cspecial=false,      # State parameter scaling for Coulomb 1-4 interactions
+    intraLJ=false,       # LJ between alchemical atoms is decoupled
+)
 
 # For system setup, set LJsoftcore=:gapsys, Csoftcore=:scaled
 # More on system setup, see the example below
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
-                        scheduler=scheduler,
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:scaled
-                      )
+                       scheduler=scheduler, LJsoftcore=:gapsys, Csoftcore=:scaled)
 ```
 
 All the settings have been tested by comparing energies and forces between Molly and OpenFE, and the comparison is part of the test suite (`test/free_energy.jl`).
@@ -859,7 +902,7 @@ Then we can use these systems to set up a hybrid system for each leg (solvated v
 ```julia
 # --- Hybrid System Setup ---
 global_λ = FT(0.0)
-scheduler = DefaultLambdaScheduler(dual=true, intraLJ=true)
+scheduler = Molly.DefaultLambdaScheduler(dual=true, intraLJ=true)
 
 sys_solv = AbsoluteFESystem(sysb_solv, global_λ, mapping;
                              temp=298.0u"K",
@@ -952,12 +995,11 @@ Then we can use SystemA and SystemB to set up a hybrid system with a single topo
 # --- Hybrid System Setup ---
 global_λ = FT(0.0)
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; 
-                        temp=298.0u"K", 
-                        scheduler=OpenFEScheduler(dual=false),
-                        loggers=(),
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:scaled
-                      )
+                       temp=298.0u"K", 
+                       scheduler=Molly.OpenFEScheduler(dual=false),
+                       loggers=(),
+                       LJsoftcore=:gapsys,
+                       Csoftcore=:scaled)
 ```
 
 This system can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
@@ -1134,10 +1176,10 @@ simulate!(awh_sim, TOTAL_STEPS)
 across AWH iterations and repeated `simulate!` calls. Pass `initial_step` when resuming from
 a checkpoint whose coordinates and velocities already correspond to a nonzero step.
 
-After the run, `pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
+After the run, `Molly.pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
 
 ```julia
-pmf_result = pmf(awh_sim.pmf)
+pmf_result = Molly.pmf(awh_sim.pmf)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 
@@ -1239,7 +1281,7 @@ julia scripts/awh_solvation.jl
 
 On one NVIDIA GeForce RTX 5090 the script takes roughly 2 h 45 min, about 2 h 5 min for the solvated leg and 35 min for the vacuum leg, including setup and equilibration.
 
-[`AbsoluteFESystem`](@ref) decouples the solute from $\lambda=0$ (fully coupled) to $\lambda=1$ (fully decoupled), so the ladder of 20 states runs from the decoupled state 1 to the coupled state 20. The scheduler removes the charges from $\lambda=0$ to $\lambda=0.5$ with the sterics untouched, and then the sterics from $\lambda=0.5$ to $\lambda=1$. The intramolecular electrostatics of benzene are annihilated with its charges, while `intraLJ = true` keeps its intramolecular Lennard-Jones interactions. For the GROMACS convention with two PME grids, use `GROMACSLambdaABFEScheduler` instead.
+[`AbsoluteFESystem`](@ref) decouples the solute from $\lambda=0$ (fully coupled) to $\lambda=1$ (fully decoupled), so the ladder of 20 states runs from the decoupled state 1 to the coupled state 20. The scheduler removes the charges from $\lambda=0$ to $\lambda=0.5$ with the sterics untouched, and then the sterics from $\lambda=0.5$ to $\lambda=1$. The intramolecular electrostatics of benzene are annihilated with its charges, while `intraLJ = true` keeps its intramolecular Lennard-Jones interactions. For the GROMACS convention with two PME grids, use [`Molly.GROMACSLambdaABFEScheduler`](@ref) instead.
 
 ```julia
 FT = Float32
@@ -1257,7 +1299,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 ```
 
 The setup function builds either the solvated or vacuum leg. The solvated leg uses PME and a Langevin integrator coupled to an NPT barostat. The vacuum leg uses short-range Coulomb with an infinite boundary and infinite non-bonded cutoff so the benzene molecule is not split by a finite cutoff.
@@ -1610,7 +1652,7 @@ tss_state = TSSState(
     graph = tss_graph,
     first_state = 1,
     first_window = 1,
-    history_forgetting = TSSHistoryForgetting(alpha = FT(0.19), n_epochs = 16),
+    history_forgetting = Molly.TSSHistoryForgetting(alpha = FT(0.19), n_epochs = 16),
     adaptive_gamma = :covdet,
 )
 ```
@@ -1679,7 +1721,7 @@ Use the `initial_step` constructor keyword when restoring an existing simulation
 For PMF deconvolution, the script uses the automatic coupling path. This is safe for the same reason as in the AWH example above: each thermodynamic state contains exactly the two umbrella [`BiasPotential`](@ref)s that define the PMF dimensions, and they appear in the same order as the grid axes. The [`PMFDeconvolution`](@ref) object must be created before the run and passed to [`TSSSimulation`](@ref).
 
 ```julia
-pmf_result = pmf(pmf_deconv)
+pmf_result = Molly.pmf(pmf_deconv)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 
@@ -1800,7 +1842,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 
 tss_solvation_replica_rngs(seed::Integer) =
     [MersenneTwister(seed + replica_i - 1) for replica_i in 1:N_REPLICAS]
@@ -1879,7 +1921,7 @@ The TSS graph is a one-dimensional non-periodic ladder. With 20 states and `TSS_
     tss_state = TSSState(
         thermo_states;
         graph = tss_graph,
-        history_forgetting = TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
+        history_forgetting = Molly.TSSHistoryForgetting(alpha = FT(0.2), n_epochs = 16),
         adaptive_gamma = :covdet,
     )
 
@@ -1936,11 +1978,11 @@ simulate!(
 )
 ```
 
-After the run, `tss_free_energy_uncertainties` returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of $k_B T$.
+After the run, [`Molly.tss_free_energy_uncertainties`](@ref) returns the reported free energies and jackknife standard errors over the retained epochs. The free energies are dimensionless, in units of $k_B T$.
 
 ```julia
-jk_solv = tss_free_energy_uncertainties(tss_state_solv)
-jk_vac  = tss_free_energy_uncertainties(tss_state_vac)
+jk_solv = Molly.tss_free_energy_uncertainties(tss_state_solv)
+jk_vac  = Molly.tss_free_energy_uncertainties(tss_state_vac)
 
 f_solv = jk_solv.free_energies
 f_vac  = jk_vac.free_energies
@@ -2122,8 +2164,8 @@ The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 
 ### Logging TSS samples
 
 System loggers see only the physical system. To record what TSS knows about each sample, pass sample loggers to [`TSSSimulation`](@ref): `sample_loggers` for one replica, or `replica_sample_loggers` with one collection per replica.
-[`log_tss_sample!`](@ref) is called with each logger for every collected sample, after each block of `n_md_steps` MD steps, in adaptive and frozen runs. Like the system loggers, the sample loggers also see the initial configuration of each replica, at the start step of the first [`simulate!`](@ref) call.
-The [`TSSSample`](@ref) it receives gives the absolute MD step, the replica, its active system, the active state and window, the window's state indices, the reduced potentials of the sampled coordinates in the window states, the log normalization `log_den` and the conditional state weights.
+[`Molly.log_tss_sample!`](@ref) is called with each logger for every collected sample, after each block of `n_md_steps` MD steps, in adaptive and frozen runs. Like the system loggers, the sample loggers also see the initial configuration of each replica, at the start step of the first [`simulate!`](@ref) call.
+The [`Molly.TSSSample`](@ref) it receives gives the absolute MD step, the replica, its active system, the active state and window, the window's state indices, the reduced potentials of the sampled coordinates in the window states, the log normalization `log_den` and the conditional state weights.
 For example, to store the window reduced potentials of every fifth sample:
 
 ```julia
@@ -2141,7 +2183,7 @@ simulate!(tss_sim)
 values(sample_logger)
 ```
 
-The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
+The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `Molly.log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
 
 ## Free energies with REMD
 
@@ -2207,7 +2249,7 @@ VACUUM_EQUIL_TIME = FT(100)u"ps"
 CUTOFF = FT(1)u"nm"
 
 lambda_schedule = FT.(range(1.0, stop = 0.0, length = N_LAMBDA_STATES))
-scheduler = DefaultLambdaScheduler(dual = true, intraLJ = true)
+scheduler = Molly.DefaultLambdaScheduler(dual = true, intraLJ = true)
 ```
 
 `HREMD_TIME` is the simulated time for each $\lambda$ state. One sample per state is written to that state's trajectory every `SAMPLE_TIME`, and the first `EQUIL_FRAC` of the samples of each state are discarded before MBAR.
@@ -2325,13 +2367,13 @@ function read_state_samples(sys_base, traj_prefix, K)
 end
 ```
 
-Every sample is then evaluated in every state with [`assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
+Every sample is then evaluated in every state with [`Molly.assemble_mbar_inputs`](@ref), and the MBAR equations are solved with [`Molly.iterate_mbar`](@ref). All states start from the same fully coupled configuration, so the first 20% of the samples of each state are discarded. The free energies are dimensionless, in units of $k_B T$.
 
 ```julia
 function hremd_free_energies(thermo_states, coords_k, boundaries_k)
     K = length(thermo_states)
     coords_dev = [[Molly.to_device(c, AT) for c in v] for v in coords_k]
-    mbar_gen = assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
+    mbar_gen = Molly.assemble_mbar_inputs(coords_dev, boundaries_k, thermo_states)
 
     # Index of every sample within its own state, to discard the start of each state
     sample_idx = zeros(Int, length(mbar_gen.win_of))
@@ -2346,7 +2388,7 @@ function hremd_free_energies(thermo_states, coords_k, boundaries_k)
 
     win_of = mbar_gen.win_of[kept]
     N_counts = [count(==(k), win_of) for k in 1:K]
-    F_k, logN = iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
+    F_k, logN = Molly.iterate_mbar(mbar_gen.u[kept, :], win_of, N_counts)
 
     return F_k
 end

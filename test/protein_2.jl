@@ -5,7 +5,7 @@
         strictness=:nowarn,
     )
     show(devnull, ff)
-    @test_throws ForceFieldXMLError MolecularForceField(
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(
         joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
         strictness=:error,
     )

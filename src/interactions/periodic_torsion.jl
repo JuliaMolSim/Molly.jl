@@ -1,5 +1,7 @@
 export PeriodicTorsion
 
+@public PeriodicTorsionλ
+
 @doc raw"""
     PeriodicTorsion(; periodicities, phases, ks, proper)
 
@@ -127,7 +129,40 @@ end
     return E
 end
 
-# λ version of `PeriodicTorsion` for alchemical systems, built by `to_lambda_function`.
+@doc raw"""
+    PeriodicTorsionλ(; periodicities, phases, ks, proper, λ_mixing=MinimumMixing(),
+                     scheduler=Molly.DefaultLambdaScheduler())
+
+A periodic torsion angle between four atoms in an alchemical system, the λ version of
+[`PeriodicTorsion`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`PeriodicTorsion`](@ref) to this type.
+`phases` and `ϕ` are as for [`PeriodicTorsion`](@ref).
+The weights below depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of
+the atoms mixed with `λ_mixing`.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
+
+In dual topology the potential energy is defined as
+```math
+V(\phi) = w \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
+```
+where ``w = 1 - \lambda`` if the torsion involves a core atom with the parameters of state A,
+``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
+involves only unique and environment atoms.
+
+In single topology the first half of the terms are those of state A and the second half are
+those of state B, and the potential energy is defined as
+```math
+V(\phi) = w_A V_A(\phi) + w_B V_B(\phi)
+```
+where ``V_A`` and ``V_B`` are the [`PeriodicTorsion`](@ref) potential energies of the two
+halves.
+``w_A = 1 - \lambda`` and ``w_B = \lambda`` if the torsion involves a core atom, and
+``w_A = w_B = 1`` otherwise.
+
+Only compatible with 3D systems.
+"""
 struct PeriodicTorsionλ{N, T, E, LM, SCH} <: AlchemicalBondedInteraction
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}
@@ -154,6 +189,28 @@ function PeriodicTorsionλ(; periodicities, phases, ks, proper::Bool=true,
 end
 
 is_torsion(::PeriodicTorsionλ) = true
+
+parameter_prefix(inter::PeriodicTorsionλ, inter_type) =
+    (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
+
+n_parameters(::Type{<:PeriodicTorsionλ{N}}) where {N} = 2 * N
+
+parameter_keys(::Type{<:PeriodicTorsionλ{N}}) where {N} =
+    (ntuple(torsion_phase_key, N)..., ntuple(torsion_k_key, N)...)
+
+parameter_values(inter::PeriodicTorsionλ) = (inter.phases..., inter.ks...)
+
+@inline function inject_parameters(inter::PeriodicTorsionλ{N, T, E, LM, SCH},
+                                   vals::Tuple) where {N, T, E, LM, SCH}
+    return PeriodicTorsionλ{N, T, E, LM, SCH}(
+        inter.periodicities,
+        ntuple(i -> convert_parameter(T, vals[i]    ), N),
+        ntuple(i -> convert_parameter(E, vals[N + i]), N),
+        inter.proper,
+        copied_field(inter.λ_mixing),
+        copied_field(inter.scheduler),
+    )
+end
 
 function Base.zero(d::PeriodicTorsionλ{N, T, E}) where {N, T, E}
     return PeriodicTorsionλ(

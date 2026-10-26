@@ -20,7 +20,8 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
             atoms=atoms,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true, scheduler=LinearLambdaScheduler(dual=true)),),
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
+                             scheduler=Molly.LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")
@@ -82,7 +83,7 @@ mutable struct TSSSampleCounter
     n::Int
 end
 
-Molly.log_tss_sample!(counter::TSSSampleCounter, sample::TSSSample) = (counter.n += 1; counter)
+Molly.log_tss_sample!(counter::TSSSampleCounter, sample::Molly.TSSSample) = (counter.n += 1; counter)
 
 function tss_sample_record(sample)
     return (

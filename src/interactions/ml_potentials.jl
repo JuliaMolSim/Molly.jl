@@ -4,9 +4,9 @@
 # function stubs live here in core Molly. The implementations that need Lux/HDF5/
 # KernelAbstractions are in ext/MollyLuxExt.jl (loaded when Lux and HDF5 are available).
 
-export
-    ANIPotential,
-    ani2x_data_dir,
+export ANIPotential
+
+@public ani2x_data_dir,
     compute_aevs
 
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
@@ -27,8 +27,12 @@ celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
 """
     ANIPotential(path; T=Float32, ensemble_idx=nothing)
 
+The ANI potential implemented as an AtomsCalculators.jl calculator.
+
+See [Smith et al. 2017](https://doi.org/10.1039/c6sc05720a).
 Load an ANI-2x neural network potential from an HDF5 file exported by
-`test/torchani_reference.py`. Requires `Lux` and `HDF5` to be loaded.
+`test/torchani_reference.py`, such as the one provided by [`Molly.ani2x_data_dir`](@ref).
+Requires `Lux` and `HDF5` to be loaded.
 
 The system's `atoms_data` is required, since the element of each atom is read from
 `atoms_data[i].element`. The supported elements are H, C, N, O, S, F and Cl.
@@ -38,7 +42,7 @@ By default all ensemble members are loaded and their energies averaged. Pass
 
 Coordinates without units are treated as nm following the Molly convention, and
 converted internally to the Å the ANI parameters use. Periodic systems must use a
-neighbor finder; the neighbor-list path applies the minimum-image convention.
+neighbor finder.
 
 Note: the ANI-2x weights are `Float32`, so the energy/force paths run in `Float32`
 internally regardless of the system's coordinate type.
@@ -66,7 +70,7 @@ end
 
 Path to the ANI-2x data directory: a lazily-downloaded artifact holding `ani2x.h5` (the model
 weights) and `6mrr_ani2x.json` (TorchANI reference energies). Requires `Lux` and `HDF5`. Load
-the potential with `ANIPotential(joinpath(ani2x_data_dir(), "ani2x.h5"))`.
+the potential with `ANIPotential(joinpath(Molly.ani2x_data_dir(), "ani2x.h5"))`.
 """
 function ani2x_data_dir end
 
@@ -74,9 +78,9 @@ function ani2x_data_dir end
     compute_aevs(coords, species_indices, neighbors, boundary, aev_params, n_species)
 
 Compute the Atomic Environment Vectors (AEVs) for all atoms, returning an
-`(n_atoms, aev_length)` matrix. `neighbors` is a `NeighborList` (or `nothing` for an all-pairs
-build). This is the reference AEV path; the GPU-portable kernel version is `compute_aevs_ka`.
-Requires `Lux` and `HDF5`. Implementation is in ext/MollyLuxExt.jl.
+`(n_atoms, aev_length)` matrix, as used by [`ANIPotential`](@ref). `neighbors` is a
+[`NeighborList`](@ref) (or `nothing` for an all-pairs build).
+Requires `Lux` and `HDF5`.
 """
 function compute_aevs end
 
@@ -94,4 +98,11 @@ end
 # On-device analytic ANI forces (implementation in ext/MollyLuxExt.jl).
 function compute_ani_forces_ka(args...; kwargs...)
     error("compute_ani_forces_ka requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(::SystemConversion, ::ANIPotential)
+    throw(ArgumentError("ANIPotential can not be converted to another float type, unit " *
+                        "setting or device, it should be given to the new system with the " *
+                        "general_inters keyword argument"))
 end

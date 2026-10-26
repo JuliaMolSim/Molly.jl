@@ -1,7 +1,8 @@
 export
     AbsoluteFESystem,
-    set_lambda!,
     RelativeFESystem
+
+@public set_lambda!
 
 ### Checks for hybrid system ###
 # same atoms in environment in both A and B
@@ -235,6 +236,9 @@ end
 function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT, LJsoftcore_params=(;),
                                 Csoftcore_params=(;))
     return map(sys.pairwise_inters) do inter
+        if inter isa DoubleExponential
+            return to_lambda_function(inter; scheduler=scheduler, λ_mixing=MinimumMixing())
+        end
         lj = inter isa LennardJones
         softcore = softcore_dic[lj ? LJsoftcore : Csoftcore]
         to_lambda_function(inter, softcore; scheduler=scheduler, λ_mixing=MinimumMixing(),
@@ -275,22 +279,23 @@ end
 """
     set_lambda!(sys, λ)
 
-Set the global λ of an alchemical system in place, without rebuilding it.
+Set the global λ of an alchemical system, as set up by [`AbsoluteFESystem`](@ref) or
+[`RelativeFESystem`](@ref), in place without rebuilding it.
 
-Only the λ of the alchemical atoms, the mesh weight of [`PME`](@ref)'s two grid form and the
-precomputed factors of the λ dispersion correction depend on λ; the neighbor masks, the interaction
+Only the λ of the alchemical atoms, the mesh weight of [`Molly.PME_λ`](@ref) and the
+precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
 lists, the topology, the constraints and the virtual sites do not, which is what makes this much
 cheaper than building the system again. Environment atoms keep λ = 1.
 
 A ladder of states can share everything λ-independent:
 
 ```julia
-states = [set_lambda!(System(sys), λ) for λ in 0:0.1:1]
+states = [Molly.set_lambda!(System(sys), λ) for λ in 0:0.1:1]
 ```
 
 `System(sys)` shares its arrays, so the masks exist once, but the states then also share the scratch
-buffers of `PME` and of any constraint algorithm. States run at the same time need their own, which
-`ReplicaSystem` arranges through `remd_unshared`; a hand-written threaded loop over states does not.
+buffers of [`PME`](@ref) and of any constraint algorithm. States run at the same time need their
+own, which [`ReplicaSystem`](@ref) arranges; a hand-written threaded loop over states does not.
 """
 function set_lambda!(sys::System, λ)
     FT = float_type(sys)
@@ -342,7 +347,7 @@ end
 
 """
     AbsoluteFESystem(sys, global_λ, mapping; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up an alchemical system for an absolute free energy calculation, in which the atoms in
@@ -357,16 +362,17 @@ random velocities are generated at `temp`.
 - `global_λ`: the global λ of the system, from 0 (coupled) to 1 (decoupled).
 - `mapping`: a vector with the indices of the atoms to decouple.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaABFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
-    1-4 parameters (e.g. CHARMM) use the same soft core.
+    1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
+    interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
 - `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
@@ -448,7 +454,7 @@ end
 
 """
     RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp=298.0u"K",
-                     scheduler=DefaultLambdaScheduler(dual=true), loggers=(),
+                     scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
                      LJsoftcore=:gapsys, Csoftcore=:gapsys)
 
 Set up a hybrid system for a relative free energy calculation that transforms system A
@@ -468,22 +474,23 @@ of A and as a massless copy with the parameters of B. Interactions are replaced 
 - `global_λ`: the global λ of the system, from 0 (state A) to 1 (state B).
 - `mapping`: a dictionary of atom index vectors, where `"core"` and `"unique_A"` index into
     `sysA` and `"unique_B"` into `sysB`. An `"env"` entry is added to it. An atom unique to one
-    end state can not be bonded to an atom outside the mapping, as it is switched off at the
+    end state cannot be bonded to an atom outside the mapping, as it is switched off at the
     other end state; such an atom belongs in `"core"`, where only its parameters change, which
     is how a covalently bound ligand is set up.
 - `core_mapAB`: a dictionary from each core atom index in `sysA` to its index in `sysB`.
 - `temp=298.0u"K"`: the temperature used to generate random velocities.
-- `scheduler=DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
+- `scheduler=Molly.DefaultLambdaScheduler(dual=true)`: the lambda scheduler that turns `global_λ`
     into the couplings of the steric, electrostatic and bonded interactions, for example
-    [`DefaultLambdaScheduler`](@ref), [`GROMACSLambdaRBFEScheduler`](@ref) or
-    [`OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and `dual=false`
-    single topology (parameter scaling), which does not support `intraLJ=true`.
+    [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaRBFEScheduler`](@ref) or
+    [`Molly.OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and
+    `dual=false` single topology (parameter scaling), which does not support `intraLJ=true`.
 - `loggers=()`: the loggers that record properties of interest during a simulation.
 - `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
-    1-4 parameters (e.g. CHARMM) use the same soft core.
+    1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
+    interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
 - `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
@@ -601,7 +608,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         cB = coordsB[core_mapAB[i]]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=aA.atom_type, mass=aA.mass, charge=aA.charge, σ=aA.σ, ϵ=aA.ϵ, 
-                                                λ=FT(global_λ), alch_role=CoreDRole))
+                              λ=FT(global_λ), alch_role=CoreDRole))
             if chain!=dA.chain_id
                 chain = dA.chain_id
                 res_n = 0
@@ -612,7 +619,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 res_n = dA.res_number
             end
             push!(Data, AtomData(atom_type=dA.atom_type, atom_name=dA.atom_name, res_number=res_number,
-                                        res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom))
+                                 res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom,
+                                 charge_type=dA.charge_type))
             push!(Coords, cA)
             mapping_A[i] = counter
             push!(unique_groups["sysA"], counter)
@@ -625,14 +633,15 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 push!(Virtual, OneParticleSite(counter, counter-1, weight_cross))
             end
             push!(Data, AtomData(atom_type=dB.atom_type, atom_name=dB.atom_name, res_number=dB.res_number,
-                                        res_name=dB.res_name, chain_id=dB.chain_id, element=dB.element, hetero_atom=dB.hetero_atom))
+                                 res_name=dB.res_name, chain_id=dB.chain_id, element=dB.element, hetero_atom=dB.hetero_atom,
+                                 charge_type=dB.charge_type))
             push!(Coords, zero(cB))
             mapping_B[core_mapAB[i]] = counter
             push!(unique_groups["sysB"], counter)
             counter += 1
         else
             push!(Atoms, Atom(index=counter, atom_type=aA.atom_type, mass=aA.mass, charge=(aA.charge, aB.charge), σ=(aA.σ, aB.σ), ϵ=(aA.ϵ, aB.ϵ),
-                                                λ=FT(global_λ), alch_role=CoreRole))
+                              λ=FT(global_λ), alch_role=CoreRole))
             if chain!=dA.chain_id
                 chain = dA.chain_id
                 res_n = 0
@@ -643,7 +652,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 res_n = dA.res_number
             end
             push!(Data, AtomData(atom_type=dA.atom_type, atom_name=dA.atom_name, res_number=res_number,
-                                        res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom))
+                                 res_name=dA.res_name, chain_id=dA.chain_id, element=dA.element, hetero_atom=dA.hetero_atom,
+                                 charge_type=dA.charge_type))
             push!(Coords, cA)
             mapping_A[i] = counter
             mapping_B[core_mapAB[i]] = counter
@@ -657,11 +667,11 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsA[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(global_λ), alch_role=DeleteRole))
+                              λ=FT(global_λ), alch_role=DeleteRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(a.charge, zero(a.charge)), 
-                                    σ=(a.σ, a.σ), ϵ=(a.ϵ, zero(a.ϵ)), 
-                                    λ=FT(global_λ), alch_role=DeleteRole))
+                              σ=(a.σ, a.σ), ϵ=(a.ϵ, zero(a.ϵ)), 
+                              λ=FT(global_λ), alch_role=DeleteRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -673,7 +683,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_A[i] = counter
         push!(unique_groups["sysA"], counter)
@@ -685,11 +696,11 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsB[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(global_λ), alch_role=InsertRole))
+                              λ=FT(global_λ), alch_role=InsertRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(zero(a.charge), a.charge), 
-                                    σ=(a.σ, a.σ), ϵ=(zero(a.ϵ),   a.ϵ),
-                                    λ=FT(global_λ), alch_role=InsertRole))
+                              σ=(a.σ, a.σ), ϵ=(zero(a.ϵ),   a.ϵ),
+                              λ=FT(global_λ), alch_role=InsertRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -701,7 +712,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_B[i] = counter
         push!(unique_groups["sysB"], counter)
@@ -713,10 +725,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         c = coordsA[i]
         if scheduler.dual
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=a.charge, σ=a.σ, ϵ=a.ϵ, 
-                                                λ=FT(1.0), alch_role=EnvRole))
+                              λ=FT(1.0), alch_role=EnvRole))
         else
             push!(Atoms, Atom(index=counter, atom_type=a.atom_type, mass=a.mass, charge=(a.charge, a.charge), σ=(a.σ, a.σ), ϵ=(a.ϵ, a.ϵ),
-                                    λ=FT(1.0), alch_role=EnvRole))
+                              λ=FT(1.0), alch_role=EnvRole))
         end
         if chain!=d.chain_id
             chain = d.chain_id
@@ -728,7 +740,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
             res_n = d.res_number
         end
         push!(Data, AtomData(atom_type=d.atom_type, atom_name=d.atom_name, res_number=res_number,
-                                    res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom))
+                             res_name=d.res_name, chain_id=d.chain_id, element=d.element, hetero_atom=d.hetero_atom,
+                             charge_type=d.charge_type))
         push!(Coords, c)
         mapping_A[i] = counter
         counter += 1

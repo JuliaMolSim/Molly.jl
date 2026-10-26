@@ -8,6 +8,16 @@ export
     CubicSplineCutoff,
     PolynomialCutoff
 
+@public AbstractCutoff
+
+"""
+Base type for non-bonded interaction cutoffs.
+
+The parameter `P` is the number of cutoff points: 0 for [`NoCutoff`](@ref), 1 for cutoffs
+with a `dist_cutoff` field such as [`DistanceCutoff`](@ref), and 2 for cutoffs that also
+have a `dist_activation` field such as [`CubicSplineCutoff`](@ref).
+Custom cutoffs should subtype this.
+"""
 abstract type AbstractCutoff{P} end
 
 Base.:+(c1::T, ::T) where {T <: AbstractCutoff} = c1

@@ -1,10 +1,13 @@
 export RBTorsion
 
+@public RBTorsionλ
+
 @doc raw"""
     RBTorsion(; c0, c1, c2, c3, c4, c5)
 
 A Ryckaert-Bellemans torsion angle between four atoms.
 
+See [Ryckaert and Bellemans 1975](https://doi.org/10.1016/0009-2614(75)85513-8).
 The potential energy is defined as
 ```math
 V(\phi) = \sum_{n=0}^{5} C_n \cos^n(\psi)
@@ -68,8 +71,32 @@ end
                                cos_ψ * (d.c4 + cos_ψ * d.c5))))
 end
 
-# λ version of `RBTorsion` for alchemical systems, built by `to_lambda_function`. The torsion
-# itself is evaluated by `RBTorsion` and scaled by the λ prefactor of the four atoms.
+@doc raw"""
+    RBTorsionλ(; c0, c1, c2, c3, c4, c5, λ_mixing=MinimumMixing(),
+               scheduler=Molly.DefaultLambdaScheduler())
+
+A Ryckaert-Bellemans torsion angle between four atoms in an alchemical system, the λ version
+of [`RBTorsion`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`RBTorsion`](@ref)
+to this type.
+The potential energy is defined as
+```math
+V(\phi) = w \sum_{n=0}^{5} C_n \cos^n(\psi)
+```
+where ``\psi`` and the sign convention of the coefficients are as for [`RBTorsion`](@ref),
+and the weight ``w`` depends on the alchemical roles of the atoms and on ``\lambda``, the `λ`
+of the atoms mixed with `λ_mixing`.
+``w = 1 - \lambda`` if the torsion involves a core atom with the parameters of state A,
+``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
+involves only unique and environment atoms.
+
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which has to use dual topology.
+Single topology is not supported for this interaction, so [`RelativeFESystem`](@ref) throws
+an error if the scheduler has `dual=false`.
+
+Only compatible with 3D systems.
+"""
 @kwdef struct RBTorsionλ{T, LM, SCH} <: AlchemicalBondedInteraction
     c0::T
     c1::T
@@ -80,6 +107,9 @@ end
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+parameter_prefix(::RBTorsionλ, inter_type) = "inter_RB_$(inter_type)_"
+parameter_fields(::Type{<:RBTorsionλ}) = parameter_fields(RBTorsion)
 
 function Base.zero(t::RBTorsionλ)
     return RBTorsionλ(c0=zero.(t.c0), c1=zero.(t.c1), c2=zero.(t.c2), c3=zero.(t.c3),

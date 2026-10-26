@@ -1,7 +1,26 @@
 # Mixing functions for non-bonded parameters
 
+@public LJZeroShortcut,
+    BuckinghamZeroShortcut,
+    LorentzMixing,
+    GeometricMixing,
+    WaldmanHaglerMixing,
+    FenderHalseyMixing,
+    InverseMixing,
+    MinimumMixing,
+    ProductMixing,
+    ExceptionList,
+    MixingException
+
 shortcut_pair(::Nothing, args...) = false
 
+"""
+    LJZeroShortcut()
+
+Skip a pairwise interaction when the `σ` or `ϵ` of either atom is zero.
+
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct LJZeroShortcut end
 
 function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
@@ -9,6 +28,13 @@ function shortcut_pair(::LJZeroShortcut, atom_i, atom_j, args...)
            iszero_value(atom_i.σ) || iszero_value(atom_j.σ) 
 end
 
+"""
+    BuckinghamZeroShortcut()
+
+Skip a pairwise interaction when the `A` or `C` of either atom is zero.
+
+Give this when setting up a pairwise interaction such as [`Buckingham`](@ref).
+"""
 struct BuckinghamZeroShortcut end
 
 function shortcut_pair(::BuckinghamZeroShortcut, atom_i, atom_j, args...)
@@ -27,6 +53,17 @@ end
 # Extra Atom fields that a mixing rule reads
 mixing_atom_fields(mr) = ()
 
+@doc raw"""
+    LorentzMixing()
+
+Mix parameters according to their arithmetic mean.
+
+For example:
+```math
+\sigma_{ij} = \frac{\sigma_i + \sigma_j}{2}
+```
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct LorentzMixing end
 
 function xy_mixing(::LorentzMixing, x, y, args...) 
@@ -49,6 +86,17 @@ A_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.A , at
 B_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.B , atom_j.B, args...)
 C_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C , atom_j.C, args...)
 
+@doc raw"""
+    GeometricMixing()
+
+Mix parameters according to their geometric mean.
+
+For example:
+```math
+\varepsilon_{ij} = \sqrt{\varepsilon_i \varepsilon_j}
+```
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct GeometricMixing end
 
 function xy_mixing(::GeometricMixing, x, y, args...) 
@@ -70,6 +118,20 @@ A_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.A, a
 B_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.B, atom_j.B, args...)
 C_mixing(m::GeometricMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C, atom_j.C, args...)
 
+@doc raw"""
+    WaldmanHaglerMixing()
+
+Mix `σ` and `ϵ` parameters according to the Waldman-Hagler rules.
+
+See [Waldman and Hagler 1993](https://doi.org/10.1002/jcc.540140909).
+```math
+\begin{aligned}
+\sigma_{ij} &= \left( \frac{\sigma_i^6 + \sigma_j^6}{2} \right)^{\frac{1}{6}} \\
+\varepsilon_{ij} &= 2 \sqrt{\varepsilon_i \varepsilon_j} \frac{\sigma_i^3 \sigma_j^3}{\sigma_i^6 + \sigma_j^6}
+\end{aligned}
+```
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct WaldmanHaglerMixing end
 
 function σ_mixing(::WaldmanHaglerMixing, atom_i, atom_j, args...)
@@ -81,12 +143,33 @@ function ϵ_mixing(::WaldmanHaglerMixing, atom_i, atom_j, args...)
     return 2 * sqrt(atom_i.ϵ * atom_j.ϵ) * ((atom_i.σ^3 * atom_j.σ^3) / (atom_i.σ^6 + atom_j.σ^6))
 end
 
+@doc raw"""
+    FenderHalseyMixing()
+
+Mix `ϵ` parameters according to the Fender-Halsey rule.
+
+See [Fender and Halsey 1962](https://doi.org/10.1063/1.1701284).
+```math
+\varepsilon_{ij} = \frac{2 \varepsilon_i \varepsilon_j}{\varepsilon_i + \varepsilon_j}
+```
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct FenderHalseyMixing end
 
 function ϵ_mixing(::FenderHalseyMixing, atom_i, atom_j, args...)
     return (2 * atom_i.ϵ * atom_j.ϵ) / (atom_i.ϵ + atom_j.ϵ)
 end
 
+@doc raw"""
+    InverseMixing()
+
+Mix `B` parameters according to their harmonic mean.
+
+```math
+B_{ij} = \frac{2}{\frac{1}{B_i} + \frac{1}{B_j}}
+```
+Give this when setting up a pairwise interaction such as [`Buckingham`](@ref).
+"""
 struct InverseMixing end
 
 B_mixing(::InverseMixing, atom_i, atom_j, args...) = 2 / (inv(atom_i.B) + inv(atom_j.B))
@@ -104,8 +187,48 @@ function get_pair(d::Dict, i, j, default)
     end
 end
 
-# GPU-compatible dictionary-like object for pair lookup
-struct ExceptionList{N, K, V}
+@doc raw"""
+    MinimumMixing()
+
+Mix `λ` parameters by taking the minimum over the atoms in an interaction.
+
+For an interaction between atoms ``i``, ``j``, ``k``, ...:
+```math
+\lambda_{ijk \dots} = \min(\lambda_i, \lambda_j, \lambda_k, \dots)
+```
+This works for pairwise and specific interactions with any number of atoms.
+Give this when setting up an alchemical interaction, where it is the default.
+"""
+struct MinimumMixing end
+
+@inline λ_mixing(m::MinimumMixing, atoms::Tuple, args...) = min(map(a -> a.λ, atoms)...)
+
+@doc raw"""
+    ProductMixing()
+
+Mix `λ` parameters according to their product.
+
+```math
+\lambda_{ij} = \lambda_i \lambda_j
+```
+This only works for interactions between two atoms.
+Give this when setting up an alchemical interaction.
+"""
+struct ProductMixing end
+
+@inline λ_mixing(m::ProductMixing, (a, b), args...) = a.λ * b.λ
+
+"""
+    ExceptionList(dict)
+    ExceptionList(keys, values)
+
+Define a set of atom pairs that have a specified mixing value.
+
+For example, giving `Dict((1, 2) => 0.3u"nm")` means that pairs of atom type
+1 and 2 have a σ value of 0.3 nm.
+Provide when setting up a [`Molly.MixingException`](@ref).
+"""
+struct ExceptionList{N, K, V} # GPU-compatible dictionary-like object for pair lookup
     keys::SVector{N, K}
     values::SVector{N, V}
 end
@@ -130,7 +253,15 @@ function get_pair(d::ExceptionList{N}, i, j, default) where N
     return val
 end
 
-# Provide exceptions (NBFix) for specific pairs of atom types
+"""
+    MixingException(mixing, exceptions)
+
+Provide mixing exceptions (NBFix) for specific pairs of atom types.
+
+`mixing` is a mixing rule such as [`Molly.LorentzMixing`](@ref), used for pairs that are not
+exceptions, and `exceptions` is a [`Molly.ExceptionList`](@ref) keyed by atom type.
+Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
+"""
 struct MixingException{M, E}
     mixing::M
     exceptions::E
@@ -151,18 +282,4 @@ end
 @inline function λ_mixing(me::MixingException, atom_i, atom_j, args...)
     default = λ_mixing(me.mixing, atom_i, atom_j, args...)
     return get_pair(me.exceptions, atom_i.atom_type, atom_j.atom_type, default)
-end
-
-struct MinimumMixing end
-
-# The mixing gets the atoms of an interaction (2 to 5), so a mixing rule can use any atom field;
-#   this one takes the smallest λ
-@inline function λ_mixing(m::MinimumMixing, atoms::Tuple, args...)
-    return min(map(a -> a.λ, atoms)...)
-end
-
-struct ProductMixing end
-
-@inline function λ_mixing(m::ProductMixing, (a, b), args...)
-    return a.λ*b.λ
 end

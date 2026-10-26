@@ -210,7 +210,7 @@
         core = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
         ref_inter = LennardJones()
         # intraLJ=true keeps the sterics between alchemical atoms of the same role on
-        scheduler = DefaultLambdaScheduler(intraLJ=true)
+        scheduler = Molly.DefaultLambdaScheduler(intraLJ=true)
 
         for inter in (LennardJonesSoftCoreBeutler(α=0.3, scheduler=scheduler),
                       LennardJonesSoftCoreGapsys(α=0.85, scheduler=scheduler))
@@ -400,7 +400,7 @@
 
     @testset "Scaled Coulomb matches pre-scaled charges" begin
         λ_state = 0.75
-        scheduler = DefaultLambdaScheduler()
+        scheduler = Molly.DefaultLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         raw_i = Atom(charge=1.0, λ=λ_state, alch_role=Molly.InsertRole)
         raw_j = Atom(charge=-0.8, λ=λ_state, alch_role=Molly.InsertRole)
@@ -411,10 +411,10 @@
         rc_test = 1.0u"nm"
 
         for (scaled_inter, ref_inter, ref_i, ref_j) in (
-            (CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
-            (CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            (Molly.CoulombScaled(scheduler=scheduler), Coulomb(), pair_i, pair_j),
+            (Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
              CoulombReactionField(dist_cutoff=rc_test), pair_i, pair_j),
-            (CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            (Molly.CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
              CoulombEwald(dist_cutoff=rc_test), charge_i, charge_j),
         )
             @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
@@ -439,9 +439,9 @@
         off_j = Atom(charge=-0.8, λ=0.25, alch_role=Molly.InsertRole)
         dr_zero = zero(dr12)
         for scaled_inter in (
-            CoulombScaled(scheduler=scheduler),
-            CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
-            CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            Molly.CoulombScaled(scheduler=scheduler),
+            Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test, scheduler=scheduler),
+            Molly.CoulombEwaldScaled(dist_cutoff=rc_test, scheduler=scheduler),
         )
             @test all(iszero, force(scaled_inter, dr12, off_i, off_j))
             @test iszero(potential_energy(scaled_inter, dr12, off_i, off_j))
@@ -449,10 +449,10 @@
             @test iszero(potential_energy(scaled_inter, dr_zero, raw_i, raw_j))
         end
 
-        scheduler = EleScaledLambdaScheduler()
+        scheduler = Molly.EleScaledLambdaScheduler()
         λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
         ref_i, ref_j = Atom(charge=1.0 * λ_elec), Atom(charge=-0.8)
-        scaled_inter = CoulombScaled(scheduler=scheduler)
+        scaled_inter = Molly.CoulombScaled(scheduler=scheduler)
 
         @test isapprox(force(scaled_inter, dr12, raw_i, raw_j),
                        force(Coulomb(), dr12, ref_i, ref_j);
@@ -669,6 +669,157 @@
         end
     end
 
+    @testset "Reaction field solute dielectric" begin
+        @testset "matches GROMACS" begin
+            # Three charges in one-atom molecules, so without exclusions, run with GROMACS
+            #   2026.0 (coulombtype = reaction-field, rcoulomb = 1.1, epsilon-rf = 0 for Inf)
+            # The GROMACS Coulomb (SR) energy includes the self term -epsfac * c_rf * Σq² / 2
+            coords_gmx = [SVector(1.0, 1.0, 1.0), SVector(1.47, 1.0, 1.0),
+                          SVector(1.3, 1.6, 1.2)]
+            charges_gmx = [1.0, -1.0, 0.5]
+            atoms_gmx = [Atom(mass=1.0, charge=q, σ=0.0, ϵ=0.0) for q in charges_gmx]
+            rc_gmx = 1.1
+            # (epsilon-r, epsilon-rf) => (Coulomb (SR), forces)
+            gmx_refs = (
+                (1.0, 80.0) => (-335.725525, [SVector(5.35412e+02, -9.07861e+01, -3.02620e+01),
+                                              SVector(-6.14141e+02, 1.17657e+02, 3.92189e+01),
+                                              SVector(7.87291e+01, -2.68706e+01, -8.95688e+00)]),
+                (2.5, 30.0) => (-133.567307, [SVector(2.15519e+02, -3.75842e+01, -1.25281e+01),
+                                              SVector(-2.48006e+02, 4.83324e+01, 1.61108e+01),
+                                              SVector(3.24863e+01, -1.07483e+01, -3.58275e+00)]),
+                (15.0, 80.0) => (-22.098209, [SVector(3.62253e+01, -6.55034e+00, -2.18345e+00),
+                                              SVector(-4.18639e+01, 8.34172e+00, 2.78057e+00),
+                                              SVector(5.63866e+00, -1.79138e+00, -5.97125e-01)]),
+                (15.0, Inf) => (-22.403847, [SVector(3.56526e+01, -6.01351e+00, -2.00450e+00),
+                                             SVector(-4.08708e+01, 7.80488e+00, 2.60163e+00),
+                                             SVector(5.21814e+00, -1.79138e+00, -5.97126e-01)]),
+            )
+            ke = ustrip(Molly.coulomb_const)
+            for ((ϵr, ϵrf), (E_gmx, fs_gmx)) in gmx_refs
+                sys_gmx = System(
+                    atoms=atoms_gmx,
+                    coords=coords_gmx,
+                    boundary=CubicBoundary(5.0),
+                    pairwise_inters=(CoulombReactionField(dist_cutoff=rc_gmx,
+                                        solvent_dielectric=ϵrf, solute_dielectric=ϵr,
+                                        coulomb_const=ke),),
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+                _, crf = Molly.reaction_field_constants(rc_gmx, ϵrf, ϵr)
+                E_self = -ke / ϵr * crf * sum(abs2, charges_gmx) / 2
+                # GROMACS runs in single precision
+                @test isapprox(potential_energy(sys_gmx) + E_self, E_gmx; rtol=1e-6)
+                @test all(isapprox.(forces(sys_gmx), fs_gmx; rtol=2e-5))
+            end
+        end
+
+        ϵr, ϵrf = 2.5, 30.0
+        rc_test = 1.0u"nm"
+        a_rf = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+        a_l05 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5,
+                     alch_role=Molly.CoreIRole)
+        crf_ref = CoulombReactionField(dist_cutoff=rc_test, solvent_dielectric=ϵrf,
+                                       solute_dielectric=ϵr, weight_special=0.5)
+        rf_variants = (
+            Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test, solvent_dielectric=ϵrf,
+                                             solute_dielectric=ϵr, weight_special=0.5),
+            CoulombSoftCoreBeutlerReactionField(dist_cutoff=rc_test, solvent_dielectric=ϵrf,
+                                                solute_dielectric=ϵr, α=1.0,
+                                                weight_special=0.5),
+            CoulombSoftCoreGapsysReactionField(dist_cutoff=rc_test, solvent_dielectric=ϵrf,
+                                               solute_dielectric=ϵr, α=0.3, σQ=1.0u"nm",
+                                               weight_special=0.5),
+        )
+
+        @testset "variants match at lambda one" begin
+            for inter_rf in rf_variants, dr_test in (dr12, dr13, dr14), special in (false, true)
+                @test isapprox(force(inter_rf, dr_test, a_rf, a_rf, u"kJ * mol^-1 * nm^-1", special),
+                               force(crf_ref, dr_test, a_rf, a_rf, u"kJ * mol^-1 * nm^-1", special);
+                               atol=1e-9u"kJ * mol^-1 * nm^-1")
+                @test isapprox(potential_energy(inter_rf, dr_test, a_rf, a_rf, u"kJ * mol^-1", special),
+                               potential_energy(crf_ref, dr_test, a_rf, a_rf, u"kJ * mol^-1", special);
+                               atol=1e-9u"kJ * mol^-1")
+            end
+        end
+
+        @testset "special pairs use plain coulomb scaled by the solute dielectric" begin
+            for dr_test in (dr12, dr13)
+                @test isapprox(
+                    potential_energy(crf_ref, dr_test, a_rf, a_rf, u"kJ * mol^-1", true),
+                    potential_energy(Coulomb(), dr_test, a_rf, a_rf) * 0.5 / ϵr;
+                    atol=1e-9u"kJ * mol^-1",
+                )
+            end
+        end
+
+        @testset "soft-core potential is zero at cutoff" begin
+            dr_rc = SVector(rc_test, 0.0u"nm", 0.0u"nm")
+            for inter_rf in rf_variants[2:3]
+                @test isapprox(potential_energy(inter_rf, dr_rc, a_l05, a_l05),
+                               0.0u"kJ * mol^-1"; atol=1e-10u"kJ * mol^-1")
+            end
+        end
+
+        @testset "conducting boundary conditions match a scaled coulomb_const" begin
+            # Only for ε_rf = Inf do the constants not depend on the solute dielectric, so
+            #   dividing coulomb_const by it is then equivalent
+            crf_div = CoulombReactionField(dist_cutoff=rc_test, solvent_dielectric=Inf,
+                                           solute_dielectric=15)
+            crf_cc = CoulombReactionField(dist_cutoff=rc_test, solvent_dielectric=Inf,
+                                          coulomb_const=Molly.coulomb_const / 15)
+            for dr_test in (dr12, dr13, dr14)
+                @test isapprox(force(crf_div, dr_test, a_rf, a_rf), force(crf_cc, dr_test, a_rf, a_rf);
+                               atol=1e-9u"kJ * mol^-1 * nm^-1")
+                @test isapprox(potential_energy(crf_div, dr_test, a_rf, a_rf),
+                               potential_energy(crf_cc, dr_test, a_rf, a_rf);
+                               atol=1e-9u"kJ * mol^-1")
+            end
+        end
+
+        @testset "setup" begin
+            scrf = SetupCoulombReactionField(solvent_dielectric=ϵrf, solute_dielectric=ϵr)
+            coul = Molly.setup_coulomb_pairwise(scrf, 1.0, 0.5f0, true, false, Float32)
+            @test coul.solute_dielectric === 2.5f0
+            @test coul.solvent_dielectric === 30.0f0
+            @test SetupCoulombReactionField().solute_dielectric === 1.0
+        end
+
+        @testset "default dielectrics take the float type of the cutoff" begin
+            crf_f32 = CoulombReactionField(dist_cutoff=1.0f0u"nm")
+            @test crf_f32.solvent_dielectric === 78.3f0
+            @test crf_f32.solute_dielectric === 1.0f0
+            @test CoulombReactionField(dist_cutoff=1.0).solute_dielectric === 1.0
+            @test CoulombReactionField(dist_cutoff=1.0f0,
+                                       solvent_dielectric=78.3).solvent_dielectric === 78.3
+            @test Molly.CoulombReactionFieldScaled(dist_cutoff=1.0f0,
+                                    solvent_dielectric=Inf32).solute_dielectric === 1.0f0
+            @test CoulombSoftCoreBeutlerReactionField(dist_cutoff=1.0f0,
+                                    solvent_dielectric=78.3f0).solute_dielectric === 1.0f0
+            @test CoulombSoftCoreGapsysReactionField(dist_cutoff=1.0f0,
+                                    solvent_dielectric=78.3f0).solute_dielectric === 1.0f0
+        end
+
+        @testset "invalid dielectrics" begin
+            for (ϵrf_bad, ϵr_bad) in ((10.0, 15.0), (78.3, 0.0), (78.3, -1.0), (78.3, NaN),
+                                      (Inf, Inf), (0.0, 1.0), (-78.3, 1.0), (NaN, 1.0))
+                @test_throws ArgumentError SetupCoulombReactionField(
+                    solvent_dielectric=ϵrf_bad, solute_dielectric=ϵr_bad)
+                @test_throws ArgumentError CoulombReactionField(dist_cutoff=rc_test,
+                    solvent_dielectric=ϵrf_bad, solute_dielectric=ϵr_bad)
+                @test_throws ArgumentError Molly.CoulombReactionFieldScaled(dist_cutoff=rc_test,
+                    solvent_dielectric=ϵrf_bad, solute_dielectric=ϵr_bad)
+                @test_throws ArgumentError CoulombSoftCoreBeutlerReactionField(
+                    dist_cutoff=rc_test, solvent_dielectric=ϵrf_bad, solute_dielectric=ϵr_bad)
+                @test_throws ArgumentError CoulombSoftCoreGapsysReactionField(
+                    dist_cutoff=rc_test, solvent_dielectric=ϵrf_bad, solute_dielectric=ϵr_bad)
+            end
+
+            @test CoulombReactionField(dist_cutoff=rc_test, solvent_dielectric=15.0,
+                                       solute_dielectric=15.0).solute_dielectric == 15.0
+        end
+    end
+
     @testset "Soft-core Ewald" begin
         c4_ewald = SVector(1.05, 1.0, 1.0)u"nm"
         dr14_ewald = vector(c1, c4_ewald, boundary)
@@ -814,7 +965,7 @@
 
         @testset "default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = DefaultLambdaScheduler()
+            scheduler = Molly.DefaultLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [
@@ -844,7 +995,7 @@
                 atoms=atoms_raw,
                 coords=coords_pme,
                 boundary=boundary_pme,
-                pairwise_inters=(CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
+                pairwise_inters=(Molly.CoulombEwaldScaled(dist_cutoff=rc, scheduler=scheduler),),
                 general_inters=(PME(rc, atoms_raw, boundary_pme; scheduler=scheduler),),
             )
             sys_ref_full = System(
@@ -863,7 +1014,7 @@
 
         @testset "non-default scheduler matches pre-scaled charges" begin
             λ_state = 0.75
-            scheduler = EleScaledLambdaScheduler()
+            scheduler = Molly.EleScaledLambdaScheduler()
             λ_elec = first(Molly.scale_elec_dual(scheduler, λ_state, Molly.InsertRole))
 
             atoms_raw = [

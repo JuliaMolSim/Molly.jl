@@ -20,7 +20,7 @@ See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHA
 [Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1) for RATTLE,
 [Elber et al. 2011](https://doi.org/10.1140/epjst/e2011-01525-9) for a derivation
 of the linear system solved to satisfy the RATTLE algorithm, and
-[Krautler et al. 2000](https://doi.org/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V)
+[Kräutler et al. 2001](https://doi.org/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V)
 for the M-SHAKE algorithm.
 
 # Arguments
@@ -36,7 +36,7 @@ for the M-SHAKE algorithm.
     angle constraints to be applied. If `nothing`, no angle constraints are applied.
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 - `max_iters=25`: the maximum number of iterations to perform when doing SHAKE. If this
-    number if iterations is reached, some constraints may not be satisfied.
+    number of iterations is reached, some constraints may not be satisfied.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error. Note that this only applies to constraint setup.
@@ -50,6 +50,21 @@ struct SHAKE_RATTLE{D, A, B, C, E, V}
     vel_tolerance::V
     gpu_block_size::Int
     max_iters::Int
+end
+
+function check_shake_tolerances(dist_tolerance, vel_tolerance, strictness)
+    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
+        err_str = "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
+    end
+
+    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
+        err_str = "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
+                  "to convergence issues"
+        report_issue(err_str, strictness)
+    end
+    return nothing
 end
 
 function SHAKE_RATTLE(; n_atoms,
@@ -71,17 +86,7 @@ function SHAKE_RATTLE(; n_atoms,
                             "provided to SHAKE_RATTLE"))
     end
 
-    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
-        err_str = "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
-                  "to convergence issues"
-        report_issue(err_str, strictness)
-    end
-
-    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
-        err_str = "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
-                  "to convergence issues"
-        report_issue(err_str, strictness)
-    end
+    check_shake_tolerances(dist_tolerance, vel_tolerance, strictness)
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
         throw(ArgumentError("constraints should be passed to SHAKE_RATTLE on CPU, data will " *
@@ -893,7 +898,7 @@ function shake_cpu!(clusters::StructArray{C},
                     max_iters,
                     n_threads,
                     shake_cluster_fn,
-                    other_kernel_args...) where {C <: ConstraintKernelData}
+                    other_kernel_args...) where {C <: AbstractConstraintKernelData}
     n_clusters = length(clusters)
     cluster_idxs  = getproperty.(Ref(clusters), idx_keys(C))
     cluster_dists = getproperty.(Ref(clusters), dist_keys(C))
@@ -934,7 +939,7 @@ function shake_gpu!(clusters::StructArray{C},
                     gpu_block_size,
                     backend,
                     shake_kernel,
-                    other_kernel_args...) where {C <: ConstraintKernelData}
+                    other_kernel_args...) where {C <: AbstractConstraintKernelData}
     N_active_clusters = length(clusters)
     kern = shake_step!(backend, gpu_block_size)
     active_idxs = allocate(backend, Int32, N_active_clusters)
@@ -1398,4 +1403,22 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca::SHAKE_RAT
 
     KernelAbstractions.synchronize(backend)
     return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
+end
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+# Constraints are converted on the CPU, the System constructor moves them to the device
+function convert_component(c::SystemConversion, sr::SHAKE_RATTLE)
+    clusters = map((sr.clusters12, sr.clusters23, sr.clusters34, sr.angle_clusters)) do cl
+        cl_cpu = host_constraint_clusters(cl)
+        if length(cl_cpu) == 0
+            return cl_cpu
+        else
+            return StructArray([convert_component(c, cd) for cd in cl_cpu])
+        end
+    end
+    dist_tolerance = convert_component(c, sr.dist_tolerance)
+    vel_tolerance = convert_component(c, sr.vel_tolerance)
+    check_shake_tolerances(dist_tolerance, vel_tolerance, c.strictness)
+    return SHAKE_RATTLE(clusters..., dist_tolerance, vel_tolerance, sr.gpu_block_size,
+                        sr.max_iters)
 end

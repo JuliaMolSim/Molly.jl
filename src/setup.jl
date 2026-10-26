@@ -3,13 +3,16 @@
 
 export
     place_atoms,
-    place_diatomics,
+    place_diatomics
+
+@public MissingResidueTemplateError,
     is_any_atom,
     is_heavy_atom,
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.default_rng())
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100,
+                rng=Random.default_rng())
 
 Generate random coordinates.
 
@@ -17,7 +20,7 @@ Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
-Can not be used if one or more dimensions has infinite boundaries.
+Cannot be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer,
                      boundary;
@@ -73,7 +76,7 @@ The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
 The keyword argument `aligned` determines whether the bonds all point the same direction
 (`true`) or random directions (`false`).
-Can not be used if one or more dimensions has infinite boundaries.
+Cannot be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer,
                          boundary,
@@ -430,6 +433,11 @@ function add_virtual_sites!(virtual_sites::Vector{<:VirtualSite{T, <:Any, P}}, t
     return virtual_sites
 end
 
+"""
+    MissingResidueTemplateError(msg)
+
+An error when a residue cannot be matched to a residue template.
+"""
 struct MissingResidueTemplateError <: Exception
     msg::String
 end
@@ -438,22 +446,42 @@ function Base.showerror(io::IO, e::MissingResidueTemplateError)
     return print(io, "MissingResidueTemplateError: ", e.msg)
 end
 
+# The charge type of each atom from the residue template it matched, see `charge_types` in
+#   `System`
+function charge_type_labels(charge_types, templates, template_of, template_id_of)
+    type_charges = Dict{String, Set{Any}}()
+    template_type_charges = Dict{Tuple{String, String}, Set{Any}}()
+    for t in templates, (type, q) in zip(t.types, t.charges)
+        push!(get!(Set{Any}, type_charges, type), q)
+        push!(get!(Set{Any}, template_type_charges, (t.name, type)), q)
+    end
+    return map(template_of, template_id_of) do t, m
+        type = t.types[m]
+        if charge_types == :atom_type || (charge_types == :auto && length(type_charges[type]) == 1)
+            return type
+        elseif charge_types == :template_type || (charge_types == :auto && length(template_type_charges[(t.name, type)]) == 1)
+            return "$(t.name)/$type"
+        else
+            # The type keeps these labels distinct from the template and type ones
+            return "$(t.name)/$type/$(t.atoms[m])"
+        end
+    end
+end
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
 Read a coordinate file in a file format readable by Chemfiles and apply a
-force field to it.
+force field, such as a [`MolecularForceField`](@ref), to it.
 
-Atom names should exactly match residue templates - no searching of residue
-templates is carried out.
+Each residue is matched to a residue template of the force field, and a
+[`Molly.MissingResidueTemplateError`](@ref) is thrown if no template matches.
 
 # Arguments
 - `boundary=nothing`: the bounding box used for simulation, read from the
     file by default.
 - `velocities=nothing`: the velocities of the atoms in the system, set to
     zero by default.
-- `loggers=()`: the loggers that record properties of interest during a
-    simulation.
 - `units::Bool=true`: whether to use Unitful quantities. Should match the
     corresponding argument used for the force field argument.
 - `array_type=Array`: the array type for the simulation, for example
@@ -464,7 +492,7 @@ templates is carried out.
     higher precision is useful, such as the potential energy and the virial.
     `Float64` by default, or `float_type` on backends that do not support
     `Float64` such as Metal.
-- `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
+- `dist_cutoff=1.0u"nm"`: cutoff distance for the non-bonded interactions.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     classical neighbor lists every few steps.
 - `constraints=:none`: which constraints to apply during the simulation, options
@@ -485,10 +513,10 @@ templates is carried out.
 - `lj_cutoff=nothing`: the cutoff method to use for the Lennard-Jones interaction,
     by default uses `DistanceCutoff(dist_cutoff)`. The cutoff distance must not exceed
     `dist_cutoff`. If the long-range Lennard-Jones dispersion correction is being used,
-    this must be a `DistanceCutoff`.
+    this must be a [`DistanceCutoff`](@ref).
 - `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
-    dispersion correction. Defaults to the force field setting, which defaults
-    to `true`.
+    dispersion correction, [`LJDispersionCorrection`](@ref). Defaults to the force
+    field setting, which defaults to `true`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.
@@ -514,6 +542,8 @@ templates is carried out.
 - `disulfide_bonds=true`: whether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     arguments to assign them.
+- `loggers=()`: the loggers that record properties of interest during a
+    simulation.
 - `n_threads=Threads.nthreads()`: the number of threads the simulation will likely
     be run on, used for example when setting up PME and implicit solvent. Only
     relevant when running on CPU.
@@ -522,12 +552,15 @@ templates is carried out.
 - `strictness=:warn`: determines behavior when encountering possible problems,
     options are `:warn` to emit warnings, `:nowarn` to suppress warnings or
     `:error` to error.
+- `charge_types=:auto`: how atoms are grouped into charge parameters for
+    [`extract_parameters`](@ref) and [`inject_gradients`](@ref) when the force field
+    takes charges from the residue templates, options are `:auto`, `:atom_type`,
+    `:template_type` or `:template_atom`. See [High-level gradient interface](@ref).
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
                 boundary=nothing,
                 velocities=nothing,
-                loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
                 float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
@@ -549,11 +582,17 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 disulfide_bonds::Bool=true,
+                loggers=(),
                 n_threads=Threads.nthreads(),
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                force_separate_lj14::Bool=false) where {AT <: AbstractArray}
+                force_separate_lj14::Bool=false,
+                charge_types::Symbol=:auto) where {AT <: AbstractArray}
     check_strictness(strictness)
+    if !(charge_types in (:auto, :atom_type, :template_type, :template_atom))
+        throw(ArgumentError("charge_types is $(repr(charge_types)), use :auto, :atom_type, " *
+                            ":template_type or :template_atom"))
+    end
     if units != force_field.units
         throw(ArgumentError("units argument to System is $units but force field has " *
                             "units $(force_field.units)"))
@@ -713,6 +752,7 @@ function System(coord_file::AbstractString,
     charge_of = Vector{Union{T, Missing}}(undef, n_atoms)
     element_of = Vector{String}(undef, n_atoms)
     template_id_of = Vector{Int}(undef, n_atoms)
+    template_of = Vector{ResidueTemplate}(undef, n_atoms)
     resnum_of = Vector{Int}(undef, n_atoms)
     use_charge_from_residue = ("charge" in force_field.attributes_from_residue)
     # Index of each atom type in the force field, avoiding repeated linear searches
@@ -738,6 +778,7 @@ function System(coord_file::AbstractString,
                     charge_of[global_idx] = template.charges[m_i]
                     element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
                     template_id_of[global_idx] = m_i
+                    template_of[global_idx] = template
                     resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
                 end
                 add_virtual_sites!(virtual_sites, template, rgraph, matches)
@@ -806,6 +847,12 @@ function System(coord_file::AbstractString,
         end
     end
 
+    if use_charge_from_residue
+        # The matched templates include patched ones, which are not in the force field
+        templates = union(values(force_field.residues), template_of)
+        charge_type_of = charge_type_labels(charge_types, templates, template_of, template_id_of)
+    end
+
     # Atoms
     for ai in 1:n_atoms
         atype = atom_type_of[ai]
@@ -857,6 +904,7 @@ function System(coord_file::AbstractString,
             chain_id=chain_ai,
             element=element_of[ai],
             hetero_atom=hetero_atoms[ai],
+            charge_type=(use_charge_from_residue ? charge_type_of[ai] : atype),
         ))
     end
     atoms = to_device([atoms_abst...], AT)
@@ -1677,7 +1725,7 @@ is_any_atom(at, at_data) = true
 """
     is_heavy_atom(at, at_data)
 
-Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
+Determine whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
 """
 function is_heavy_atom(at, at_data)
     if isnothing(at_data) || at_data.element in ("?", "")
@@ -1688,7 +1736,8 @@ function is_heavy_atom(at, at_data)
 end
 
 """
-    add_position_restraints(sys, k; atom_selector=is_any_atom, restrain_coords=sys.coords)
+    add_position_restraints(sys, k; atom_selector=Molly.is_any_atom,
+                            restrain_coords=sys.coords)
 
 Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
 atoms.
@@ -1697,7 +1746,7 @@ The force constant `k` can be a single value or an array of equal length to the 
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain
 that atom.
-For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
+For example, [`Molly.is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
 function add_position_restraints(sys::System{<:Any, AT, T, TH},
                                  k;

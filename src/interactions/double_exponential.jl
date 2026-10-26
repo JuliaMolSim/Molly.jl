@@ -8,6 +8,7 @@ export
 
 The double exponential interaction between two atoms.
 
+See [Wu and Brooks 2019](https://doi.org/10.1063/1.5107505).
 The potential energy is defined as
 ```math
 V(r_{ij}) = \varepsilon_{ij} \left[
@@ -26,6 +27,7 @@ where
 ```math
 r_m = 2^{1/6}\sigma_{ij}
 ```
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
 """
 struct DoubleExponential{C, T, SC, S, E, W} <: PairwiseInteraction
     cutoff::C
@@ -155,6 +157,7 @@ end
 The double exponential interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
 
+See [Horton et al. 2023](https://doi.org/10.1039/d3dd00070b).
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda\varepsilon_{ij} \left[
@@ -180,21 +183,27 @@ r_m = 2^{1/6}\sigma_{ij}
 \beta_s = 1 + \lambda(\beta - 1)
 ```
 
-If ``\lambda`` is 1.0, this gives the standard [`DoubleExponential`](@ref) potential and
-means the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`DoubleExponential`](@ref) potential, and if
+it is 0 the interaction is turned off.
 ``\alpha`` and ``\beta`` determine the shape of the double exponential potential.
 """
 struct DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C
     use_neighbors::Bool
+    # The scheduler follows `use_neighbors`, as in the other λ interactions, so that their
+    #   Bools fill one word; placed after α and β, Enzyme dropped the gradients of
+    #   `weight_special` and of every later interaction in the tuple once the interaction
+    #   was read back out of a System
+    λ_mixing::LM
+    scheduler::SCH
     α::T
     β::T
     shortcut::SC
     σ_mixing::S
     ϵ_mixing::E
-    λ_mixing::LM
-    scheduler::SCH
     weight_special::W
 end
 
@@ -202,8 +211,8 @@ function DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=false, α,
                                    shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
                                    ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                    scheduler=DefaultLambdaScheduler(), weight_special=1)
-    return DoubleExponentialSoftCore(cutoff, use_neighbors, α, β, shortcut, σ_mixing,
-                                     ϵ_mixing, λ_mixing, scheduler, weight_special)
+    return DoubleExponentialSoftCore(cutoff, use_neighbors, λ_mixing, scheduler, α, β, shortcut,
+                                     σ_mixing, ϵ_mixing, weight_special)
 end
 
 use_neighbors(inter::DoubleExponentialSoftCore) = inter.use_neighbors
@@ -216,13 +225,13 @@ function Base.zero(i::DoubleExponentialSoftCore{C, T, SC, S, E, LM, SCH, W}) whe
     return DoubleExponentialSoftCore(
         i.cutoff,
         false,
+        i.λ_mixing,
+        i.scheduler,
         zero(T),
         zero(T),
         i.shortcut,
         i.σ_mixing,
         i.ϵ_mixing,
-        i.λ_mixing,
-        i.scheduler,
         zero(W)
     )
 end
@@ -231,13 +240,13 @@ function Base.:+(i1::DoubleExponentialSoftCore, i2::DoubleExponentialSoftCore)
     return DoubleExponentialSoftCore(
         i1.cutoff,
         false,
+        i1.λ_mixing,
+        i1.scheduler,
         i1.α + i2.α,
         i1.β + i2.β,
         i1.shortcut,
         i1.σ_mixing,
         i1.ϵ_mixing,
-        i1.λ_mixing,
-        i1.scheduler,
         i1.weight_special + i2.weight_special
     )
 end
@@ -246,6 +255,17 @@ parameter_prefix(::DoubleExponentialSoftCore) = "inter_DEXP_"
 parameter_fields(::Type{<:DoubleExponentialSoftCore}) =
     ((:α, "alpha"), (:β, "beta"), (:weight_special, "weight_14"))
 
+
+# The double exponential has one soft core, so the soft core chosen for Lennard-Jones does not
+#   apply to it
+function to_lambda_function(inter::DoubleExponential; λ_mixing=MinimumMixing(),
+                            scheduler=DefaultLambdaScheduler())
+    return DoubleExponentialSoftCore(cutoff=inter.cutoff, use_neighbors=inter.use_neighbors,
+                                     α=inter.α, β=inter.β, shortcut=inter.shortcut,
+                                     σ_mixing=inter.σ_mixing, ϵ_mixing=inter.ϵ_mixing,
+                                     λ_mixing=λ_mixing, scheduler=scheduler,
+                                     weight_special=inter.weight_special)
+end
 
 # Energy prefactor, soft-core coupling and mixed σ/ϵ of a pair, from the scheduler as for the
 # Lennard-Jones soft cores

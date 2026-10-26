@@ -395,7 +395,7 @@ end
             neighbor_finder=neighbor_finder,
             strictness=:nowarn,
         )
-        @test_throws NaNSimulationError System(
+        @test_throws Molly.NaNSimulationError System(
             atoms=to_device(atoms, AT),
             coords=to_device(coords_nan, AT),
             boundary=boundary,
@@ -404,8 +404,8 @@ end
             strictness=:error,
         )
         for simulator in simulators
-            @test_throws NaNSimulationError simulate!(sys_nan, simulator, sim_time; n_threads=1,
-                                                      check_nans=true)
+            @test_throws Molly.NaNSimulationError simulate!(sys_nan, simulator, sim_time;
+                                                            n_threads=1, check_nans=true)
         end
     end
 
@@ -888,8 +888,8 @@ end
 
         atom_selector(at, at_data) = at_data.atom_type == "A1"
 
-        sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
-                                          atom_selector=atom_selector)
+        sys_res = Molly.add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
+                                                atom_selector=atom_selector)
 
         simulate!(sys_res, sim, n_steps)
 

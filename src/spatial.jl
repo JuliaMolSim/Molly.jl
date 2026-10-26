@@ -6,12 +6,9 @@ export
     TriclinicBoundary,
     volume,
     density,
-    box_center,
     scale_boundary,
     random_coord,
-    vector_1D,
     vector,
-    wrap_coord_1D,
     wrap_coords,
     random_velocity,
     maxwell_boltzmann,
@@ -26,7 +23,18 @@ export
     scale_coords!,
     dipole_moment
 
-# Parameters are dimension, float type and coordinate type
+@public AbstractBoundary,
+    box_center,
+    vector_1D,
+    wrap_coord_1D
+
+"""
+Base type for boundary types.
+
+Parameters are dimension, float type and coordinate type.
+The built-in boundary types are [`CubicBoundary`](@ref), [`TriclinicBoundary`](@ref)
+and [`RectangularBoundary`](@ref).
+"""
 abstract type AbstractBoundary{D, T, C} end
 
 """
@@ -718,7 +726,8 @@ end
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
                     dims=3, rng=Random.default_rng())
-    random_velocity(atom_mass::Real, temp::Real, k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
+    random_velocity(atom_mass::Real, temp::Real,
+                    k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
                     dims=3, rng=Random.default_rng())
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
@@ -1219,18 +1228,24 @@ function check_boundary_change(sys, strictness)
     return nothing
 end
 
-"""
+@doc raw"""
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
                   rotate::Bool=true,
                   ignore_molecules::Bool=false,
                   scale_velocities::Bool=false,
                   strictness=:warn)
 
-Rigid-molecular barostat update with optional rotation.
+Scale the bounding box and coordinates of a system by the matrix ``\mu``, as done by
+barostats such as [`CRescaleBarostat`](@ref).
 
-- Box:        B′ = μ * B
-- Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
-- Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
+```math
+B' = \mu B, \quad \mathbf{r}' = \mu \mathbf{r}, \quad \mathbf{v}' = \mu^{-1} \mathbf{v}
+```
+where ``B`` is the box matrix and the velocities are only scaled when
+`scale_velocities=true`.
+If the system has a topology the molecules are moved as rigid units: the center of each
+molecule is scaled, and with `rotate=true` the molecule is rotated by the rotational part
+of ``\mu``. Setting `ignore_molecules=true` scales every atom instead.
 
 A warning is given at most once if the new box is too small for the interaction
 cutoff distance.
@@ -1344,12 +1359,18 @@ function scale_coords!(sys::System{<:Any, AT, T},
     end
 end
 
-"""
+@doc raw"""
     dipole_moment(sys)
 
-The dipole moment μ of a system.
+The dipole moment of a system.
 
-Calculated as the sum of the coordinates multiplied by the partial charges.
+Calculated as the sum of the coordinates multiplied by the partial charges,
+``\boldsymbol{\mu} = \sum_i q_i \mathbf{r}_i``.
 Requires the charges on the atoms to be set.
 """
 dipole_moment(sys) = sum(sys.coords .* charges(sys))
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(c::SystemConversion, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(convert_component(c, b.basis_vectors); approx_images=A)
+end

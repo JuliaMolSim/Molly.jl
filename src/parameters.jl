@@ -1,11 +1,12 @@
 # Taking gradients with respect to force field parameters
 
 export
-    parameter_prefix,
-    parameter_fields,
     ParameterPlan,
     extract_parameters,
     inject_gradients
+
+@public parameter_prefix,
+    parameter_fields
 
 """
     parameter_prefix(inter)
@@ -16,8 +17,8 @@ example `"inter_HB_CT/CT_"`.
 
 Return `nothing`, the default, for an interaction with no differentiable parameters.
 Specific interactions are given the interaction type as a second argument, so their keys
-can depend on it. Define this along with [`parameter_fields`](@ref) to make a custom
-interaction work with [`extract_parameters`](@ref) and `inject_gradients`.
+can depend on it. Define this along with [`Molly.parameter_fields`](@ref) to make a custom
+interaction work with [`extract_parameters`](@ref) and [`inject_gradients`](@ref).
 """
 parameter_prefix(inter) = nothing
 parameter_prefix(inter, inter_type) = parameter_prefix(inter)
@@ -28,10 +29,10 @@ parameter_prefix(inter, inter_type) = parameter_prefix(inter)
 A tuple of `(field, key_suffix)` pairs naming the differentiable parameters of an
 interaction type, for example `((:k, "k"), (:r0, "r0"))`.
 
-The key of a parameter is [`parameter_prefix`](@ref) followed by its suffix. Interactions
+The key of a parameter is [`Molly.parameter_prefix`](@ref) followed by its suffix. Interactions
 whose parameters do not correspond one-to-one with fields, such as
-[`PeriodicTorsion`](@ref), instead define `parameter_keys`, `parameter_values` and
-`inject_parameters` directly.
+[`PeriodicTorsion`](@ref), instead define `Molly.n_parameters`, `Molly.parameter_keys`,
+`Molly.parameter_values` and `Molly.inject_parameters` directly.
 """
 parameter_fields(::Type) = ()
 parameter_fields(x) = parameter_fields(typeof(x))
@@ -55,6 +56,11 @@ parameter_fields(x) = parameter_fields(typeof(x))
 @inline convert_parameter(::Type{T}, x::Real) where {T <: Unitful.AbstractQuantity} =
     convert(T, x * unit(T))
 
+# A field that is not a parameter, as it is put into the injected copy of an interaction.
+#   `LambdaScheduler` rebuilds itself field by field, since Enzyme cannot deduce the type of a
+#   plain copy of its `Bool`s and errors on λ interactions with no other such field.
+@inline copied_field(x) = x
+
 # A copy of `inter` with its differentiable parameters replaced by `values`, which are in the
 #   order given by `parameter_fields`, either plain numbers in the units of the fields or
 #   values with units
@@ -73,28 +79,88 @@ parameter_fields(x) = parameter_fields(typeof(x))
         if haskey(pos, fname)
             push!(args, :(convert_parameter($(fieldtype(T, i)), vals[$(pos[fname])])))
         else
-            push!(args, :(getfield(inter, $i)))
+            push!(args, :(copied_field(getfield(inter, $i))))
         end
     end
     return Expr(:call, T, args...)
 end
 
-# Atoms are handled like an interaction with a per-atom-type prefix
-const atom_parameter_keys = ("mass", "σ", "ϵ")
+# Atoms are handled like an interaction with one element per atom, keyed by the atom type
+#   except for the charge, which is keyed by the charge type of the atom
+@inline atom_parameter_values(at) = (at.mass, at.charge, at.σ, at.ϵ)
 
-@inline atom_parameter_values(at) = (at.mass, at.σ, at.ϵ)
+function atom_parameter_keys(ad)
+    prefix = string("atom_", ad.atom_type, "_")
+    charge_type = (isempty(ad.charge_type) ? ad.atom_type : ad.charge_type)
+    return (prefix * "mass", string("atom_", charge_type, "_charge"), prefix * "σ", prefix * "ϵ")
+end
 
-@inline function inject_atom(at, m, s, e)
-    return Atom(at.index, at.atom_type, convert_parameter(typeof(at.mass), m), at.charge,
-                convert_parameter(typeof(at.σ), s), convert_parameter(typeof(at.ϵ), e),
-                at.λ, at.alch_role)
+@inline function inject_atom(at, m, q, s, e)
+    return Atom(at.index, at.atom_type, convert_parameter(typeof(at.mass), m),
+                convert_parameter(typeof(at.charge), q), convert_parameter(typeof(at.σ), s),
+                convert_parameter(typeof(at.ϵ), e), at.λ, at.alch_role)
+end
+
+# Atom keys whose atoms do not all have the same value, for example the masses of a type
+#   after hydrogen mass repartitioning or the zero masses of the B copies in a dual topology
+#   system. A single value would overwrite those values, so these keys are not parameters.
+function inconsistent_atom_keys(atoms, atoms_data)
+    first_values = Dict{String, Any}()
+    inconsistent = Set{String}()
+    for (at, ad) in zip(atoms, atoms_data)
+        for (key, val) in zip(atom_parameter_keys(ad), atom_parameter_values(at))
+            get!(first_values, key, val) == val || push!(inconsistent, key)
+        end
+    end
+    return inconsistent
+end
+
+# Single topology systems store the parameters of both end states in each atom
+function check_scalar_atoms(atoms)
+    if any(at -> any(v -> v isa Tuple, atom_parameter_values(at)), atoms)
+        throw(ArgumentError("atoms with parameters for two end states, as in a single " *
+                            "topology RelativeFESystem, are not supported; use dual topology"))
+    end
+end
+
+# Whether an interaction stores the parameters of both end states, as the λ interactions of a
+#   single topology system do; such an interaction has no single value per key
+single_topology(inter) = false
+
+function check_dual_topology(inters)
+    if any(single_topology, inters)
+        throw(ArgumentError("interactions with parameters for two end states, as in a single " *
+                            "topology RelativeFESystem, are not supported; use dual topology"))
+    end
+end
+
+# Keys of specific interactions whose interactions do not all have the same value, for example
+#   a bond type that the two end states of a dual topology system parametrise differently. A
+#   single value would overwrite some of them, so these keys are not parameters.
+function inconsistent_inter_keys(specific_inter_lists)
+    first_values = Dict{String, Any}()
+    inconsistent = Set{String}()
+    for il in specific_inter_lists
+        for (inter, t) in zip(from_device(il.inters), il.types)
+            prefix = parameter_prefix(inter, t)
+            isnothing(prefix) && continue
+            for (suffix, val) in zip(parameter_keys(inter), parameter_values(inter))
+                get!(first_values, prefix * suffix, val) == val || push!(inconsistent, prefix * suffix)
+            end
+        end
+    end
+    return inconsistent
 end
 
 """
     ParameterPlan(sys, params_dic)
 
 The mapping from the entries of `params_dic` to the parameters of `sys`, built
-once and reused on every call to `inject_gradients`.
+once and reused on every call to [`inject_gradients`](@ref).
+
+Atom keys are described in [`extract_parameters`](@ref). It is an error to give an atom key
+whose atoms have different values, or an interaction key whose interactions have different
+values, which [`extract_parameters`](@ref) leaves out, or to use a single topology system.
 
 Building the plan is where the dictionary keys are formed and looked up. A plan is valid
 for any dictionary with the same keys, so it can be reused across a gradient calculation
@@ -149,15 +215,14 @@ function plan_slot!(keys_v, key_index, params_dic, key)
     return s
 end
 
-# One block of the flat vector: `n_elements` entries for each of the parameters named by
-# `suffixes`, laid out parameter by parameter so each is a contiguous view
-function plan_block!(plan_state, prefixes, values_per_element, suffixes)
+# One block of the flat vector: one entry per element for each of `n_params` parameters,
+# laid out parameter by parameter so each is a contiguous view
+function plan_block!(plan_state, keys_per_element, values_per_element, n_params)
     keys_v, key_index, params_dic, slots, defaults, ranges = plan_state
-    n_params = length(suffixes)
     for f in 1:n_params
         start = length(slots) + 1
-        for (i, prefix) in enumerate(prefixes)
-            key = prefix * suffixes[f]
+        for i in eachindex(keys_per_element)
+            key = keys_per_element[i][f]
             push!(slots, plan_slot!(keys_v, key_index, params_dic, key))
             push!(defaults, ustrip(values_per_element[i][f]))
         end
@@ -177,27 +242,44 @@ function ParameterPlan(sys::System, params_dic)
     push!(target_starts, length(ranges))
     atoms_cpu = from_device(sys.atoms)
     if length(sys.atoms_data) == length(atoms_cpu)
-        prefixes = [string("atom_", ad.atom_type, "_") for ad in sys.atoms_data]
-        plan_block!(state, prefixes, map(atom_parameter_values, atoms_cpu), atom_parameter_keys)
+        check_scalar_atoms(atoms_cpu)
+        for key in inconsistent_atom_keys(atoms_cpu, sys.atoms_data)
+            if haskey(params_dic, key)
+                throw(ArgumentError("the atoms with parameter $key have different values, " *
+                    "which it would overwrite; remove it from the dictionary or give them " *
+                    "different atom or charge types"))
+            end
+        end
+        plan_block!(state, map(atom_parameter_keys, sys.atoms_data),
+                    map(atom_parameter_values, atoms_cpu), 4)
     else
         # No atom data, so no atom types to key on
-        for _ in atom_parameter_keys
+        for _ in 1:4
             push!(ranges, (length(slots) + 1):length(slots))
         end
     end
 
     # Specific interaction lists
+    for key in inconsistent_inter_keys(values(sys.specific_inter_lists))
+        if haskey(params_dic, key)
+            throw(ArgumentError("the interactions with parameter $key have different values, " *
+                "which it would overwrite; remove it from the dictionary or give them " *
+                "different types"))
+        end
+    end
     for il in values(sys.specific_inter_lists)
         push!(target_starts, length(ranges))
         inters_cpu = from_device(il.inters)
+        check_dual_topology(inters_cpu)
         suffixes = parameter_keys(eltype(inters_cpu))
         if length(suffixes) == 0 || isnothing(parameter_prefix(first(inters_cpu), ""))
             for _ in suffixes
                 push!(ranges, (length(slots) + 1):length(slots))
             end
         else
-            prefixes = [parameter_prefix(inter, t) for (inter, t) in zip(inters_cpu, il.types)]
-            plan_block!(state, prefixes, map(parameter_values, inters_cpu), suffixes)
+            keys = [map(suffix -> parameter_prefix(inter, t) * suffix, suffixes)
+                    for (inter, t) in zip(inters_cpu, il.types)]
+            plan_block!(state, keys, map(parameter_values, inters_cpu), length(suffixes))
         end
     end
 
@@ -211,7 +293,8 @@ function ParameterPlan(sys::System, params_dic)
                 push!(ranges, (length(slots) + 1):length(slots))
             end
         else
-            plan_block!(state, [prefix], [parameter_values(inter)], suffixes)
+            plan_block!(state, [map(suffix -> prefix * suffix, suffixes)],
+                        [parameter_values(inter)], length(suffixes))
         end
     end
 
@@ -221,6 +304,10 @@ function ParameterPlan(sys::System, params_dic)
 end
 
 inject_interaction(inter, args...) = inter
+
+# A copy of a general interaction that is consistent with new atom charges, for an
+#   interaction that caches values computed from the charges
+update_charges(inter, atoms) = inter
 
 # The values of the plan's parameters, in slot order
 function plan_values(params_dic, plan::ParameterPlan{V}) where {V}
@@ -248,9 +335,12 @@ end
 
 @inline function inject_atoms(sys, flat, plan, ::Type{AT}) where {AT}
     isempty(plan.ranges[1]) && return sys.atoms
-    m, s, e = target_views(flat, plan, 1, Val(3))
-    return to_device(inject_atom.(plan.atoms_host, m, s, e), AT)
+    m, q, s, e = target_views(flat, plan, 1, Val(4))
+    return to_device(inject_atom.(plan.atoms_host, m, q, s, e), AT)
 end
+
+# Whether the dictionary sets the charge of any atom
+@inline injects_charges(plan::ParameterPlan) = !isempty(plan.ranges[2]) && any(!iszero, view(plan.slots, plan.ranges[2]))
 
 @inline function inject_list(il, inters_host, flat, plan, target, ::Type{AT}) where {AT}
     N = n_parameters_val(eltype(inters_host))
@@ -318,7 +408,7 @@ end
 
 @inline function injected_masses(sys, flat, plan, ::Type{AT}) where {AT}
     isempty(plan.ranges[1]) && return sys.masses, sys.total_mass
-    m_host = first(target_views(flat, plan, 1, Val(3)))
+    m_host = first(target_views(flat, plan, 1, Val(4)))
     masses_host = convert_parameter.(eltype(sys.masses), m_host)
     return to_device(masses_host, AT), sum(masses_host)
 end
@@ -358,6 +448,9 @@ them.
 units that each parameter is stored with in `sys`, as returned by
 [`extract_parameters`](@ref). The unit of each field is re-attached when it is replaced.
 Gradients are only supported for systems without units.
+
+When charges are injected, the charge sums that a [`PME`](@ref) with `fixed_charges=true`
+caches are recomputed from the new charges.
 """
 inject_gradients(sys::System, params_dic) =
     inject_gradients(sys, params_dic, ParameterPlan(sys, params_dic))
@@ -378,6 +471,9 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic, plan::ParameterPla
     pis = inject_inters(sys.pairwise_inters, flat, plan, 2 + n_lists)
     gis = inject_generals(sys.general_inters, flat, plan, 2 + n_lists + n_pairwise,
                           params_dic, sys)
+    if injects_charges(plan)
+        gis = map(inter -> update_charges(inter, atoms), gis)
+    end
 
     masses, total_mass = injected_masses(sys, flat, plan, AT)
     velocities = copy(sys.velocities)
@@ -397,36 +493,70 @@ function extract_block!(params_dic, prefix, keys_t, values_t)
 end
 
 """
-    extract_parameters(sys, ff=nothing)
+    extract_parameters(sys, ff=nothing; strictness=:warn)
 
 A dictionary of the force field parameters of a system, keyed by strings, for use with
-`inject_gradients`.
+[`inject_gradients`](@ref).
 
-An interaction contributes its parameters if it defines [`parameter_prefix`](@ref) and
-[`parameter_fields`](@ref).
+Atoms contribute `atom_<type>_mass`, `atom_<type>_σ` and `atom_<type>_ϵ` for each atom type,
+and `atom_<charge type>_charge` for each charge type, the `charge_type` of
+[`AtomData`](@ref) (the atom type if empty). A key whose atoms have different values, for
+example masses after hydrogen mass repartitioning, is left out, so that injecting the
+dictionary leaves those values unchanged. Leaving out a charge, σ or ϵ key is reported
+according to `strictness`: `:warn` to emit a warning (the default), `:nowarn` to suppress it
+or `:error` to error; leaving out a mass key is not reported. Likewise, an interaction key whose
+interactions have different values, for example a bond type that the two end states of a
+[`RelativeFESystem`](@ref) parametrise differently, is left out and reported. Single topology
+systems, whose atoms and interactions store the parameters of two end states, are not
+supported.
+An interaction contributes its parameters if it defines [`Molly.parameter_prefix`](@ref)
+and [`Molly.parameter_fields`](@ref). The λ interactions of an [`AbsoluteFESystem`](@ref) or
+a dual topology [`RelativeFESystem`](@ref) have the keys of the interactions they replace, so
+an alchemical system has the keys of the systems it was built from.
 
 The values are plain numbers of the float type of the system. On a system with units they
 are in the units that each parameter is stored with in the system, for example kJ mol⁻¹ nm⁻²
 for a bond force constant in a system set up with the default units, and the units are
-re-attached by [`ParameterPlan`](@ref) and `inject_gradients`.
+re-attached by [`ParameterPlan`](@ref) and [`inject_gradients`](@ref).
 """
-function extract_parameters(sys::System{<:Any, <:Any, T}, ff=nothing) where T
+function extract_parameters(sys::System{<:Any, <:Any, T}, ff=nothing;
+                            strictness=default_strictness()) where T
+    check_strictness(strictness)
     params_dic = Dict{String, T}()
 
     atoms_cpu = from_device(sys.atoms)
     if length(sys.atoms_data) == length(atoms_cpu)
+        check_scalar_atoms(atoms_cpu)
         for (at, ad) in zip(atoms_cpu, sys.atoms_data)
-            extract_block!(params_dic, string("atom_", ad.atom_type, "_"),
-                           atom_parameter_keys, atom_parameter_values(at))
+            extract_block!(params_dic, "", atom_parameter_keys(ad), atom_parameter_values(at))
+        end
+        inconsistent = inconsistent_atom_keys(atoms_cpu, sys.atoms_data)
+        for key in inconsistent
+            delete!(params_dic, key)
+        end
+        # Masses that differ within a type are expected, e.g. hydrogen mass repartitioning
+        left_out = sort!([k for k in inconsistent if !endswith(k, "_mass")])
+        if !isempty(left_out)
+            report_issue("the atoms of each of these parameters have different values, so " *
+                "they are left out: $(join(left_out, ", ")); give the atoms different atom types " *
+                "or charge types to make them parameters", strictness)
         end
     end
 
     for il in values(sys.specific_inter_lists)
         inters_cpu = from_device(il.inters)
+        check_dual_topology(inters_cpu)
         for (inter, t) in zip(inters_cpu, il.types)
             extract_block!(params_dic, parameter_prefix(inter, t), parameter_keys(inter),
                            parameter_values(inter))
         end
+    end
+    inconsistent_inters = sort!(collect(inconsistent_inter_keys(values(sys.specific_inter_lists))))
+    if !isempty(inconsistent_inters)
+        foreach(key -> delete!(params_dic, key), inconsistent_inters)
+        report_issue("the interactions of each of these parameters have different values, so " *
+            "they are left out: $(join(inconsistent_inters, ", ")); give the interactions " *
+            "different types to make them parameters", strictness)
     end
 
     for inter in (values(sys.pairwise_inters)..., values(sys.general_inters)...)
