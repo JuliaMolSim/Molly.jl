@@ -947,6 +947,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
+    excluded_ends = copy(excluded_hybrid)
+
     # The unique alchemical groups are excluded from interating
     for i in unique_groups["sysA"], j in unique_groups["sysB"]
         push!(excluded_hybrid, (i, j))
@@ -1016,13 +1018,15 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
-    # The reaction field exclusions also follow the hybrid masks, with self terms for all atoms
-    #   if system A has them
+    # The reaction field exclusions follow the exclusions of the end states, with self terms for
+    #   all atoms if system A has them. Unlike Ewald, the pairs between the unique groups are
+    #   left out, since the neighbor list already removes their reaction field.
     for il in sysA.specific_inter_lists
         if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData
+            eligible_ends = SparsePairMatrix(n_atoms, excluded_ends; listed=false)
             push!(Interactions, reaction_field_exclusions(
                 replace_fields(il.data, (scheduler=scheduler,)), n_atoms,
-                find_excluded_pairs(eligible, special), has_self_exclusions(il), AT))
+                find_excluded_pairs(eligible_ends, special), has_self_exclusions(il), AT))
         end
     end
 
