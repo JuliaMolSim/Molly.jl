@@ -1776,6 +1776,8 @@ if `self` is `true`, to each atom with itself.
 
 `inter` is the reaction field pairwise interaction of the system, from which the parameters
 are taken with [`CoulombReactionFieldExclusionData`](@ref).
+It must have `use_neighbors=true`, since otherwise the excluded pairs are not removed from
+the pairwise interaction.
 The excluded pairs are either given as `excluded_pairs`, a list of atom index pairs, or are
 the pairs that are not `eligible` or are `special`, the matrices given to the neighbor
 finder.
@@ -1791,7 +1793,9 @@ end
 function reaction_field_exclusions(inter::ReactionFieldInteraction, n_atoms::Integer,
                                    excluded_pairs; self::Bool=true, array_type=Array,
                                    kwargs...)
-    data = CoulombReactionFieldExclusionData(inter; kwargs...)
+    use_neighbors(inter) || throw(ArgumentError("the reaction field interaction must use " *
+                    "the neighbor list, otherwise excluded pairs are counted twice"))
+    data =CoulombReactionFieldExclusionData(inter; kwargs...)
     return reaction_field_exclusions(data, n_atoms, excluded_pairs, self, array_type)
 end
 

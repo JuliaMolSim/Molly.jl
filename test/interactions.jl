@@ -2373,6 +2373,8 @@ end
     @testset "invalid input" begin
         crf = CoulombReactionField(dist_cutoff=rc)
         @test_throws ArgumentError reaction_field_exclusions(crf, 2, [(1, 3)])
+        @test_throws ArgumentError reaction_field_exclusions(
+                    CoulombReactionField(dist_cutoff=rc, use_neighbors=false), trues(2, 2))
         @test_throws ArgumentError CoulombReactionFieldExclusionData(dist_cutoff=rc,
                             solvent_dielectric=10.0, solute_dielectric=15.0)
 
