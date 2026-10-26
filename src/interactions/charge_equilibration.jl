@@ -139,7 +139,9 @@ function EEM(
         q = similar(χ, n_atoms)
         fill!(q, zero(QT))
     else
-        @assert length(charges) == n_atoms "Length of charges array must match number of atoms"
+        if length(charges) != n_atoms
+            throw(ArgumentError("Length of charges array must match number of atoms"))
+        end
         q = charges
     end
 
@@ -1097,7 +1099,6 @@ function charge_equilibration!(
 
     # rz should be non-negative
     if !isfinite(rz) || rz < -QEq_tolerance
-        @warn "EEM rz non-finite or negative" iter=0 rz QEq_tolerance
         eem.state.q .= eem.state.q_backup
         synchronize(backend)
         error("EEM QEq failed at step $step_n, iteration 0: rz=$rz, squared tolerance=$QEq_tolerance")
@@ -1172,14 +1173,12 @@ function charge_equilibration!(
         # a NaN is written to slot 2 when dHd is invalid
         if !isfinite(rz)
             dHd = scalar_getindex(eem.state.buffers, 4)
-            @warn "EEM not fully converged" iter=(iter-1) dHd rz=rz_old QEq_tolerance
             eem.state.q .= eem.state.q_backup
             synchronize(backend)
-            error("EEM QEq failed at step $step_n, iteration $iter: rz=$rz, dHd=$dHd, squared tolerance=$QEq_tolerance")
+            error("EEM QEq failed at step $step_n, iteration $iter: rz=$rz, rz_old=$rz_old, dHd=$dHd, squared tolerance=$QEq_tolerance")
         end
 
         if rz < -QEq_tolerance
-            @warn "EEM rz non-finite or negative" iter rz QEq_tolerance
             eem.state.q .= eem.state.q_backup
             synchronize(backend)
             error("EEM QEq failed at step $step_n, iteration $iter: rz=$rz, squared tolerance=$QEq_tolerance")
@@ -1201,7 +1200,6 @@ function charge_equilibration!(
     end
 
     if iter == eem.max_iterations && rz > QEq_tolerance
-        @warn "EEM CG did not converge" iter rz QEq_tolerance
         eem.state.q .= eem.state.q_backup
         synchronize(backend)
         error("EEM QEq did not converge at step $step_n after $iter iterations: rz=$rz, squared tolerance=$QEq_tolerance")

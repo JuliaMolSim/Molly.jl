@@ -744,7 +744,9 @@ function _set_force_field_file_reaxff_params(
             items = split(l)
 
             num_general_params = items[1]
-            @assert num_general_params == "39" "Number of general parameters must be 39"
+            if num_general_params != "39"
+                throw(ArgumentError("Number of general parameters must be 39"))
+            end
 
             unused_general = [14, 19, 23, 27, 35, 36, 37, 38]     # indices of general parameters that are not used
 
@@ -766,7 +768,9 @@ function _set_force_field_file_reaxff_params(
 
             # Atom parameters block
             l = strip(readline(f))
-            @assert occursin("Nr of atoms", l) "$l"
+            if !occursin("Nr of atoms", l)
+                throw(ArgumentError("Expected 'Nr of atoms' header, got: $l"))
+            end
 
             num_atom_types = parse(Int, split(l)[1])
 
@@ -784,7 +788,9 @@ function _set_force_field_file_reaxff_params(
             for i in 1:num_atom_types
                 l = strip(readline(f))     # first line contains atom name followed by 8 parameters
                 items = split(l)
-                @assert length(items) == 9
+                if length(items) != 9
+                    throw(ArgumentError("Expected atom name followed by 8 parameters, got: $l"))
+                end
 
                 atom_id = items[1]
                 atom_map[atom_id] = i
@@ -801,7 +807,9 @@ function _set_force_field_file_reaxff_params(
                 for _ in 1:3
                     l = strip(readline(f))
                     items = split(l)
-                    @assert length(items) == 8
+                    if length(items) != 8
+                        throw(ArgumentError("Expected 8 atom parameters, got: $l"))
+                    end
 
                     for param in items
                         counter += 1
@@ -822,7 +830,9 @@ function _set_force_field_file_reaxff_params(
 
             # Bond parameters block
             l = strip(readline(f))
-            @assert occursin("Nr of bonds", l) "$l"
+            if !occursin("Nr of bonds", l)
+                throw(ArgumentError("Expected 'Nr of bonds' header, got: $l"))
+            end
 
             num_bonds = parse(Int, split(l)[1])
 
@@ -835,7 +845,9 @@ function _set_force_field_file_reaxff_params(
             for _ in 1:num_bonds
                 l = strip(readline(f))     # first line contains at1, at2, followed by 8 parameters
                 items = split(l)
-                @assert length(items) == 10
+                if length(items) != 10
+                    throw(ArgumentError("Expected 2 atom types followed by 8 bond parameters, got: $l"))
+                end
                 empty!(bndp_tmp)
 
                 at_1 = parse(Int, items[1])
@@ -856,7 +868,9 @@ function _set_force_field_file_reaxff_params(
 
                 l = strip(readline(f))
                 items = split(l)
-                @assert length(items) == 8  # second line contains 8 parameters
+                if length(items) != 8  # second line contains 8 parameters
+                    throw(ArgumentError("Expected 8 bond parameters, got: $l"))
+                end
 
                 for param in items
                     counter += 1
@@ -889,7 +903,9 @@ function _set_force_field_file_reaxff_params(
                 for _ in 1:num_off_diagonal
                     l = strip(readline(f))     # each line contains at1, at2, followed by 6 parameters
                     items = split(l)
-                    @assert length(items) == 8
+                    if length(items) != 8
+                        throw(ArgumentError("Expected 2 atom types followed by 6 off-diagonal parameters, got: $l"))
+                    end
                     empty!(ofdp_tmp)
 
                     at_1 = parse(Int, items[1])
@@ -943,7 +959,9 @@ function _set_force_field_file_reaxff_params(
             end
 
             # Angle parameters block
-            @assert occursin("Nr of angles", l)
+            if !occursin("Nr of angles", l)
+                throw(ArgumentError("Expected 'Nr of angles' header, got: $l"))
+            end
 
             num_angles = parse(Int, split(l)[1])
     
@@ -953,7 +971,9 @@ function _set_force_field_file_reaxff_params(
             for _ in 1:num_angles
                 l = strip(readline(f))     # each line contains at1, at2, at3, followed by 7 parameters
                 items = split(l)
-                @assert length(items) == 10
+                if length(items) != 10
+                    throw(ArgumentError("Expected 3 atom types followed by 7 angle parameters, got: $l"))
+                end
                 empty!(angp_tmp)
 
                 at_1 = parse(Int, items[1])
@@ -982,7 +1002,9 @@ function _set_force_field_file_reaxff_params(
 
             # Torsion terms parameters block
             l = strip(readline(f))
-            @assert occursin("Nr of torsions", l) "$l"
+            if !occursin("Nr of torsions", l)
+                throw(ArgumentError("Expected 'Nr of torsions' header, got: $l"))
+            end
 
             num_torsions = parse(Int, split(l)[1])
             
@@ -994,7 +1016,9 @@ function _set_force_field_file_reaxff_params(
             for _ in 1:num_torsions
                 l = strip(readline(f))     # each line contains at1, at2, at3, at4, followed by 5 parameters, followed by 2 unused parameters
                 items = split(l)
-                @assert length(items) == 11
+                if length(items) != 11
+                    throw(ArgumentError("Expected 11 fields in torsion parameter line, got: $l"))
+                end
                 empty!(torp_tmp)
 
                 at_1 = parse(Int, items[1])
@@ -1002,7 +1026,9 @@ function _set_force_field_file_reaxff_params(
                 at_3 = parse(Int, items[3])
                 at_4 = parse(Int, items[4])
 
-                @assert at_2 > 0 && at_3 > 0
+                if at_2 <= 0 || at_3 <= 0
+                    throw(ArgumentError("Central atom type indices in torsion entry must be positive, got: $l"))
+                end
 
                 for param in items[5:end-2]
                     p = parse(T, param)
@@ -1047,21 +1073,27 @@ function _set_force_field_file_reaxff_params(
             if !eof(f)      
                 l = strip(readline(f))
                 if !isempty(l)
-                    @assert occursin("Nr of hydrogen bonds", l) "$l"
+                    if !occursin("Nr of hydrogen bonds", l)
+                        throw(ArgumentError("Expected 'Nr of hydrogen bonds' header, got: $l"))
+                    end
         
                     num_h_bonds = parse(Int, split(l)[1])
                     
                     for _ in 1:num_h_bonds
                         l = strip(readline(f))     # each line contains at1, at2, at3, followed by 4 parameters
                         items = split(l)
-                        @assert length(items) == 7
+                        if length(items) != 7
+                            throw(ArgumentError("Expected 3 atom types followed by 4 hydrogen bond parameters, got: $l"))
+                        end
                         empty!(hbdp_tmp)
 
                         at_1 = parse(Int, items[1])
                         at_2 = parse(Int, items[2])
                         at_3 = parse(Int, items[3])
 
-                        @assert 0 < at_1 <= num_atom_types && 0 < at_2 <= num_atom_types && 0 < at_3 <= num_atom_types
+                        if !(0 < at_1 <= num_atom_types && 0 < at_2 <= num_atom_types && 0 < at_3 <= num_atom_types)
+                            throw(ArgumentError("Hydrogen bond atom type indices must be in 1:$num_atom_types, got: $l"))
+                        end
 
                         h_bond_donors[at_1] = true
                         h_bond_acceptors[at_3] = true
@@ -1082,7 +1114,9 @@ function _set_force_field_file_reaxff_params(
                 println("No ReaxFF hydrogen bond parameters specified")
             end
 
-            @assert eof(f) || isempty(strip(readline(f)))
+            if !eof(f) && !isempty(strip(readline(f)))
+                throw(ArgumentError("Unexpected content after ReaxFF force field parameters"))
+            end
 
             # Global cutoff parameters
             global_parameters = GlobalParameters(
@@ -4482,7 +4516,9 @@ function EEM(
     max_iterations=200
 ) where {T, AT, QT<:AbstractFloat}
     if !isnothing(charges)
-        @assert length(charges) == length(atoms_data) "Length of charges array must equal length of atoms_data array"
+        if length(charges) != length(atoms_data)
+            throw(ArgumentError("Length of charges array must equal length of atoms_data array"))
+        end
     end
 
     coupling = ReaxFFTaperedCoulomb(reaxff, QT)
