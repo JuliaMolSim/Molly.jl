@@ -27,6 +27,7 @@ EnzymeRules.inactive(::typeof(is_on_gpu), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.default_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_strictness), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_specific_inter_lists), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.check_reaction_field_parameters), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_neighbor_finder), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_float_types), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_n_dims), args...) = nothing

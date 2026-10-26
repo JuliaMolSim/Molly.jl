@@ -2204,6 +2204,14 @@ end
             @test isapprox(E_14, E_14_gmx * eu; atol=1e-5eu)
             @test isapprox(potential_energy(sys) - E_14, E_sr_gmx * eu; atol=1e-4eu)
 
+            # The exclusions keep the parameters they were built with
+            for crf_new in (CoulombReactionField(dist_cutoff=1.0u"nm", solvent_dielectric=ϵrf,
+                                                 solute_dielectric=ϵr, use_neighbors=true),
+                            CoulombReactionField(dist_cutoff=rc, solvent_dielectric=ϵrf,
+                                                 solute_dielectric=2ϵr, use_neighbors=true))
+                @test_throws ArgumentError System(sys; pairwise_inters=(crf_new,))
+            end
+
             # Without the correction there is a large difference
             sys_nec = rf_system(atoms, coords, crf, (); neighbor_finder=nf)
             @test abs(potential_energy(sys_nec) - E_14 - E_sr_gmx * eu) > 1.0eu

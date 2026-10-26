@@ -1818,6 +1818,25 @@ end
 
 has_self_exclusions(inter_list) = any(inter -> inter.self, from_device(inter_list.inters))
 
+# The exclusion data hold a copy of the parameters, which must agree with the pairwise
+#   reaction field
+function check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
+    for il in values(specific_inter_lists)
+        il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData || continue
+        for inter in values(pairwise_inters)
+            inter isa ReactionFieldInteraction || continue
+            for field in (:dist_cutoff, :solvent_dielectric, :solute_dielectric, :coulomb_const)
+                if !isapprox(getfield(il.data, field), getfield(inter, field))
+                    throw(ArgumentError("the $field of the reaction field exclusions, " *
+                            "$(getfield(il.data, field)), differs from that of the pairwise " *
+                            "reaction field, $(getfield(inter, field))"))
+                end
+            end
+        end
+    end
+    return nothing
+end
+
 @inline function inject_list_data(il::InteractionList2Atoms{<:Any, <:Any,
                                                            <:CoulombReactionFieldExclusionData},
                                   pis)
