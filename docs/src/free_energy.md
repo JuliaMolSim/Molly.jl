@@ -2783,6 +2783,6 @@ The file has the columns step, CV values, bias, offset, hill height and log weig
 Base.flush(::MetadynamicsLogger)
 ```
 
-Metadynamics with [`ReplicaExchangeMD`](@ref) isn't supported yet.
+Metadynamics with [`ReplicaExchangeMD`](@ref) or [`MetropolisMonteCarlo`](@ref) isn't supported yet.
 
 For full worked examples with plots -- comparing tempered against untempered sampling, and the histogram of the well-tempered run reweighted with these weights against the analytical equilibrium distribution -- see `scripts/metadynamics_bond_recovery_plots.jl`.

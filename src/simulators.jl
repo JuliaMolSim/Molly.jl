@@ -2648,12 +2648,21 @@ function remd_unshared(items)
     end
 end
 
+# History-dependent general interactions (e.g. Metadynamics) change during a run
+is_history_dependent(inter) = false
+
+# Throws for history-dependent general interactions, which the simulator doesn't support yet
+function check_no_history_inters(inters, sim_name)
+    if any(is_history_dependent, inters)
+        throw(ArgumentError("history-dependent general interactions (e.g. Metadynamics) are " *
+                            "not supported with $sim_name yet"))
+    end
+end
+
 # The partition holds frozen copies of the interactions, so exchanges would ignore a changing bias
 function check_remd_history_inters(sys::ReplicaSystem)
-    if any(inters -> any(is_history_dependent, values(inters)), sys.state_general_inters)
-        throw(ArgumentError("history-dependent general interactions (e.g. Metadynamics) are not " *
-                            "supported with replica exchange yet"))
-    end
+    foreach(inters -> check_no_history_inters(values(inters), "replica exchange"),
+            sys.state_general_inters)
 end
 
 # Attempt exchanges between neighbouring states, alternating which pairs are tried every cycle
@@ -2996,6 +3005,7 @@ A trial move with potential energy change ``\Delta E`` is accepted with probabil
 [`MonteCarloLogger`](@ref) can be used to record the acceptances.
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
+Throws for history-dependent general interactions such as [`Metadynamics`](@ref).
 
 # Arguments
 - `temperature::T`: the temperature of the system.
@@ -3015,15 +3025,6 @@ function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
     return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
-# History-dependent general interactions (e.g. Metadynamics) change during a run
-is_history_dependent(inter) = false
-
-# Lets general interactions update at the current state (e.g. deposit a hill); true if any changed
-visit_state!(inter, sys, step_n; kwargs...) = false
-function visit_state!(sys::System, step_n; kwargs...)
-    return any(map(inter -> visit_state!(inter, sys, step_n; kwargs...), values(sys.general_inters)))
-end
-
 @inline function simulate!(sys::System,
                            sim::MetropolisMonteCarlo,
                            n_steps::Integer;
@@ -3036,6 +3037,7 @@ end
                            rng=Random.default_rng(),
                            strictness=default_strictness())
     check_simulate_inputs(init_step, run_loggers, strictness)
+    check_no_history_inters(values(sys.general_inters), "MetropolisMonteCarlo")
     if length(sys.constraints) > 0
         err_str = "MetropolisMonteCarlo is not compatible with constraints, " *
                   "constraints will be ignored"
@@ -3064,23 +3066,17 @@ end
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)
-        accepted = δ < 0 || (rand(rng) < exp(-δ))
-        if accepted
+        if δ < 0 || (rand(rng) < exp(-δ))
+            apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
+                           strictness=strictness, current_potential_energy=E_new, success=true,
+                           energy_rate=(E_new / (sys.k * sim.temperature)))
             E_old = E_new
         else
             sys.coords .= coords_old
+            apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
+                           strictness=strictness, current_potential_energy=E_old, success=false,
+                           energy_rate=(E_old / (sys.k * sim.temperature)))
         end
-        # The chain's current state is visited every step; a rejected move repeats the old state
-        if visit_state!(sys, step_n; strictness=strictness)
-            if !accepted # A rejected move left the neighbors of the trial configuration
-                neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-            end
-            E_old = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
-                                     strictness=strictness)
-        end
-        apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
-                       strictness=strictness, current_potential_energy=E_old, success=accepted,
-                       energy_rate=(E_old / (sys.k * sim.temperature)))
         check_nans && check_array_nans((sys.coords,), check_nan_labels, step_n)
         if shortcut_sim(shortcut, sys, nothing, neighbors, step_n; n_threads=n_threads)
             break

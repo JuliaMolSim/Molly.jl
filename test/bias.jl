@@ -895,90 +895,62 @@ end
 @testset "GridHills interpolation" begin
     dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
     tor = CalcTorsion([1, 2, 3, 4])
-    @test_throws ArgumentError GridHills(dist, 1.0, 0.1, 0.0, 2.0, 21; derivatives=:exact)
-    @test length(GridHills(dist, 1.0, 0.1, 0.0, 2.0, 21; derivatives=:estimated).hermite) == 1
     @test length(GridHills((dist, dist), 1.0, (0.1, 0.1), (0.0, 0.0), (2.0, 2.0), 21).hermite) == 4
-
-    # Catmull-Rom on a coarse grid: derivatives from the neighbouring grid values
-    gh_cr = GridHills(dist, 1.0, 0.2, 0.0, 2.0, 5; derivatives=:estimated)
-    add_hill!(gh_cr, 1.0)
-    @test isapprox(potential_energy(gh_cr, 0.75), 0.58446823; atol=1e-6)
-    @test isapprox(Molly.bias_gradient(gh_cr, 0.75), 2.61819013; atol=1e-6)
-    # In the edge cell the missing neighbour is extrapolated, giving a one-sided difference
-    v = gh_cr.values
-    t = 0.3
-    @test isapprox(potential_energy(gh_cr, 0.5t),
-                   (2t^3 - 3t^2 + 1) * v[1] + (-2t^3 + 3t^2) * v[2] +
-                   (t^3 - 2t^2 + t) * (v[2] - v[1]) + (t^3 - t^2) * (v[3] - v[1]) / 2; atol=1e-12)
     fd(mem, x, h) = (potential_energy(mem, x + h) - potential_energy(mem, x - h)) / 2h
 
-    for derivatives in (:estimated, :stored)
-        # 1D: close to the exact ListHills bias, gradient matches finite differences
-        lh = ListHills(dist, 1.0, 0.1)
-        gh = GridHills(dist, 1.0, 0.1, 0.0, 2.0, 201; derivatives)
-        for c in (0.73, 1.21)
-            add_hill!(lh, c)
-            add_hill!(gh, c)
-        end
-        # Off the grid points, where the second derivative jumps and spoils finite differences
-        xs = [x + o for x in 0.5:0.01:1.49 for o in (0.0013, 0.0047, 0.0081)]
-        # Errors relative to the largest exact energy and gradient, about 3x the measured ones
-        V_max = maximum(x -> abs(potential_energy(lh, x)), xs)
-        G_max = maximum(x -> abs(Molly.bias_gradient(lh, x)), xs)
-        tol = derivatives == :stored ? (energy=2e-6, grad=1e-4) : (energy=5e-5, grad=5e-3)
-        @test maximum(x -> abs(potential_energy(gh, x) - potential_energy(lh, x)), xs) / V_max <
-              tol.energy
-        @test maximum(x -> abs(Molly.bias_gradient(gh, x) - Molly.bias_gradient(lh, x)), xs) /
-              G_max < tol.grad
-        # The gradient is the derivative of the interpolated energy, up to finite difference round-off
-        @test maximum(x -> abs(fd(gh, x, 1e-6) - Molly.bias_gradient(gh, x)), xs) / G_max < 1e-9
-        # The gradient is continuous across a grid point
-        @test isapprox(Molly.bias_gradient(gh, 0.8 - 1e-12), Molly.bias_gradient(gh, 0.8 + 1e-12);
-                       atol=1e-8)
-
-        # 2D: gradient matches finite differences of the energy
-        gh2 = GridHills((dist, dist), 1.0, (0.1, 0.15), (0.0, 0.0), (2.0, 2.0), 101; derivatives)
-        add_hill!(gh2, (0.73, 1.1))
-        for p in ((0.6113, 0.9471), (0.8027, 1.2033), (0.7, 1.0003))
-            grad = Molly.bias_gradient(gh2, p)
-            h = 1e-6
-            @test isapprox(grad[1], (potential_energy(gh2, (p[1] + h, p[2])) -
-                                     potential_energy(gh2, (p[1] - h, p[2]))) / 2h; atol=1e-5)
-            @test isapprox(grad[2], (potential_energy(gh2, (p[1], p[2] + h)) -
-                                     potential_energy(gh2, (p[1], p[2] - h))) / 2h; atol=1e-5)
-        end
-
-        # Periodic: smooth across ±π
-        ghp = GridHills(tor, 1.0, 0.1, -π, π, 360; derivatives)
-        add_hill!(ghp, π - 0.05)
-        @test isapprox(Molly.bias_gradient(ghp, π - 1e-9), Molly.bias_gradient(ghp, -π + 1e-9);
-                       atol=1e-6)
-        for x in (π - 0.0313, -π + 0.0071)
-            @test isapprox(fd(ghp, x, 1e-6), Molly.bias_gradient(ghp, x); atol=1e-5)
-        end
-    end
-
-    # Stored derivatives are more accurate on a coarse grid
+    # 1D: close to the exact ListHills bias, gradient matches finite differences
     lh = ListHills(dist, 1.0, 0.1)
-    add_hill!(lh, 0.97)
-    errs = map((:estimated, :stored)) do derivatives
-        gh = GridHills(dist, 1.0, 0.1, 0.0, 2.0, 41; derivatives) # bin width half of sigma
-        add_hill!(gh, 0.97)
-        maximum(x -> abs(potential_energy(gh, x) - potential_energy(lh, x)), 0.6:0.0071:1.4)
+    gh = GridHills(dist, 1.0, 0.1, 0.0, 2.0, 201)
+    for c in (0.73, 1.21)
+        add_hill!(lh, c)
+        add_hill!(gh, c)
     end
-    @test errs[2] < errs[1] / 5
+    # Off the grid points, where the second derivative jumps and spoils finite differences
+    xs = [x + o for x in 0.5:0.01:1.49 for o in (0.0013, 0.0047, 0.0081)]
+    # Errors relative to the largest exact energy and gradient, about 3x the measured ones
+    V_max = maximum(x -> abs(potential_energy(lh, x)), xs)
+    G_max = maximum(x -> abs(Molly.bias_gradient(lh, x)), xs)
+    @test maximum(x -> abs(potential_energy(gh, x) - potential_energy(lh, x)), xs) / V_max < 2e-6
+    @test maximum(x -> abs(Molly.bias_gradient(gh, x) - Molly.bias_gradient(lh, x)), xs) /
+          G_max < 1e-4
+    # The gradient is the derivative of the interpolated energy, up to finite difference round-off
+    @test maximum(x -> abs(fd(gh, x, 1e-6) - Molly.bias_gradient(gh, x)), xs) / G_max < 1e-9
+    # The gradient is continuous across a grid point
+    @test isapprox(Molly.bias_gradient(gh, 0.8 - 1e-12), Molly.bias_gradient(gh, 0.8 + 1e-12);
+                   atol=1e-8)
+
+    # 2D: gradient matches finite differences of the energy
+    gh2 = GridHills((dist, dist), 1.0, (0.1, 0.15), (0.0, 0.0), (2.0, 2.0), 101)
+    add_hill!(gh2, (0.73, 1.1))
+    for p in ((0.6113, 0.9471), (0.8027, 1.2033), (0.7, 1.0003))
+        grad = Molly.bias_gradient(gh2, p)
+        h = 1e-6
+        @test isapprox(grad[1], (potential_energy(gh2, (p[1] + h, p[2])) -
+                                 potential_energy(gh2, (p[1] - h, p[2]))) / 2h; atol=1e-5)
+        @test isapprox(grad[2], (potential_energy(gh2, (p[1], p[2] + h)) -
+                                 potential_energy(gh2, (p[1], p[2] - h))) / 2h; atol=1e-5)
+    end
+
+    # Periodic: smooth across ±π
+    ghp = GridHills(tor, 1.0, 0.1, -π, π, 360)
+    add_hill!(ghp, π - 0.05)
+    @test isapprox(Molly.bias_gradient(ghp, π - 1e-9), Molly.bias_gradient(ghp, -π + 1e-9);
+                   atol=1e-6)
+    for x in (π - 0.0313, -π + 0.0071)
+        @test isapprox(fd(ghp, x, 1e-6), Molly.bias_gradient(ghp, x); atol=1e-5)
+    end
 
     # 2D and 3D with a periodic CV: close to the exact ListHills bias, which catches mixed-up
     #   stored derivatives that finite differences of the interpolant can't
     setups = (
         ((dist, tor), (0.1, 0.3), (0.0, -π), (2.0, π), (101, 120), [(0.8, 2.9), (1.1, -0.5)],
-         (stored=(5e-5, 1e-3), estimated=(7e-4, 3e-2))),
+         (5e-5, 1e-3)),
         ((dist, dist, tor), (0.2, 0.2, 0.5), (0.0, 0.0, -π), (2.0, 2.0, π), (31, 31, 36),
-         [(0.8, 1.0, 3.0), (1.2, 0.9, -1.0)], (stored=(5e-4, 4e-3), estimated=(6e-3, 0.1))),
+         [(0.8, 1.0, 3.0), (1.2, 0.9, -1.0)], (5e-4, 4e-3)),
     )
-    for (cvs, sig, gmin, gmax, n, hills, tols) in setups, derivatives in (:stored, :estimated)
+    for (cvs, sig, gmin, gmax, n, hills, tol) in setups
         lh = ListHills(cvs, 1.0, sig)
-        gh = GridHills(cvs, 1.0, sig, gmin, gmax, n; derivatives)
+        gh = GridHills(cvs, 1.0, sig, gmin, gmax, n)
         for h in hills
             add_hill!(lh, h)
             add_hill!(gh, h)
@@ -988,7 +960,6 @@ end
         pts = [ntuple(d -> d < n_cvs ? 0.5 + rand(rng) : -π + 2π * rand(rng), n_cvs) for _ in 1:300]
         V_max = maximum(p -> abs(potential_energy(lh, p)), pts)
         G_max = maximum(p -> maximum(abs, Molly.bias_gradient(lh, p)), pts)
-        tol = tols[derivatives]
         @test maximum(p -> abs(potential_energy(gh, p) - potential_energy(lh, p)), pts) / V_max <
               tol[1]
         @test maximum(p -> maximum(abs, Molly.bias_gradient(gh, p) .- Molly.bias_gradient(lh, p)),
@@ -996,37 +967,33 @@ end
     end
 
     # Mixed units: CV values in Å on a grid in nm
-    for derivatives in (:stored, :estimated)
-        g_nm = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201; derivatives)
-        g_Å = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201; derivatives)
-        add_hill!(g_nm, 0.9u"nm")
-        add_hill!(g_Å, 9.0u"Å")
-        # Up to the Gaussian at the cutoff, exp(-18), where rounding can shift the footprint edge
-        @test all(isapprox.(g_nm.values, g_Å.values; atol=1e-7u"kJ * mol^-1"))
-        @test potential_energy(g_nm, 9.5u"Å") ≈ potential_energy(g_nm, 0.95u"nm")
-        @test Molly.bias_gradient(g_nm, 9.5u"Å") ≈ Molly.bias_gradient(g_nm, 0.95u"nm")
-    end
+    g_nm = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201)
+    g_Å = GridHills(dist, 1.0u"kJ * mol^-1", 0.1u"nm", 0.0u"nm", 2.0u"nm", 201)
+    add_hill!(g_nm, 0.9u"nm")
+    add_hill!(g_Å, 9.0u"Å")
+    # Up to the Gaussian at the cutoff, exp(-18), where rounding can shift the footprint edge
+    @test all(isapprox.(g_nm.values, g_Å.values; atol=1e-7u"kJ * mol^-1"))
+    @test potential_energy(g_nm, 9.5u"Å") ≈ potential_energy(g_nm, 0.95u"nm")
+    @test Molly.bias_gradient(g_nm, 9.5u"Å") ≈ Molly.bias_gradient(g_nm, 0.95u"nm")
 
     # Continuous forces conserve energy in NVE with a fixed bias (zero-height deposits)
-    for derivatives in (:estimated, :stored)
-        mem = GridHills(dist, 0.0, 0.05, 0.5, 1.5, 51; derivatives)
-        for c in (0.9, 0.97, 1.05, 1.1)
-            add_hill!(mem, c, 2.0)
-        end
-        sys = System(
-            atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
-            coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 1.0, 1.0)],
-            boundary=CubicBoundary(5.0),
-            velocities=[SVector(0.0, 0.0, 0.0), SVector(0.5, 0.0, 0.0)],
-            specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=1.0)]),),
-            general_inters=(Metadynamics(mem; n_steps=10),),
-            loggers=(etot=TotalEnergyLogger(Float64, 1),),
-            force_units=NoUnits, energy_units=NoUnits,
-        )
-        simulate!(sys, VelocityVerlet(dt=0.0005, remove_CM_motion=false), 4000)
-        e = values(sys.loggers.etot)
-        @test maximum(e) - minimum(e) < 1e-4
+    mem = GridHills(dist, 0.0, 0.05, 0.5, 1.5, 51)
+    for c in (0.9, 0.97, 1.05, 1.1)
+        add_hill!(mem, c, 2.0)
     end
+    sys = System(
+        atoms=[Atom(mass=10.0, σ=0.3, ϵ=0.2) for _ in 1:2],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 1.0, 1.0)],
+        boundary=CubicBoundary(5.0),
+        velocities=[SVector(0.0, 0.0, 0.0), SVector(0.5, 0.0, 0.0)],
+        specific_inter_lists=(InteractionList2Atoms([1], [2], [HarmonicBond(k=500.0, r0=1.0)]),),
+        general_inters=(Metadynamics(mem; n_steps=10),),
+        loggers=(etot=TotalEnergyLogger(Float64, 1),),
+        force_units=NoUnits, energy_units=NoUnits,
+    )
+    simulate!(sys, VelocityVerlet(dt=0.0005, remove_CM_motion=false), 4000)
+    e = values(sys.loggers.etot)
+    @test maximum(e) - minimum(e) < 1e-4
 end
 
 @testset "Metadynamics default centers" begin
@@ -1607,9 +1574,6 @@ end
     @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
     # Without visiting, nothing is deposited, so another k is fine
     forces(sys_d, find_neighbors(sys_d), 2)
-    # Monte Carlo also checks kT before the pacing
-    @test_throws ArgumentError Molly.visit_state!(md_k, sys_d, 3)
-    @test (md_k.step_count, md_k.last_step_n, md_k.last_deposit_step) == pacing
 
     # NoTempering needs kT and ListHills needs cv_points; no logger by default
     @test_throws ArgumentError Metadynamics(ListHills((dist,), 1.0, 0.1);
@@ -1620,7 +1584,7 @@ end
 end
 
 @testset "Metadynamics Monte Carlo" begin
-    # Monte Carlo deposits on the configuration after each accept/reject step
+    # Not supported yet: Monte Carlo doesn't visit states
     cv = CalcDist([1], [2], CalcSingleDist(), :wrap)
     bias = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=5)
     sys = System(
@@ -1631,56 +1595,10 @@ end
         general_inters=(bias,), force_units=NoUnits, energy_units=NoUnits,
     )
     simulator = MetropolisMonteCarlo(temperature=300.0,
-                                     trial_moves=Molly.random_uniform_translation!,
-                                     trial_args=Dict(:shift_size => 0.02,
-                                                     :rng => MersenneTwister(2)))
-    simulate!(sys, simulator, 50; rng=MersenneTwister(1))
-    # Windows open at steps 1, 5, 10, ..., 50
-    @test bias.n_deposits == 11
-    @test bias.last_deposit_step == 50
-    # The last hill is on the final configuration of the chain
-    @test bias.memory.centers[end] ≈ calculate_cv(cv, sys.coords, sys.atoms, sys.boundary)
-
-    # The energy of the current configuration is recomputed after a deposit: with moves that
-    #   change nothing, the energy difference stays zero and every move is accepted, while a
-    #   stale energy would reject moves after each 10 kT hill
-    bias_high = Metadynamics(ListHills(cv, 10 * Molly.default_k(NoUnits) * 300.0, 0.05); n_steps=5)
-    sys_fixed = System(sys; general_inters=(bias_high,), loggers=(mc=MonteCarloLogger(),))
-    simulator_fixed = MetropolisMonteCarlo(temperature=300.0, trial_moves=(sys; kwargs...) -> nothing,
-                                           trial_args=Dict())
-    simulate!(sys_fixed, simulator_fixed, 20; n_threads=1, rng=MersenneTwister(1))
-    @test bias_high.n_deposits == 5
-    @test all(sys_fixed.loggers.mc.state_changed)
-
-    # A forces logger doesn't visit the state, so it never deposits
-    bias_log = Metadynamics(ListHills(cv, 10 * Molly.default_k(NoUnits) * 300.0, 0.05); n_steps=5)
-    sys_log = System(sys; general_inters=(bias_log,),
-                     loggers=(mc=MonteCarloLogger(), f=ForcesLogger(Float64, 5)))
-    simulate!(sys_log, simulator_fixed, 20; n_threads=1, rng=MersenneTwister(1))
-    @test bias_log.n_deposits == 5
-    @test all(sys_log.loggers.mc.state_changed)
-    @test length(values(sys_log.loggers.f)) == 4
-
-    # A rejected move still visits the chain's state, the old configuration
-    bias_rej = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=1)
-    sys_rej = System(sys; general_inters=(bias_rej,), loggers=(mc=MonteCarloLogger(),))
-    s_start = calculate_cv(cv, sys_rej.coords, sys_rej.atoms, sys_rej.boundary)
-    stretch!(sys; kwargs...) = (sys.coords[2] += SVector(0.5, 0.0, 0.0)) # Costs ~25 kT
-    simulate!(sys_rej, MetropolisMonteCarlo(temperature=300.0, trial_moves=stretch!,
-                                            trial_args=Dict()), 10; rng=MersenneTwister(1))
-    @test !any(sys_rej.loggers.mc.state_changed)
-    @test bias_rej.n_deposits == 10
-    @test all(c -> c ≈ s_start, bias_rej.memory.centers)
-    # E_old is recomputed after each rejected deposit: every step adds one hill at the state
-    kT = Molly.default_k(NoUnits) * 300.0
-    @test diff(sys_rej.loggers.mc.energy_rates) ≈ fill(0.1 / kT, 9)
-
-    # visit_state! reports whether an interaction changed
-    bias_visit = Metadynamics(ListHills(cv, 0.1, 0.05); n_steps=5)
-    sys_visit = System(sys; general_inters=(bias_visit,))
-    @test Molly.visit_state!(sys_visit, 0) # Opens the first window
-    @test !Molly.visit_state!(sys_visit, 1)
-    @test !Molly.visit_state!(System(sys; general_inters=()), 5)
+                                     trial_moves=Molly.random_uniform_translation!)
+    coords0 = copy(sys.coords)
+    @test_throws ArgumentError simulate!(sys, simulator, 10)
+    @test sys.coords == coords0 # Throws before any trial move
 end
 
 @testset "Metadynamics REMD" begin

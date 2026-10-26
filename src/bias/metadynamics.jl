@@ -189,7 +189,7 @@ end
 
 @doc raw"""
     GridHills(cvs, height, sigma, grid_min, grid_max, n_points; cutoff=6,
-              out_of_grid=:global_strictness, derivatives=:stored)
+              out_of_grid=:global_strictness)
 
 Metadynamics memory for the CVs in the tuple `cvs`, accumulating deposited hills onto a
 discretized grid spanning `[grid_min, grid_max]`, evaluated by cubic Hermite interpolation,
@@ -199,8 +199,10 @@ hills; see [`ListHills`](@ref) for an exact but O(n_hills) alternative.
 For a single CV, `sigma`, `grid_min` and `grid_max` are scalars and `n_points` an Integer,
 giving a 1D grid. For several CVs, pass same-length tuples (one entry per CV in `cvs`) and
 `n_points` as an Integer or a matching tuple, giving a dense N-dimensional grid.
-Cost scales as roughly O(prod(n_points)) memory and O(cutoff^N) per deposit, so this is only
-practical for a handful of CVs (2-3); use [`ListHills`](@ref) for more.
+Memory and the cost per deposit scale as `2^N` times the grid size and the hill footprint,
+since the exact derivatives of the hills are stored at the grid points, so this is only
+practical for a handful of CVs (2-3); with 3 CVs on a fine grid, use a coarser grid or a
+larger `n_steps`. Use [`ListHills`](@ref) for more CVs.
 
 # Arguments
 - `cvs`: Tuple of CV descriptors, e.g. [`CalcDist`](@ref); a single CV may be passed
@@ -216,20 +218,13 @@ practical for a handful of CVs (2-3); use [`ListHills`](@ref) for more.
     error, the bias is held at its edge value along a CV outside the grid, so it exerts no
     force along that CV, and no hills are deposited. With several CVs, the others still feel
     the bias at the edge. `:global_strictness` follows the `strictness` of the simulation.
-- `derivatives::Symbol=:stored`: Source of the derivatives at the grid points used by the
-    interpolation. `:stored` accumulates the exact derivatives of every deposited hill, which
-    needs `2^N` times the memory of the grid values and makes deposits slower. `:estimated`
-    takes them from finite differences of the grid values (Catmull-Rom), which needs no extra
-    memory but is less accurate on coarse grids. With 3 CVs on a fine grid the deposits of
-    `:stored` can dominate the run time; `:estimated`, a coarser grid or a larger `n_steps`
-    reduce it.
 
 The grid of a periodic CV such as a torsion (see [`cv_period`](@ref)) must span exactly
 one period, e.g. `-π` to `π`, with `grid_max` the same point as `grid_min`: its `n_points`
 points are then spaced by `period / n_points`, hills and interpolation wrap around, and CV
 values outside `[grid_min, grid_max]` are wrapped into the grid.
 """
-struct GridHills{C, K, R, G, E, H, T, D} <: AbstractMetadynamicsMemory
+struct GridHills{C, K, R, G, E, H, T} <: AbstractMetadynamicsMemory
     cvs::C
     height::K
     sigma::R
@@ -237,10 +232,8 @@ struct GridHills{C, K, R, G, E, H, T, D} <: AbstractMetadynamicsMemory
     grid_max::G
     bin_width::G
     values::E
-    # values, and with stored derivatives the derivatives scaled by the bin widths, one array
-    #   per subset of dimensions
+    # values and the derivatives scaled by the bin widths, one array per subset of dimensions
     hermite::H
-    derivatives::D # Val(:stored) or Val(:estimated), so the interpolation dispatches on it
     cutoff::T
     out_of_grid::Symbol # Strictness outside the grid, :global_strictness for the simulation's
     period::G # One entry per dimension, zero for a non-periodic one
@@ -248,13 +241,8 @@ struct GridHills{C, K, R, G, E, H, T, D} <: AbstractMetadynamicsMemory
     # The only constructor of the struct: checks the per-dimension tuples and derives the
     #   grid from them, so no grid is built unchecked
     function GridHills(cvs::Tuple, height, sigma::Tuple, grid_min::Tuple, grid_max::Tuple,
-                       n_points::Tuple; cutoff=6, out_of_grid::Symbol=:global_strictness,
-                       derivatives::Symbol=:stored)
+                       n_points::Tuple; cutoff=6, out_of_grid::Symbol=:global_strictness)
         out_of_grid == :global_strictness || check_strictness(out_of_grid)
-        if !(derivatives in (:estimated, :stored))
-            throw(ArgumentError("GridHills derivatives must be :estimated or :stored, " *
-                                "got :$derivatives"))
-        end
         height = float(height) # Tempered heights are generally fractional
         # Float bounds of a common type per dimension, so bin_width can share their type
         grid_min_t, grid_max_t = float.(grid_min), float.(grid_max)
@@ -298,12 +286,12 @@ struct GridHills{C, K, R, G, E, H, T, D} <: AbstractMetadynamicsMemory
         bin_width_t = map(grid_min_t, grid_max_t, n_points, period_t) do gmin, gmax, n, p
             (gmax - gmin) / (iszero(p) ? n - 1 : n)
         end
-        hermite = ntuple(_ -> fill(zero(height), n_points), derivatives == :stored ? 2^n_dims : 1)
+        hermite = ntuple(_ -> fill(zero(height), n_points), 2^n_dims)
         values = hermite[1]
         return new{typeof(cvs), typeof(height), typeof(sigma), typeof(grid_min_t),
-                   typeof(values), typeof(hermite), typeof(cutoff), Val{derivatives}}(
+                   typeof(values), typeof(hermite), typeof(cutoff)}(
             cvs, height, sigma, grid_min_t, grid_max_t, bin_width_t, values, hermite,
-            Val(derivatives), cutoff, out_of_grid, period_t,
+            cutoff, out_of_grid, period_t,
         )
     end
 end
@@ -389,42 +377,17 @@ in_subset(s, d) = isodd((s - 1) >> (d - 1))
 hermite_bases(t) = (2t^3 - 3t^2 + 1, t^3 - 2t^2 + t, -2t^3 + 3t^2, t^3 - t^2)
 hermite_bases_dt(t) = (6t^2 - 6t, 3t^2 - 4t + 1, 6t - 6t^2, 3t^2 - 2t)
 
-# Catmull-Rom weights on the values at i0 - 1, i0, i1 and i1 + 1: Hermite with central differences
-catmull_rom((h00, h10, h01, h11)) = (-h10 / 2, h00 - h11 / 2, h01 + h10 / 2, h11 / 2)
-
-# A missing neighbour at a non-periodic edge is the linear extrapolation of the two nearest values
-function fold_ghosts((wm, w0, w1, w2), lower_edge, upper_edge)
-    if lower_edge
-        w0, w1, wm = w0 + 2wm, w1 - wm, zero(wm)
-    end
-    if upper_edge
-        w1, w0, w2 = w1 + 2w2, w0 - w2, zero(w2)
-    end
-    return (wm, w0, w1, w2)
-end
-
-# Interpolation taps of one dimension: grid indices, whether each reads a stored derivative,
-#   and the weights with their derivatives along the fractional position t
-function grid_taps(::Val{:stored}, mem::GridHills, d, (i0, i1, t))
+# Interpolation taps of one dimension: grid indices, whether each reads the stored scaled
+#   derivative instead of the value, and the weights with their derivatives along t
+function grid_taps((i0, i1, t))
     return (i0, i0, i1, i1), (false, true, false, true), hermite_bases(t), hermite_bases_dt(t)
-end
-
-function grid_taps(::Val{:estimated}, mem::GridHills, d, (i0, i1, t))
-    n = size(mem.values, d)
-    w, w_dt = catmull_rom(hermite_bases(t)), catmull_rom(hermite_bases_dt(t))
-    if is_periodic(mem, d)
-        return (mod1(i0 - 1, n), i0, i1, mod1(i1 + 1, n)), (false, false, false, false), w, w_dt
-    end
-    lower, upper = i0 == 1, i1 == n
-    return (max(i0 - 1, 1), i0, i1, min(i1 + 1, n)), (false, false, false, false),
-           fold_ghosts(w, lower, upper), fold_ghosts(w_dt, lower, upper)
 end
 
 # Interpolated value and its gradient along the fractional grid positions, in one pass
 function grid_value_gradient(mem::GridHills{<:Any, <:Any, <:Any, <:NTuple{N, Any}},
                              cv_sim) where N
     dims = grid_bracket_dims(mem, cv_sim)
-    taps = ntuple(d -> grid_taps(mem.derivatives, mem, d, dims[d]), Val(N))
+    taps = ntuple(d -> grid_taps(dims[d]), Val(N))
     # Closures only capture bindings that aren't reassigned, which would box them
     zero_value = zero(eltype(mem.values))
     value, grad = zero_value, ntuple(_ -> zero_value, Val(N))
@@ -610,12 +573,11 @@ run one after the other, not in parallel.
 
 Hills are deposited when a simulator visits a state, on the first visit in each window of
 `n_steps` steps -- no external logger is needed. Molecular dynamics integrators visit a
-state in their force calculation (`visit_state=true` in [`forces`](@ref)), and
-[`MetropolisMonteCarlo`](@ref) on the chain's current state after each accept/reject step.
+state in their force calculation (`visit_state=true` in [`forces`](@ref)).
+[`MetropolisMonteCarlo`](@ref) and [`ReplicaExchangeMD`](@ref) aren't supported yet.
 The first hill is on the start configuration, at step 0, or at step 1 for integrators such
-as [`Langevin`](@ref); with Monte Carlo it is on the state after the first accept/reject
-step. A multiple time step integrator deposits once per outer step. Minimizers, loggers, couplers and other force or energy calls don't deposit.
-Chunked `simulate!` calls deposit as one continuous run, with or without `init_step`, as
+as [`Langevin`](@ref). A multiple time step integrator deposits once per outer step.
+Minimizers, loggers, couplers and other force or energy calls don't deposit. Chunked `simulate!` calls deposit as one continuous run, with or without `init_step`, as
 long as a bias uses one of the two throughout: mixing them, or visiting with a step number
 between runs, shifts the schedule. The number of hills deposited so far is
 `bias.n_deposits` and the step of the last deposit window is `bias.last_deposit_step`
@@ -709,15 +671,6 @@ function add_hill!(md::Metadynamics, sys::System)
 end
 
 is_history_dependent(::Metadynamics) = true
-
-# Explicit visit, e.g. by Monte Carlo after each accept/reject step. Only the kT check
-#   precedes the pacing; the CVs are evaluated on deposit steps only.
-function visit_state!(md::Metadynamics, sys, step_n; strictness=default_strictness(), kwargs...)
-    check_logger_kT(md.logger, md, sys.k)
-    should_deposit_hill!(md, step_n) || return false
-    cv_sim = check_bias_finite(evaluate_metadynamics_cvs(md, sys), "collective variable", md)
-    return deposit_hill!(md, cv_sim, step_n, sys.k; strictness)
-end
 
 """
     free_energy(bias::Metadynamics, cv_value)
