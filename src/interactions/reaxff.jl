@@ -2,7 +2,7 @@ export
     ReaxFF2008,
     ReaxFF
 
-abstract type ReaxFFVersion end
+abstract type AbstractReaxFFVersion end
 
 """
     ReaxFF2008()
@@ -11,7 +11,7 @@ Selects the 2008 ReaxFF functional form used by [`ReaxFF`](@ref)
 ([Chenoweth et al. 2008](https://doi.org/10.1021/jp709896w)).
 This is the default and currently supported ReaxFF version.
 """
-struct ReaxFF2008 <: ReaxFFVersion end
+struct ReaxFF2008 <: AbstractReaxFFVersion end
 
 
 struct GeneralParameters{T}
@@ -453,7 +453,7 @@ and the associated [`EEM`](@ref) charge equilibration automatically. Use a fresh
 
 This interaction is only compatible with 3D systems. The virial is not yet supported.
 """
-mutable struct ReaxFF{V<:ReaxFFVersion, T, AT, DP, S, SC}
+mutable struct ReaxFF{V<:AbstractReaxFFVersion, T, AT, DP, S, SC}
     version::V
     params::ReaxFF2008Params{T}
     device_params::DP
@@ -498,7 +498,7 @@ Use a fresh `ReaxFF` instance for each system, since it stores system-specific
 cached state.
 """
 function System(coord_file_path::AbstractString,
-                reaxff::ReaxFF{<:ReaxFFVersion, T, ATR};
+                reaxff::ReaxFF{<:AbstractReaxFFVersion, T, ATR};
                 eem_tolerance=1e-6,
                 eem_max_iterations=200,
                 eem_float_type::Type{QT}=Float64,
@@ -619,7 +619,7 @@ function System(coord_file_path::AbstractString,
     end
 
     # create neighbor finder
-    if neighbor_skin_angstrom < 0.0
+    if neighbor_skin_angstrom < zero(neighbor_skin_angstrom)
         throw(ArgumentError("neighbor_skin_angstrom must be non-negative"))
     end
 
@@ -636,6 +636,11 @@ function System(coord_file_path::AbstractString,
         reaxff.device_params.global_parameters.hbond_dist_cutoff,
         reaxff.device_params.general_parameters.upper_taper_radius
     ) 
+    check_cutoff_box_size(
+        units ? required_cutoff * u"Å" : required_cutoff / T(10),
+        boundary_used,
+        default_strictness(),
+    )
     neighbor_list_cutoff = required_cutoff + T(neighbor_skin_angstrom)
 
     if units
@@ -647,18 +652,14 @@ function System(coord_file_path::AbstractString,
 
     backend = get_backend(coords)
     
-    nf = if backend isa KernelAbstractions.GPU &&
-            gpu_cell_list_suitable(boundary_used, far_dist_cutoff; force_float32=true)
-        println("Using GPUCellListNeighborFinder on GPU")
+    nf = if backend isa KernelAbstractions.GPU && gpu_cell_list_suitable(boundary_used, far_dist_cutoff; force_float32=true)
         GPUCellListNeighborFinder(
             n_steps = neighbor_refresh_n_steps,
             force_float32 = true,
             dist_cutoff = far_dist_cutoff,
             output = :geometric_pairs,
         )
-
     elseif backend isa KernelAbstractions.GPU
-        println("Using DistanceNeighborFinder on GPU")
         DistanceNeighborFinder(
             n_atoms = n_atoms,
             array_type = AT,
@@ -669,30 +670,21 @@ function System(coord_file_path::AbstractString,
         # CellListNeighborFinder requires perpendicualr distance between cell planes to be greater than twice the cutoff
         # If the boundary is too small, use DistanceNeighborFinder on CPU instead
         eligible = to_device(trues(n_atoms, n_atoms), AT)
-        try
-            finder = redirect_stdout(devnull) do 
-                CellListMapNeighborFinder(
-                    eligible = eligible,
-                    n_steps = neighbor_refresh_n_steps,
-                    dist_cutoff = far_dist_cutoff,
-                    boundary = boundary_used,
-                    x0 = coords
-                )
-            end
-            println("Using CellListMapNeighborFinder on CPU")
+        if minimum(cell_list_box_widths(boundary_used)) > 2 * far_dist_cutoff
+            finder = CellListMapNeighborFinder(
+                eligible = eligible,
+                n_steps = neighbor_refresh_n_steps,
+                dist_cutoff = far_dist_cutoff,
+                boundary = boundary_used,
+                x0 = coords
+            )
             finder
-        catch e
-            if isa(e, ArgumentError) && occursin("Unit cell matrix does not satisfy required conditions", e.msg)
-                println("Using DistanceNeighborFinder on CPU")
-
-                DistanceNeighborFinder(
-                    eligible = eligible,
-                    n_steps = neighbor_refresh_n_steps,
-                    dist_cutoff = far_dist_cutoff
-                )
-            else
-                rethrow(e)
-            end
+        else
+            DistanceNeighborFinder(
+                eligible = eligible,
+                n_steps = neighbor_refresh_n_steps,
+                dist_cutoff = far_dist_cutoff
+            )
         end
     end
 
@@ -735,190 +727,216 @@ function _set_force_field_file_reaxff_params(
     ::Type{AT},
 ) where {T<:AbstractFloat, AT}
 
-    try
-        open(file, "r") do f
-            readline(f)     # Comment line, ignored
+    open(file, "r") do f
+        readline(f)     # Comment line, ignored
 
-            # General parameters block
+        # General parameters block
+        l = strip(readline(f))
+        items = split(l)
+
+        num_general_params = items[1]
+        if num_general_params != "39"
+            throw(ArgumentError("Number of general parameters must be 39"))
+        end
+
+        unused_general = [14, 19, 23, 27, 35, 36, 37, 38]     # indices of general parameters that are not used
+
+        genp_tmp = T[]
+
+        for i in 1:39
             l = strip(readline(f))
+
+            if i in unused_general
+                continue
+            end
+
             items = split(l)
+            val = parse(T, items[1])
+            push!(genp_tmp, val)
+        end
 
-            num_general_params = items[1]
-            if num_general_params != "39"
-                throw(ArgumentError("Number of general parameters must be 39"))
+        general_parameters = GeneralParameters{T}(genp_tmp...)
+
+        # Atom parameters block
+        l = strip(readline(f))
+        if !occursin("Nr of atoms", l)
+            throw(ArgumentError("Expected 'Nr of atoms' header, got: $l"))
+        end
+
+        num_atom_types = parse(Int, split(l)[1])
+
+        for _ in 1:3        # skip column headers
+            readline(f)
+        end
+
+        unused_atom = [13, 16, 23, 24, 27, 30, 31, 32]
+
+        atom_map = Dict{String, Int}()
+
+        atom_parameters = AtomParameters{T}[]
+        atmp_tmp = T[]
+
+        for i in 1:num_atom_types
+            l = strip(readline(f))     # first line contains atom name followed by 8 parameters
+            items = split(l)
+            if length(items) != 9
+                throw(ArgumentError("Expected atom name followed by 8 parameters, got: $l"))
             end
 
-            unused_general = [14, 19, 23, 27, 35, 36, 37, 38]     # indices of general parameters that are not used
+            atom_id = items[1]
+            atom_map[atom_id] = i
+            empty!(atmp_tmp)
 
-            genp_tmp = T[]
+            counter = 0
 
-            for i in 1:39
-                l = strip(readline(f))
-
-                if i in unused_general
-                    continue
-                end
-
-                items = split(l)
-                val = parse(T, items[1])
-                push!(genp_tmp, val)
+            for param in items[2:end]
+                counter += 1
+                p = parse(T, param)
+                push!(atmp_tmp, p)
             end
 
-            general_parameters = GeneralParameters{T}(genp_tmp...)
-
-            # Atom parameters block
-            l = strip(readline(f))
-            if !occursin("Nr of atoms", l)
-                throw(ArgumentError("Expected 'Nr of atoms' header, got: $l"))
-            end
-
-            num_atom_types = parse(Int, split(l)[1])
-
-            for _ in 1:3        # skip column headers
-                readline(f)
-            end
-            
-            unused_atom = [13, 16, 23, 24, 27, 30, 31, 32]
-            
-            atom_map = Dict{String, Int}()
-
-            atom_parameters = AtomParameters{T}[]
-            atmp_tmp = T[]
-
-            for i in 1:num_atom_types
-                l = strip(readline(f))     # first line contains atom name followed by 8 parameters
-                items = split(l)
-                if length(items) != 9
-                    throw(ArgumentError("Expected atom name followed by 8 parameters, got: $l"))
-                end
-
-                atom_id = items[1]
-                atom_map[atom_id] = i
-                empty!(atmp_tmp)
-                
-                counter = 0
-
-                for param in items[2:end]
-                    counter += 1
-                    p = parse(T, param)
-                    push!(atmp_tmp, p)
-                end
-                
-                for _ in 1:3
-                    l = strip(readline(f))
-                    items = split(l)
-                    if length(items) != 8
-                        throw(ArgumentError("Expected 8 atom parameters, got: $l"))
-                    end
-
-                    for param in items
-                        counter += 1
-
-                        if counter in unused_atom
-                            continue
-                        end
-
-                        p = parse(T, param)
-                        push!(atmp_tmp, p)
-                    end
-                end
-
-                atmp = AtomParameters{T}(atmp_tmp...)
-                push!(atom_parameters, atmp)
-            end
-
-
-            # Bond parameters block
-            l = strip(readline(f))
-            if !occursin("Nr of bonds", l)
-                throw(ArgumentError("Expected 'Nr of bonds' header, got: $l"))
-            end
-
-            num_bonds = parse(Int, split(l)[1])
-
-            readline(f) # skip column headers
-                 
-            unused_bond = [12, 16]
-            bond_parameters = fill(zero(BondParameters{T}), num_atom_types, num_atom_types)
-            bndp_tmp = T[]
-
-            for _ in 1:num_bonds
-                l = strip(readline(f))     # first line contains at1, at2, followed by 8 parameters
-                items = split(l)
-                if length(items) != 10
-                    throw(ArgumentError("Expected 2 atom types followed by 8 bond parameters, got: $l"))
-                end
-                empty!(bndp_tmp)
-
-                at_1 = parse(Int, items[1])
-                at_2 = parse(Int, items[2])
-
-                counter = 0
-
-                for param in items[3:end]
-                    counter += 1
-
-                    if counter in unused_bond
-                        continue
-                    end
-
-                    p = parse(T, param)
-                    push!(bndp_tmp, p)
-                end
-
+            for _ in 1:3
                 l = strip(readline(f))
                 items = split(l)
-                if length(items) != 8  # second line contains 8 parameters
-                    throw(ArgumentError("Expected 8 bond parameters, got: $l"))
+                if length(items) != 8
+                    throw(ArgumentError("Expected 8 atom parameters, got: $l"))
                 end
 
                 for param in items
                     counter += 1
 
-                    if counter in unused_bond
+                    if counter in unused_atom
                         continue
                     end
 
                     p = parse(T, param)
-                    push!(bndp_tmp, p)
+                    push!(atmp_tmp, p)
+                end
+            end
+
+            atmp = AtomParameters{T}(atmp_tmp...)
+            push!(atom_parameters, atmp)
+        end
+
+
+        # Bond parameters block
+        l = strip(readline(f))
+        if !occursin("Nr of bonds", l)
+            throw(ArgumentError("Expected 'Nr of bonds' header, got: $l"))
+        end
+
+        num_bonds = parse(Int, split(l)[1])
+
+        readline(f) # skip column headers
+
+        unused_bond = [12, 16]
+        bond_parameters = fill(zero(BondParameters{T}), num_atom_types, num_atom_types)
+        bndp_tmp = T[]
+
+        for _ in 1:num_bonds
+            l = strip(readline(f))     # first line contains at1, at2, followed by 8 parameters
+            items = split(l)
+            if length(items) != 10
+                throw(ArgumentError("Expected 2 atom types followed by 8 bond parameters, got: $l"))
+            end
+            empty!(bndp_tmp)
+
+            at_1 = parse(Int, items[1])
+            at_2 = parse(Int, items[2])
+
+            counter = 0
+
+            for param in items[3:end]
+                counter += 1
+
+                if counter in unused_bond
+                    continue
                 end
 
-                push!(bndp_tmp, true)
-                bndp = BondParameters{T}(bndp_tmp...)
-                bond_parameters[at_1, at_2] = bndp
-                bond_parameters[at_2, at_1] = bndp
+                p = parse(T, param)
+                push!(bndp_tmp, p)
             end
-  
 
-            # Off diagonal terms parameters block is optional
-            # Next block could be either off-diagonal terms OR angle terms
             l = strip(readline(f))
+            items = split(l)
+            if length(items) != 8  # second line contains 8 parameters
+                throw(ArgumentError("Expected 8 bond parameters, got: $l"))
+            end
 
-            off_diagonal_parameters = fill(zero(OffDiagonalParameters{T}), num_atom_types, num_atom_types)  # empty dict if off diagonal params block missing
-            ofdp_tmp = T[]
+            for param in items
+                counter += 1
 
-            if occursin("Nr of off-diagonal terms", l)  
-                num_off_diagonal = parse(Int, split(l)[1])
+                if counter in unused_bond
+                    continue
+                end
 
-                for _ in 1:num_off_diagonal
-                    l = strip(readline(f))     # each line contains at1, at2, followed by 6 parameters
-                    items = split(l)
-                    if length(items) != 8
-                        throw(ArgumentError("Expected 2 atom types followed by 6 off-diagonal parameters, got: $l"))
-                    end
+                p = parse(T, param)
+                push!(bndp_tmp, p)
+            end
+
+            push!(bndp_tmp, true)
+            bndp = BondParameters{T}(bndp_tmp...)
+            bond_parameters[at_1, at_2] = bndp
+            bond_parameters[at_2, at_1] = bndp
+        end
+
+
+        # Off diagonal terms parameters block is optional
+        # Next block could be either off-diagonal terms OR angle terms
+        l = strip(readline(f))
+
+        off_diagonal_parameters = fill(zero(OffDiagonalParameters{T}), num_atom_types, num_atom_types)  # empty dict if off diagonal params block missing
+        ofdp_tmp = T[]
+
+        if occursin("Nr of off-diagonal terms", l)
+            num_off_diagonal = parse(Int, split(l)[1])
+
+            for _ in 1:num_off_diagonal
+                l = strip(readline(f))     # each line contains at1, at2, followed by 6 parameters
+                items = split(l)
+                if length(items) != 8
+                    throw(ArgumentError("Expected 2 atom types followed by 6 off-diagonal parameters, got: $l"))
+                end
+                empty!(ofdp_tmp)
+
+                at_1 = parse(Int, items[1])
+                at_2 = parse(Int, items[2])
+
+                for param in items[3:end]
+                    p = parse(T, param)
+                    push!(ofdp_tmp, p)
+                end
+
+                gamma_w_inv_pow = (one(T) / sqrt(atom_parameters[at_1].gamma_w * atom_parameters[at_2].gamma_w))^general_parameters.p_vdW1
+                push!(ofdp_tmp, gamma_w_inv_pow)
+
+                gamma_prod = atom_parameters[at_1].gamma * atom_parameters[at_2].gamma
+                gamma_ij_inv_pow = one(T) / (gamma_prod * sqrt(gamma_prod))
+                push!(ofdp_tmp, gamma_ij_inv_pow)
+
+                push!(ofdp_tmp, true)
+                ofdp = OffDiagonalParameters{T}(ofdp_tmp...)
+                off_diagonal_parameters[at_1, at_2] = ofdp
+                off_diagonal_parameters[at_2, at_1] = ofdp
+            end
+
+            l = strip(readline(f))      # read first line of angle parameters block
+        end
+
+        for at_1 in 1:num_atom_types
+            for at_2 in 1:num_atom_types
+                if !off_diagonal_parameters[at_1, at_2].is_defined
                     empty!(ofdp_tmp)
-
-                    at_1 = parse(Int, items[1])
-                    at_2 = parse(Int, items[2])
-
-                    for param in items[3:end]
-                        p = parse(T, param)
-                        push!(ofdp_tmp, p)
-                    end
+                    push!(ofdp_tmp, sqrt(atom_parameters[at_1].D_ij * atom_parameters[at_2].D_ij))
+                    push!(ofdp_tmp, sqrt(atom_parameters[at_1].r_vdW * atom_parameters[at_2].r_vdW))
+                    push!(ofdp_tmp, sqrt(atom_parameters[at_1].alpha * atom_parameters[at_2].alpha))
+                    push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_sigma + atom_parameters[at_2].ro_sigma))
+                    push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_pi + atom_parameters[at_2].ro_pi))
+                    push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_pipi + atom_parameters[at_2].ro_pipi))
 
                     gamma_w_inv_pow = (one(T) / sqrt(atom_parameters[at_1].gamma_w * atom_parameters[at_2].gamma_w))^general_parameters.p_vdW1
                     push!(ofdp_tmp, gamma_w_inv_pow)
-                    
+
                     gamma_prod = atom_parameters[at_1].gamma * atom_parameters[at_2].gamma
                     gamma_ij_inv_pow = one(T) / (gamma_prod * sqrt(gamma_prod))
                     push!(ofdp_tmp, gamma_ij_inv_pow)
@@ -928,253 +946,219 @@ function _set_force_field_file_reaxff_params(
                     off_diagonal_parameters[at_1, at_2] = ofdp
                     off_diagonal_parameters[at_2, at_1] = ofdp
                 end
-
-                l = strip(readline(f))      # read first line of angle parameters block
             end
-
-            for at_1 in 1:num_atom_types
-                for at_2 in 1:num_atom_types
-                    if !off_diagonal_parameters[at_1, at_2].is_defined
-                        empty!(ofdp_tmp)
-                        push!(ofdp_tmp, sqrt(atom_parameters[at_1].D_ij * atom_parameters[at_2].D_ij))             
-                        push!(ofdp_tmp, sqrt(atom_parameters[at_1].r_vdW * atom_parameters[at_2].r_vdW))           
-                        push!(ofdp_tmp, sqrt(atom_parameters[at_1].alpha * atom_parameters[at_2].alpha))         
-                        push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_sigma + atom_parameters[at_2].ro_sigma)) 
-                        push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_pi + atom_parameters[at_2].ro_pi))    
-                        push!(ofdp_tmp, T(0.5) * (atom_parameters[at_1].ro_pipi + atom_parameters[at_2].ro_pipi)) 
-                        
-                        gamma_w_inv_pow = (one(T) / sqrt(atom_parameters[at_1].gamma_w * atom_parameters[at_2].gamma_w))^general_parameters.p_vdW1
-                        push!(ofdp_tmp, gamma_w_inv_pow)
-                        
-                        gamma_prod = atom_parameters[at_1].gamma * atom_parameters[at_2].gamma
-                        gamma_ij_inv_pow = one(T) / (gamma_prod * sqrt(gamma_prod))
-                        push!(ofdp_tmp, gamma_ij_inv_pow)
-
-                        push!(ofdp_tmp, true)
-                        ofdp = OffDiagonalParameters{T}(ofdp_tmp...)
-                        off_diagonal_parameters[at_1, at_2] = ofdp
-                        off_diagonal_parameters[at_2, at_1] = ofdp
-                    end
-                end
-            end
-
-            # Angle parameters block
-            if !occursin("Nr of angles", l)
-                throw(ArgumentError("Expected 'Nr of angles' header, got: $l"))
-            end
-
-            num_angles = parse(Int, split(l)[1])
-    
-            angle_parameters = Array{Union{Vector{AngleParameters{T}}, Nothing}}(nothing, num_atom_types, num_atom_types, num_atom_types)
-            angp_tmp = T[]
-
-            for _ in 1:num_angles
-                l = strip(readline(f))     # each line contains at1, at2, at3, followed by 7 parameters
-                items = split(l)
-                if length(items) != 10
-                    throw(ArgumentError("Expected 3 atom types followed by 7 angle parameters, got: $l"))
-                end
-                empty!(angp_tmp)
-
-                at_1 = parse(Int, items[1])
-                at_2 = parse(Int, items[2])
-                at_3 = parse(Int, items[3])
-
-                for param in items[4:end]
-                    p = parse(T, param)
-                    push!(angp_tmp, p)
-                end
-
-                push!(angp_tmp, true)
-                angp = AngleParameters{T}(angp_tmp...)
-
-                if isnothing(angle_parameters[at_1, at_2, at_3])
-                    angle_parameters[at_1, at_2, at_3] = AngleParameters{T}[]
-                    angle_parameters[at_3, at_2, at_1] = AngleParameters{T}[]
-                end
-
-                push!(angle_parameters[at_1, at_2, at_3], angp)
-                if at_1 != at_3
-                    push!(angle_parameters[at_3, at_2, at_1], angp)
-                end
-            end
-
-
-            # Torsion terms parameters block
-            l = strip(readline(f))
-            if !occursin("Nr of torsions", l)
-                throw(ArgumentError("Expected 'Nr of torsions' header, got: $l"))
-            end
-
-            num_torsions = parse(Int, split(l)[1])
-            
-            torsion_parameters = fill(zero(TorsionParameters{T}), num_atom_types, num_atom_types, num_atom_types, num_atom_types)
-            torp_tmp = T[]
-            
-            seen = zeros(Int, num_atom_types, num_atom_types, num_atom_types, num_atom_types)
-
-            for _ in 1:num_torsions
-                l = strip(readline(f))     # each line contains at1, at2, at3, at4, followed by 5 parameters, followed by 2 unused parameters
-                items = split(l)
-                if length(items) != 11
-                    throw(ArgumentError("Expected 11 fields in torsion parameter line, got: $l"))
-                end
-                empty!(torp_tmp)
-
-                at_1 = parse(Int, items[1])
-                at_2 = parse(Int, items[2])
-                at_3 = parse(Int, items[3])
-                at_4 = parse(Int, items[4])
-
-                if at_2 <= 0 || at_3 <= 0
-                    throw(ArgumentError("Central atom type indices in torsion entry must be positive, got: $l"))
-                end
-
-                for param in items[5:end-2]
-                    p = parse(T, param)
-                    push!(torp_tmp, p)
-                end
-                
-                push!(torp_tmp, true)
-                torp = TorsionParameters{T}(torp_tmp...)
-
-                if at_1 > 0 && at_4 > 0         # All atoms types defined, store forward and reverse orders
-                    seen[at_1, at_2, at_3, at_4] = 1
-                    seen[at_4, at_3, at_2, at_1] = 1
-
-                    torsion_parameters[at_1, at_2, at_3, at_4] = torp
-                    torsion_parameters[at_4, at_3, at_2, at_1] = torp
-
-                else        # First and last atoms undefined (0), loop over all possible pairs and store if not already defined previously
-                    for z in 1:num_atom_types
-                        for w in 1:num_atom_types
-                            if seen[w, at_2, at_3, z] == 0
-                                seen[w, at_2, at_3, z] = 1
-                                torsion_parameters[w, at_2, at_3, z] = torp
-                            end
-
-                            if seen[z, at_3, at_2, w] == 0
-                                seen[z, at_3, at_2, w] = 1
-                                torsion_parameters[z, at_3, at_2, w] = torp
-                            end
-                        end
-                    end
-                end
-            end
-
-
-            # Hydrogen bonds terms parameters block
-            # This block is optional => check if end-of-file reached
-            h_bond_parameters = fill(zero(HBondParameters{T}), num_atom_types, num_atom_types, num_atom_types)
-            hbdp_tmp = T[]
-            h_bond_donors = zeros(Bool, num_atom_types)
-            h_bond_acceptors = zeros(Bool, num_atom_types)
-                    
-            if !eof(f)      
-                l = strip(readline(f))
-                if !isempty(l)
-                    if !occursin("Nr of hydrogen bonds", l)
-                        throw(ArgumentError("Expected 'Nr of hydrogen bonds' header, got: $l"))
-                    end
-        
-                    num_h_bonds = parse(Int, split(l)[1])
-                    
-                    for _ in 1:num_h_bonds
-                        l = strip(readline(f))     # each line contains at1, at2, at3, followed by 4 parameters
-                        items = split(l)
-                        if length(items) != 7
-                            throw(ArgumentError("Expected 3 atom types followed by 4 hydrogen bond parameters, got: $l"))
-                        end
-                        empty!(hbdp_tmp)
-
-                        at_1 = parse(Int, items[1])
-                        at_2 = parse(Int, items[2])
-                        at_3 = parse(Int, items[3])
-
-                        if !(0 < at_1 <= num_atom_types && 0 < at_2 <= num_atom_types && 0 < at_3 <= num_atom_types)
-                            throw(ArgumentError("Hydrogen bond atom type indices must be in 1:$num_atom_types, got: $l"))
-                        end
-
-                        h_bond_donors[at_1] = true
-                        h_bond_acceptors[at_3] = true
-
-                        for param in items[4:end]
-                            p = parse(T, param)
-                            push!(hbdp_tmp, p)
-                        end
-
-                        push!(hbdp_tmp, true)
-                        hbdp = HBondParameters{T}(hbdp_tmp...)
-                        h_bond_parameters[at_1, at_2, at_3] = hbdp
-                    end
-                else
-                    println("No ReaxFF hydrogen bond parameters specified")
-                end
-            else
-                println("No ReaxFF hydrogen bond parameters specified")
-            end
-
-            if !eof(f) && !isempty(strip(readline(f)))
-                throw(ArgumentError("Unexpected content after ReaxFF force field parameters"))
-            end
-
-            # Global cutoff parameters
-            global_parameters = GlobalParameters(
-                bo_cutoff = general_parameters.cutoff_bond_order * T(0.01),
-                bond_dist_cutoff = T(5.0),
-                valence_cutoff = T(0.001),
-                valence_prod_cutoff = T(0.00001),
-                hbond_bo_cutoff = T(0.01),
-                hbond_dist_cutoff = T(7.5),
-            )
-
-            # Calculate taper correction terms
-            R_cut = general_parameters.upper_taper_radius
-
-            Tap = [one(T), zero(T), zero(T), zero(T)]  # Tap_0 through Tap_3
-
-            R_cut_pow = R_cut^4
-            push!(Tap, T(-35.0) / R_cut_pow)
-            R_cut_pow *= R_cut
-            push!(Tap, T(84.0) / R_cut_pow)
-            R_cut_pow *= R_cut
-            push!(Tap, T(-70.0) / R_cut_pow)
-            R_cut_pow *= R_cut
-            push!(Tap, T(20.0) / R_cut_pow)
-
-            taper_parameters = TaperParameters{T}(Tap...)
-
-            # Create combined ReaxFF parameters struct 
-            params = ReaxFF2008Params{T}(
-                atom_map,
-                angle_parameters
-            )
-
-            angle_entries, angle_parameters_flat = flatten_angle_parameters(angle_parameters, T)
-
-            device_params = DeviceParams(
-                general_parameters,
-                to_device(atom_parameters, AT),
-                to_device(bond_parameters, AT),
-                to_device(off_diagonal_parameters, AT),
-                to_device(angle_entries, AT),
-                to_device(angle_parameters_flat, AT),
-                to_device(torsion_parameters, AT),
-                to_device(h_bond_parameters, AT),
-                global_parameters,
-                taper_parameters,
-                to_device(h_bond_donors, AT),
-                to_device(h_bond_acceptors, AT)
-            )
-
-            return params, device_params
         end
 
-    catch e
-        println("Force Field File Read Error: $e")
-        st = stacktrace(catch_backtrace())
-        Base.show_backtrace(stdout, st)
-        rethrow(e)
+        # Angle parameters block
+        if !occursin("Nr of angles", l)
+            throw(ArgumentError("Expected 'Nr of angles' header, got: $l"))
+        end
+
+        num_angles = parse(Int, split(l)[1])
+
+        angle_parameters = Array{Union{Vector{AngleParameters{T}}, Nothing}}(nothing, num_atom_types, num_atom_types, num_atom_types)
+        angp_tmp = T[]
+
+        for _ in 1:num_angles
+            l = strip(readline(f))     # each line contains at1, at2, at3, followed by 7 parameters
+            items = split(l)
+            if length(items) != 10
+                throw(ArgumentError("Expected 3 atom types followed by 7 angle parameters, got: $l"))
+            end
+            empty!(angp_tmp)
+
+            at_1 = parse(Int, items[1])
+            at_2 = parse(Int, items[2])
+            at_3 = parse(Int, items[3])
+
+            for param in items[4:end]
+                p = parse(T, param)
+                push!(angp_tmp, p)
+            end
+
+            push!(angp_tmp, true)
+            angp = AngleParameters{T}(angp_tmp...)
+
+            if isnothing(angle_parameters[at_1, at_2, at_3])
+                angle_parameters[at_1, at_2, at_3] = AngleParameters{T}[]
+                angle_parameters[at_3, at_2, at_1] = AngleParameters{T}[]
+            end
+
+            push!(angle_parameters[at_1, at_2, at_3], angp)
+            if at_1 != at_3
+                push!(angle_parameters[at_3, at_2, at_1], angp)
+            end
+        end
+
+
+        # Torsion terms parameters block
+        l = strip(readline(f))
+        if !occursin("Nr of torsions", l)
+            throw(ArgumentError("Expected 'Nr of torsions' header, got: $l"))
+        end
+
+        num_torsions = parse(Int, split(l)[1])
+
+        torsion_parameters = fill(zero(TorsionParameters{T}), num_atom_types, num_atom_types, num_atom_types, num_atom_types)
+        torp_tmp = T[]
+
+        seen = zeros(Int, num_atom_types, num_atom_types, num_atom_types, num_atom_types)
+
+        for _ in 1:num_torsions
+            l = strip(readline(f))     # each line contains at1, at2, at3, at4, followed by 5 parameters, followed by 2 unused parameters
+            items = split(l)
+            if length(items) != 11
+                throw(ArgumentError("Expected 11 fields in torsion parameter line, got: $l"))
+            end
+            empty!(torp_tmp)
+
+            at_1 = parse(Int, items[1])
+            at_2 = parse(Int, items[2])
+            at_3 = parse(Int, items[3])
+            at_4 = parse(Int, items[4])
+
+            if at_2 <= 0 || at_3 <= 0
+                throw(ArgumentError("Central atom type indices in torsion entry must be positive, got: $l"))
+            end
+
+            for param in items[5:end-2]
+                p = parse(T, param)
+                push!(torp_tmp, p)
+            end
+
+            push!(torp_tmp, true)
+            torp = TorsionParameters{T}(torp_tmp...)
+
+            if at_1 > 0 && at_4 > 0         # All atoms types defined, store forward and reverse orders
+                seen[at_1, at_2, at_3, at_4] = 1
+                seen[at_4, at_3, at_2, at_1] = 1
+
+                torsion_parameters[at_1, at_2, at_3, at_4] = torp
+                torsion_parameters[at_4, at_3, at_2, at_1] = torp
+
+            else        # First and last atoms undefined (0), loop over all possible pairs and store if not already defined previously
+                for z in 1:num_atom_types
+                    for w in 1:num_atom_types
+                        if seen[w, at_2, at_3, z] == 0
+                            seen[w, at_2, at_3, z] = 1
+                            torsion_parameters[w, at_2, at_3, z] = torp
+                        end
+
+                        if seen[z, at_3, at_2, w] == 0
+                            seen[z, at_3, at_2, w] = 1
+                            torsion_parameters[z, at_3, at_2, w] = torp
+                        end
+                    end
+                end
+            end
+        end
+
+
+        # Hydrogen bonds terms parameters block
+        # This block is optional => check if end-of-file reached
+        h_bond_parameters = fill(zero(HBondParameters{T}), num_atom_types, num_atom_types, num_atom_types)
+        hbdp_tmp = T[]
+        h_bond_donors = zeros(Bool, num_atom_types)
+        h_bond_acceptors = zeros(Bool, num_atom_types)
+
+        if !eof(f)
+            l = strip(readline(f))
+            if !isempty(l)
+                if !occursin("Nr of hydrogen bonds", l)
+                    throw(ArgumentError("Expected 'Nr of hydrogen bonds' header, got: $l"))
+                end
+
+                num_h_bonds = parse(Int, split(l)[1])
+
+                for _ in 1:num_h_bonds
+                    l = strip(readline(f))     # each line contains at1, at2, at3, followed by 4 parameters
+                    items = split(l)
+                    if length(items) != 7
+                        throw(ArgumentError("Expected 3 atom types followed by 4 hydrogen bond parameters, got: $l"))
+                    end
+                    empty!(hbdp_tmp)
+
+                    at_1 = parse(Int, items[1])
+                    at_2 = parse(Int, items[2])
+                    at_3 = parse(Int, items[3])
+
+                    if !(0 < at_1 <= num_atom_types && 0 < at_2 <= num_atom_types && 0 < at_3 <= num_atom_types)
+                        throw(ArgumentError("Hydrogen bond atom type indices must be in 1:$num_atom_types, got: $l"))
+                    end
+
+                    h_bond_donors[at_1] = true
+                    h_bond_acceptors[at_3] = true
+
+                    for param in items[4:end]
+                        p = parse(T, param)
+                        push!(hbdp_tmp, p)
+                    end
+
+                    push!(hbdp_tmp, true)
+                    hbdp = HBondParameters{T}(hbdp_tmp...)
+                    h_bond_parameters[at_1, at_2, at_3] = hbdp
+                end
+            else
+                @warn "No ReaxFF hydrogen bond parameters specified"
+            end
+        else
+            @warn "No ReaxFF hydrogen bond parameters specified"
+        end
+
+        if !eof(f) && !isempty(strip(readline(f)))
+            throw(ArgumentError("Unexpected content after ReaxFF force field parameters"))
+        end
+
+        # Global cutoff parameters
+        global_parameters = GlobalParameters(
+            bo_cutoff = general_parameters.cutoff_bond_order * T(0.01),
+            bond_dist_cutoff = T(5.0),
+            valence_cutoff = T(0.001),
+            valence_prod_cutoff = T(0.00001),
+            hbond_bo_cutoff = T(0.01),
+            hbond_dist_cutoff = T(7.5),
+        )
+
+        # Calculate taper correction terms
+        R_cut = general_parameters.upper_taper_radius
+
+        Tap = [one(T), zero(T), zero(T), zero(T)]  # Tap_0 through Tap_3
+
+        R_cut_pow = R_cut^4
+        push!(Tap, T(-35.0) / R_cut_pow)
+        R_cut_pow *= R_cut
+        push!(Tap, T(84.0) / R_cut_pow)
+        R_cut_pow *= R_cut
+        push!(Tap, T(-70.0) / R_cut_pow)
+        R_cut_pow *= R_cut
+        push!(Tap, T(20.0) / R_cut_pow)
+
+        taper_parameters = TaperParameters{T}(Tap...)
+
+        # Create combined ReaxFF parameters struct
+        params = ReaxFF2008Params{T}(
+            atom_map,
+            angle_parameters
+        )
+
+        angle_entries, angle_parameters_flat = flatten_angle_parameters(angle_parameters, T)
+
+        device_params = DeviceParams(
+            general_parameters,
+            to_device(atom_parameters, AT),
+            to_device(bond_parameters, AT),
+            to_device(off_diagonal_parameters, AT),
+            to_device(angle_entries, AT),
+            to_device(angle_parameters_flat, AT),
+            to_device(torsion_parameters, AT),
+            to_device(h_bond_parameters, AT),
+            global_parameters,
+            taper_parameters,
+            to_device(h_bond_donors, AT),
+            to_device(h_bond_acceptors, AT)
+        )
+
+        return params, device_params
     end
 end
 
@@ -1184,7 +1168,7 @@ function ReaxFF(; version::V=ReaxFF2008(),
                   float_type::Type{T}=Float64,
                   array_type::Type{AT}=Array,
                   smoothness_correction::Bool=false,
-) where {V<:ReaxFFVersion, T<:AbstractFloat, AT}
+) where {V<:AbstractReaxFFVersion, T<:AbstractFloat, AT}
 
     params, device_params = _set_force_field_file_reaxff_params(force_field_file, T, AT)
 
@@ -1644,7 +1628,7 @@ end
 
     odgp_ij = odgp[atid_i, atid_j]
     
-    if ro_σ_i > 0.0 && ro_σ_j > 0.0 && odgp_ij.ro_sigma > 0.0
+    if ro_σ_i > zero(T) && ro_σ_j > zero(T) && odgp_ij.ro_sigma > zero(T)
         p_bo1 = bndp_ij.p_bo1
         p_bo2 = bndp_ij.p_bo2
         ro_σ_bond = odgp_ij.ro_sigma
@@ -1665,7 +1649,7 @@ end
         dBOσ′_dr = zero(T)
     end
 
-    if ro_π_i > 0.0 && ro_π_j > 0.0 && odgp_ij.ro_pi > 0.0
+    if ro_π_i > zero(T) && ro_π_j > zero(T) && odgp_ij.ro_pi > zero(T)
         p_bo3 = bndp_ij.p_bo3
         p_bo4 = bndp_ij.p_bo4
         ro_π_bond = odgp_ij.ro_pi
@@ -1684,7 +1668,7 @@ end
         dBOπ′_dr = zero(T)
     end
 
-    if ro_ππ_i > 0.0 && ro_ππ_j > 0.0 && odgp_ij.ro_pipi > 0.0
+    if ro_ππ_i > zero(T) && ro_ππ_j > zero(T) && odgp_ij.ro_pipi > zero(T)
         p_bo5 = bndp_ij.p_bo5
         p_bo6 = bndp_ij.p_bo6
         ro_ππ_bond = odgp_ij.ro_pipi
@@ -2747,7 +2731,7 @@ end
                         BO_jk_raw = BO[idx_k, j]
                         BO_jk = BO_jk_raw - valence_cutoff
 
-                        if (BO_jk > 0.0) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
+                        if (BO_jk > zero(BO_jk)) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
                             for p_idx in start_index:end_index
                                 angp_ijk = angp[p_idx]
 
@@ -2856,7 +2840,7 @@ end
         dSBO_pref = SBO_prdt * T(8.0) * sbo_sm1
         dSBO_dΔj = (SBO_prdt - one(T)) * (one(T) + p_val8 * dn_lp_dΔi_ef)
 
-        if SBO <= 0.0
+        if SBO <= zero(T)
             SBO2 = zero(T)
             dSBO2 = zero(T)
         elseif SBO < 1.0
@@ -2878,7 +2862,7 @@ end
 
         BO_ij_raw = BO[idx_i, j]
         BO_ij = BO_ij_raw - valence_cutoff
-        if BO_ij > 0.0
+        if BO_ij > zero(T)
 
             r_vec_ij = map(x -> ustrip(x) * conv_factor, vector(coords[j], coords[i], boundary))
 
@@ -2892,7 +2876,7 @@ end
 
                 BO_jk_raw = BO[idx_k, j]
                 BO_jk = BO_jk_raw - valence_cutoff
-                if (BO_jk > 0.0) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
+                if (BO_jk > zero(T)) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
                     val_exp2 = exp(-p_val10 * (T(2.0) - SBO2))
                     val_sm1 = p_val5 - one(T)
                     val_sm2 = T(2.0) + val_exp1
@@ -3296,7 +3280,7 @@ end
                 BO_jk_raw = BO[idx_k, j]
                 BO_jk = BO_jk_raw - valence_cutoff
 
-                if BO_jk > 0.0
+                if BO_jk > zero(BO_jk)
                     # loop through neighbors i of j
                     for idx_i in 1:fill_pos[j]
                         i = nbrs[idx_i, j]
@@ -3305,7 +3289,7 @@ end
                             BO_ij_raw = BO[idx_i, j]
                             BO_ij = BO_ij_raw - valence_cutoff
 
-                            if BO_ij > 0.0
+                            if BO_ij > zero(BO_ij)
                                 # loop through neighbors l of k
                                 for idx_l in 1:fill_pos[k]
                                     l = nbrs[idx_l, k]
@@ -3318,7 +3302,7 @@ end
                                             BO_kl_raw = BO[idx_l, k]
                                             BO_kl = BO_kl_raw - valence_cutoff
 
-                                            if BO_kl > 0.0 && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
+                                            if BO_kl > zero(BO_kl) && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
                                                 valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
 
                                                 if valid_torsion_idx <= size(valid_torsions, 2)
@@ -3380,7 +3364,7 @@ end
         if k > j 
             BO_jk_raw = BO[idx_k, j]
             BO_jk = BO_jk_raw - valence_cutoff
-            if BO_jk > 0.0 
+            if BO_jk > zero(T)
 
                 idx_j_k = reverse_nbrs[idx_k, j]
 
@@ -3410,7 +3394,7 @@ end
                 if i != k 
                     BO_ij_raw = BO[idx_i, j]
                     BO_ij = BO_ij_raw - valence_cutoff
-                    if BO_ij > 0.0
+                    if BO_ij > zero(T)
                         idx_j_i = reverse_nbrs[idx_i, j]
 
                         r_vec_ij = map(x -> ustrip(x) * conv_factor, vector(coords[j], coords[i], boundary))
@@ -3434,7 +3418,7 @@ end
                             if torp_ijkl.is_defined
                                 BO_kl_raw = BO[idx_l, k]
                                 BO_kl = BO_kl_raw - valence_cutoff
-                                if BO_kl > 0.0 
+                                if BO_kl > zero(T)
                                     if smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff
                                         idx_k_l = reverse_nbrs[idx_l, k]
 
@@ -4592,7 +4576,7 @@ function compute_reaxff_energy_forces!(
 end
 
 
-get_float_type(::ReaxFF{V, T}) where {V<:ReaxFFVersion, T} = T
+get_float_type(::ReaxFF{V, T}) where {V<:AbstractReaxFFVersion, T} = T
 
 
 @kernel function force_convert_tally!(
