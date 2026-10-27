@@ -5,13 +5,21 @@ export
     ListHills,
     GridHills,
     WellTempered,
-    MetadynamicsLogger,
-    metadynamics_weights,
-    read_metadynamics_logger
+    MetadynamicsLogger
 
-@public NoTempering, AbstractMetadynamicsMemory, AbstractTempering, add_hill!, free_energy,
-        metadynamics_log_weights, tempering_height, free_energy_scale, bias_points_cache,
-        bias_at_points, can_deposit
+@public NoTempering,
+    AbstractMetadynamicsMemory,
+    AbstractTempering,
+    add_hill!,
+    free_energy,
+    metadynamics_log_weights,
+    tempering_height,
+    free_energy_scale,
+    bias_points_cache,
+    bias_at_points,
+    can_deposit,
+    read_metadynamics_logger,
+    metadynamics_weights
 
 function validate_positive_finite(value, label::AbstractString)
     if !isfinite(ustrip(value)) || value <= zero(value)
@@ -476,8 +484,7 @@ and [`Molly.free_energy_scale`](@ref), the prefactor of the free energy estimate
 A [`MetadynamicsLogger`](@ref) takes its temperature from [`WellTempered`](@ref), or from
 its `temperature` keyword for other temperings.
 
-Built-in subtypes are [`NoTempering`](@ref) (the default) and
-[`WellTempered`](@ref).
+Built-in subtypes are [`Molly.NoTempering`](@ref) (the default) and [`WellTempered`](@ref).
 """
 abstract type AbstractTempering end
 
@@ -698,7 +705,7 @@ otherwise. kT, `bias.logger.kT`, is fixed at the first deposit with the Boltzman
 of its System; a later deposit with a different kT throws.
 c(t) integrates the bias over the grid of a [`GridHills`](@ref), and over `cv_points`,
 a uniform grid of CV values, for other memories.
-See [`metadynamics_weights`](@ref).
+See [`Molly.metadynamics_weights`](@ref).
 
 c(t) costs O(grid points or `cv_points`) per deposit, so 2D/3D grids want a larger
 `n_steps`.
@@ -709,7 +716,7 @@ Call `flush(bias.logger)` after the run to write the last batch. An existing fil
 appended to as a new run with its own header, unless `overwrite=true`, which replaces it.
 Use one file per logger, also for walkers: a flush that finds its file changed by another
 writer throws.
-[`read_metadynamics_logger`](@ref) reads the file back.
+[`Molly.read_metadynamics_logger`](@ref) reads the file back.
 """
 mutable struct MetadynamicsLogger{T, K, P, S, E, F}
     const temperature::T
@@ -994,7 +1001,7 @@ header_columns(text) = [(m[1], isnothing(m[2]) ? NoUnits : uparse(replace(m[2], 
     read_metadynamics_logger(filepath; run=nothing)
 
 Restore the records of a [`MetadynamicsLogger`](@ref) file, e.g. for
-[`metadynamics_weights`](@ref) after the run. Units from the header are reattached.
+[`Molly.metadynamics_weights`](@ref) after the run. Units from the header are reattached.
 The returned logger records nothing further.
 
 A file written with `overwrite=false` can hold several appended runs, each with its own

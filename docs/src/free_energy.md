@@ -2637,7 +2637,7 @@ The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 
 
 ### Method overview
 
-[Metadynamics](https://doi.org/10.1073/pnas.202427399) (Laio & Parrinello, 2002) is a history-dependent biasing method for enhanced sampling and free energy estimation. Rather than pre-defining a fixed set of thermodynamic states as MBAR, AWH and TSS do, it runs a single simulation and periodically deposits small Gaussian "hills" of bias potential at the current value of one or more collective variables (CVs). Over time these hills accumulate and fill in the free energy wells the system would otherwise stay trapped in, pushing it to explore new regions of CV space:
+[Metadynamics](https://doi.org/10.1073/pnas.202427399) is a history-dependent biasing method for enhanced sampling and free energy estimation. Rather than pre-defining a fixed set of thermodynamic states as MBAR, AWH and TSS do, it runs a single simulation and periodically deposits small Gaussian "hills" of bias potential at the current value of one or more collective variables (CVs). Over time these hills accumulate and fill in the free energy wells the system would otherwise stay trapped in, pushing it to explore new regions of CV space:
 
 ```math
 V_{bias}(\boldsymbol{s}, t) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
@@ -2647,12 +2647,12 @@ Once the bias has grown to compensate the underlying free energy landscape, $V_{
 
 In Molly this is implemented by [`Metadynamics`](@ref), usable directly as a `general_inters` entry. Hills on periodic CVs such as [`CalcTorsion`](@ref) wrap around automatically; custom CV types opt in by defining [`Molly.cv_period`](@ref). The CVs and the resulting force or potential are evaluated each step and the rate at which new gaussians are added is controlled via `n_steps`. Two aspects are controlled by Julia type dispatch:
 
-- **Hill memory**, an [`Molly.AbstractMetadynamicsMemory`](@ref): 
+- **Hill memory**, a [`Molly.AbstractMetadynamicsMemory`](@ref): 
     - [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills), no knowledge of CV range needed)
     - [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
-- **Hill height scaling**, an [`Molly.AbstractTempering`](@ref):
+- **Hill height scaling**, a [`Molly.AbstractTempering`](@ref):
     - the default [`Molly.NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
-    - [`WellTempered`](@ref) (Barducci, Bussi & Parrinello, 2008) instead shrinks each new hill according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
+    - [`WellTempered`](@ref) instead [shrinks each new hill](https://doi.org/10.1103/PhysRevLett.100.020603) according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
 
 Standard metadynamics is prone to over-filling: if the total deposited height grows much larger than $k_B T$, the bias floods the well and the system random-walks broadly for the rest of the run, widening the reconstructed profile well beyond the true surface. Well-tempered metadynamics avoids this at the cost of one extra parameter, `bias_factor`.
 
@@ -2758,7 +2758,7 @@ savefig(fig2,"./docs/src/images/MetaDynamicsHistogram.png")
 
 ### Reweighting
 
-Since the bias changes during the run, samples can't simply be reweighted by the final bias. A [`MetadynamicsLogger`](@ref) records, at each deposit, the CV value $s$, the bias $V(s, t)$ it was sampled under and the offset $c(t)$ of Tiwary & Parrinello (2015). The frames then get the weights $w \propto \exp\left((V(s, t) - c(t)) / k_B T\right)$, which reweight any observable of those frames to the unbiased ensemble.
+Since the bias changes during the run, samples can't simply be reweighted by the final bias. A [`MetadynamicsLogger`](@ref) records, at each deposit, the CV value $s$, the bias $V(s, t)$ it was sampled under and the [offset](https://doi.org/10.1021/jp504920s) $c(t)$. The frames then get the weights $w \propto \exp\left((V(s, t) - c(t)) / k_B T\right)$, which reweight any observable of those frames to the unbiased ensemble.
 
 The records can be used in two equivalent ways. Either use the live logger of the bias straight after the run:
 
@@ -2766,16 +2766,16 @@ The records can be used in two equivalent ways. Either use the live logger of th
 logger = bias.logger
 ```
 
-or, since the example passed a `filepath`, read the records back from `metadynamics.txt`, e.g. in a later session, with [`read_metadynamics_logger`](@ref):
+or, since the example passed a `filepath`, read the records back from `metadynamics.txt`, e.g. in a later session, with [`Molly.read_metadynamics_logger`](@ref):
 
 ```julia
-logger = read_metadynamics_logger("metadynamics.txt")
+logger = Molly.read_metadynamics_logger("metadynamics.txt")
 ```
 
 Both give the same weights:
 
 ```julia
-w = metadynamics_weights(logger)
+w = Molly.metadynamics_weights(logger)
 r_s = values(logger)
 mean_r = sum(w .* r_s) # Unbiased average distance
 ```

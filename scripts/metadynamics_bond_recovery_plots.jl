@@ -138,7 +138,7 @@ savefig(fig, "./metadynamics_bond_recovery_plots.png")
 ##
 # Reweight the deposit frames of the well-tempered run by their bias at sampling time
 r_frames = values(bias_tempered.logger)
-w_frames = metadynamics_weights(bias_tempered.logger)
+w_frames = Molly.metadynamics_weights(bias_tempered.logger)
 keep = xlims_plot[1] .<= r_frames .<= xlims_plot[2]
 dist_rw, weights_rw = r_frames[keep], w_frames[keep]
 

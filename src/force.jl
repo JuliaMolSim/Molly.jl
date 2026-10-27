@@ -747,8 +747,7 @@ Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
 
 `visit_state=true` marks the current state as visited by a simulation, which lets
-history-dependent general interactions such as [`Metadynamics`](@ref) update, e.g. deposit
-a hill. Molecular dynamics simulators pass it; other force calls don't change the system.
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function forces(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, kwargs...)
@@ -765,15 +764,17 @@ end
     forces_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters, strictness=:warn)
+                  general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the forces on all atoms in a system and the virial using the pairwise,
 specific and general interactions.
-For constrained systems, constraint virial contributions are approximated using
-the same deterministic small-step constraint preview as [`virial`](@ref).
 
 Returns a tuple of the forces and the virial.
 This is faster than calling [`forces`](@ref) and [`virial`](@ref) separately.
+For constrained systems, constraint virial contributions are approximated using
+the same deterministic small-step constraint preview as [`virial`](@ref).
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function forces_virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return forces_virial(sys, find_neighbors(sys; n_threads=n_threads);
@@ -798,10 +799,13 @@ end
     forces!(fs, system, neighbors, step_n, buffers, needs_vir_val;
             n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
             specific_inter_lists=system.specific_inter_lists,
-            general_inters=system.general_inters, strictness=:warn)
+            general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions and add them to `fs`.
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function forces!(fs,
                  sys::System{<:Any, <:Any, T, TH},
@@ -813,8 +817,8 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness(),
-                 visit_state::Bool=false) where {T, TH, needs_vir}
+                 visit_state::Bool=false,
+                 strictness=default_strictness()) where {T, TH, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(TH) * sys.energy_units)
     else
@@ -876,11 +880,10 @@ function forces!(fs,
         buffers.virial .= buffers.vir_nounits .* sys.energy_units
     end
 
-    # visit_state lets history-dependent interactions (e.g. Metadynamics) update at this state
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 strictness=strictness, visit_state=visit_state)
+                                 visit_state=visit_state, strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1325,8 +1328,8 @@ function forces!(fs,
                  pairwise_inters=sys.pairwise_inters,
                  specific_inter_lists=sys.specific_inter_lists,
                  general_inters=sys.general_inters,
-                 strictness=default_strictness(),
-                 visit_state::Bool=false) where needs_vir
+                 visit_state::Bool=false,
+                 strictness=default_strictness()) where needs_vir
     # Allow an Enzyme reverse rule
     gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                 specific_inter_lists, n_threads)
@@ -1334,7 +1337,7 @@ function forces!(fs,
     for inter in values(general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                 strictness=strictness, visit_state=visit_state)
+                                 visit_state=visit_state, strictness=strictness)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 

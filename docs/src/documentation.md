@@ -1122,7 +1122,10 @@ For example, the following could go in the function above:
 
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
 
-A general interaction that changes with the simulation history, such as [`Metadynamics`](@ref), can use the `visit_state` keyword argument. It is `true` when a molecular dynamics simulator visits the current state in its force calculation, and `false` for minimizers, loggers and other force or energy calls, so that only visited states update the interaction. It can be `true` several times in one step, e.g. in the substeps of a multiple time step integrator, so the interaction should update once per `step_n`. [`MetropolisMonteCarlo`](@ref) and [`ReplicaExchangeMD`](@ref) never pass `visit_state=true`.
+A general interaction that changes with the simulation history, such as [`Metadynamics`](@ref), can use the `visit_state` keyword argument.
+This is given to [`forces`](@ref) and [`potential_energy`](@ref) and defaults to `false`.
+It is `true` for a molecular dynamics simulator force call, and `false` for minimizers and loggers, so that only visited states update the interaction.
+[`MetropolisMonteCarlo`](@ref) and [`ReplicaExchangeMD`](@ref) never pass `visit_state=true` and are hence not compatible with these interactions.
 
 To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia

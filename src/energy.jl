@@ -204,11 +204,14 @@ end
     potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                      specific_inter_lists=system.specific_inter_lists,
-                     general_inters=system.general_inters, strictness=:warn,
-                     visit_state=false)
+                     general_inters=system.general_inters, visit_state=false,
+                     strictness=:warn)
 
 Calculate the potential energy of a system using the pairwise, specific and
-general interactions. `visit_state` is as for [`forces`](@ref).
+general interactions.
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 
     potential_energy(inter, vec_ij, atom_i, atom_j, energy_units, special, coord_i, coord_j,
                      boundary, velocity_i, velocity_j, step_n)
@@ -246,8 +249,8 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness(),
-                          visit_state::Bool=false) where TH
+                          visit_state::Bool=false,
+                          strictness=default_strictness()) where TH
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
         pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
@@ -270,15 +273,14 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           Val(TH), step_n)
     end
 
-    # visit_state lets history-dependent interactions (e.g. Metadynamics) update at this state
     # `map` over the tuple keeps each interaction concretely typed; a loop over general
     #   interactions of different types gives a Union that Enzyme can not differentiate
     pes_general = map(values(general_inters)) do inter
         uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness,
-                                              visit_state=visit_state),
+                                              n_threads=n_threads, visit_state=visit_state,
+                                              strictness=strictness),
         )
     end
     for pe_general in pes_general
@@ -538,8 +540,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness(),
-                          visit_state::Bool=false)
+                          visit_state::Bool=false,
+                          strictness=default_strictness())
     # Allow an Enzyme reverse rule
     pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
@@ -549,8 +551,8 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
         uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness,
-                                visit_state=visit_state),
+                                              n_threads=n_threads, visit_state=visit_state,
+                                              strictness=strictness),
         )
     end
     for pe_general in pes_general
