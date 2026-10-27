@@ -214,6 +214,7 @@ windowed TSS. `history_forgetting` can be a [`Molly.TSSHistoryForgetting`](@ref)
 The state owns the active thermodynamic state, local window estimators,
 visit-control coupling state, and diagnostic histories.
 Loggers are attached by [`TSSSimulation`](@ref), not by `TSSState`.
+History-dependent general interactions such as [`Metadynamics`](@ref) are not supported.
 """
 mutable struct TSSState{T, ES, AS, G, W, E}
     state_space::ES # Shared ExtendedStateSpace among windows
@@ -796,6 +797,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           visit_control_damping::Real = 1.0,
                           pi_regularization::Real = 1e-3)
 
+    check_thermo_states_history_inters(thermo_states, "TSS")
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
     K = n_states(state_space)
     explicit_graph = !isnothing(graph)

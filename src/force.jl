@@ -24,10 +24,13 @@ calc_accels(f, m) = (iszero(m) ? zero(f / oneunit(m)) : (f / m))
     accelerations(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
-                  general_inters=system.general_inters, strictness=:warn)
+                  general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function accelerations(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return accelerations(sys, find_neighbors(sys; n_threads=n_threads);
@@ -741,7 +744,7 @@ zero_forces(sys) = ustrip_vec.(zero.(sys.coords)) .* sys.force_units
     forces(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
            specific_inter_lists=system.specific_inter_lists,
-           general_inters=system.general_inters, strictness=:warn, visit_state=false)
+           general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.

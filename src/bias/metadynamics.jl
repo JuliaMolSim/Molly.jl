@@ -1,25 +1,22 @@
 # Metadynamics bias potential
 
 export
-    Metadynamics,
     ListHills,
     GridHills,
     WellTempered,
+    Metadynamics,
     MetadynamicsLogger
 
-@public NoTempering,
-    AbstractMetadynamicsMemory,
-    AbstractTempering,
+@public AbstractMetadynamicsMemory,
     add_hill!,
-    free_energy,
-    metadynamics_log_weights,
+    can_deposit,
+    AbstractTempering,
+    NoTempering,
     tempering_height,
     free_energy_scale,
-    bias_points_cache,
-    bias_at_points,
-    can_deposit,
-    read_metadynamics_logger,
-    metadynamics_weights
+    metadynamics_log_weights,
+    metadynamics_weights,
+    read_metadynamics_logger
 
 function validate_positive_finite(value, label::AbstractString)
     if !isfinite(ustrip(value)) || value <= zero(value)
@@ -35,14 +32,15 @@ Abstract type for the different ways a [`Metadynamics`](@ref) can store deposite
 Gaussian hills.
 
 Subtypes must have the fields `cvs`, the tuple of CVs, and `height`, the default hill height,
-and implement
-`potential_energy(memory, cv_value; kwargs...)`, `bias_gradient(memory, cv_value; kwargs...)`
-and `add_hill!(memory, cv_value, height)`, where `cv_value` is a scalar for one CV and a tuple
-for several. The keyword arguments include the `strictness` of the simulation.
-Subtypes that support periodic CVs take the periods from [`cv_period`](@ref) in their
-constructor. Optionally, they implement [`can_deposit`](@ref)`(memory, cv_value; kwargs...)`
-to skip hills (e.g. outside a grid), and [`bias_points_cache`](@ref) with
-[`bias_at_points`](@ref) for a cheaper offset of a [`MetadynamicsLogger`](@ref).
+and implement `potential_energy(memory, cv_value; kwargs...)`,
+`Molly.bias_gradient(memory, cv_value; kwargs...)` and
+`Molly.add_hill!(memory, cv_value, height)`, where `cv_value` is a scalar for one CV and a
+tuple for several. The keyword arguments include the `strictness` of the simulation.
+Subtypes that support periodic CVs take the periods from [`Molly.cv_period`](@ref) in their
+constructor. Optionally, they implement
+[`Molly.can_deposit`](@ref)`(memory, cv_value; kwargs...)` to skip hills (e.g. outside a
+grid), and `bias_points_cache` with `bias_at_points` for a cheaper offset of a
+[`MetadynamicsLogger`](@ref).
 Built-in subtypes are [`ListHills`](@ref) and [`GridHills`](@ref).
 """
 abstract type AbstractMetadynamicsMemory end
@@ -78,12 +76,13 @@ O(n_hills) per evaluation; see [`GridHills`](@ref) for an O(1) alternative.
 
 `sigma` and the elements of `centers` are scalars for a single CV, or tuples with one
 entry per CV for several. Hills on periodic CVs such as torsions wrap around (see
-[`cv_period`](@ref)).
+[`Molly.cv_period`](@ref)).
 
 # Arguments
 - `cvs`: Tuple of CV descriptors, e.g. [`CalcDist`](@ref); a single CV may be passed
     without the tuple.
-- `height`: Default hill height, used unless [`add_hill!`](@ref) is given an explicit height.
+- `height`: Default hill height, used unless [`Molly.add_hill!`](@ref) is given an
+    explicit height.
 - `sigma`: Gaussian width (standard deviation), in CV units.
 - `centers`: CV values where hills have already been deposited. Defaults to an empty
     vector with the float element type of `sigma`; its element type sets the precision and
@@ -215,7 +214,8 @@ larger `n_steps`. Use [`ListHills`](@ref) for more CVs.
 # Arguments
 - `cvs`: Tuple of CV descriptors, e.g. [`CalcDist`](@ref); a single CV may be passed
     without the tuple.
-- `height`: Default hill height, used unless [`add_hill!`](@ref) is given an explicit height.
+- `height`: Default hill height, used unless [`Molly.add_hill!`](@ref) is given an
+    explicit height.
 - `sigma`: Gaussian width (standard deviation), scalar or one per dimension.
 - `grid_min`, `grid_max`: Extent of the grid, scalar or one per dimension.
 - `n_points`: Number of grid points, at least 2 in every dimension; a single Integer or one
@@ -227,10 +227,10 @@ larger `n_steps`. Use [`ListHills`](@ref) for more CVs.
     force along that CV, and no hills are deposited. With several CVs, the others still feel
     the bias at the edge. `:global_strictness` follows the `strictness` of the simulation.
 
-The grid of a periodic CV such as a torsion (see [`cv_period`](@ref)) must span exactly
-one period, e.g. `-π` to `π`, with `grid_max` the same point as `grid_min`: its `n_points`
-points are then spaced by `period / n_points`, hills and interpolation wrap around, and CV
-values outside `[grid_min, grid_max]` are wrapped into the grid.
+The grid of a periodic CV such as a torsion (see [`Molly.cv_period`](@ref)) must span
+exactly one period, e.g. `-π` to `π`, with `grid_max` the same point as `grid_min`: its
+`n_points` points are then spaced by `period / n_points`, hills and interpolation wrap
+around, and CV values outside `[grid_min, grid_max]` are wrapped into the grid.
 """
 struct GridHills{C, K, R, G, E, H, T} <: AbstractMetadynamicsMemory
     cvs::C
@@ -500,8 +500,8 @@ struct NoTempering <: AbstractTempering end
     tempering_height(tempering, v_bias, base_height, k)
 
 Height of a new hill, given its base height `base_height` and the bias `v_bias` accumulated
-so far at its CV value, as scaled by `tempering` (an [`AbstractTempering`](@ref)). `k` is
-the Boltzmann constant of the System.
+so far at its CV value, as scaled by `tempering` (a [`Molly.AbstractTempering`](@ref)).
+`k` is the Boltzmann constant of the System.
 """
 function tempering_height end
 
@@ -552,7 +552,7 @@ end
 
 Prefactor relating the converged bias to the free energy,
 `F(s) ≈ free_energy_scale(tempering) * V_bias(s) + const`.
-Custom [`AbstractTempering`](@ref) types should implement it.
+Custom [`Molly.AbstractTempering`](@ref) types should implement it.
 """
 free_energy_scale(::NoTempering) = -1
 free_energy_scale(wt::WellTempered) = -wt.bias_factor / (wt.bias_factor - 1)
@@ -566,22 +566,23 @@ previously visited collective variable (CV) values.
 V(\boldsymbol{s}) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
 ```
 
-The `memory` argument (an [`AbstractMetadynamicsMemory`](@ref)) holds the CVs and controls
-how hills are stored: [`ListHills`](@ref) (exact, O(n_hills)) or [`GridHills`](@ref) (O(1),
-grid-based).
+The `memory` argument (a [`Molly.AbstractMetadynamicsMemory`](@ref)) holds the CVs and
+controls how hills are stored: [`ListHills`](@ref) (exact, O(n_hills)) or
+[`GridHills`](@ref) (O(1), grid-based).
 
 With the CVs in the memory, e.g. `Metadynamics(ListHills((cv,), height, sigma))`, the bias
 is an AtomsCalculators.jl calculator usable directly as a `general_inters` entry. Each CV
 is evaluated on the coordinates its own `correction` asks for, and hills on periodic CVs
-such as torsions wrap around (see [`cv_period`](@ref)). Hills are deposited into the memory
-passed in, which is also `bias.memory`, so biases built from one memory are walkers sharing
-their hills. Deposits into a memory aren't thread-safe, so walkers sharing a memory must
-run one after the other, not in parallel.
+such as torsions wrap around (see [`Molly.cv_period`](@ref)). Hills are deposited into the
+memory passed in, which is also `bias.memory`, so biases built from one memory are walkers
+sharing their hills. Deposits into a memory aren't thread-safe, so walkers sharing a memory
+must run one after the other, not in parallel.
 
 Hills are deposited when a simulator visits a state, on the first visit in each window of
 `n_steps` steps -- no external logger is needed. Molecular dynamics integrators visit a
 state in their force calculation (`visit_state=true` in [`forces`](@ref)).
-[`MetropolisMonteCarlo`](@ref) and [`ReplicaExchangeMD`](@ref) aren't supported yet.
+[`MetropolisMonteCarlo`](@ref), [`ReplicaExchangeMD`](@ref), [`AWHSimulation`](@ref) and
+[`TSSSimulation`](@ref) aren't supported yet.
 The first hill is on the start configuration, at step 0, or at step 1 for integrators such
 as [`Langevin`](@ref). A multiple time step integrator deposits once per outer step.
 Minimizers, loggers, couplers and other force or energy calls don't deposit. Chunked `simulate!` calls deposit as one continuous run, with or without `init_step`, as
@@ -590,20 +591,21 @@ between runs, shifts the schedule. The number of hills deposited so far is
 `bias.n_deposits` and the step of the last deposit window is `bias.last_deposit_step`
 (outside a [`GridHills`](@ref) grid that window adds no hill).
 
-[`add_hill!`](@ref) deposits a hill manually, on every `n_steps`-th call. Force or energy
-calls outside a simulator deposit only when given `visit_state=true`: with a step number,
-as [`forces`](@ref) and [`potential_energy`](@ref) pass (0 by default), they follow the
-step schedule; without one, as in `AtomsCalculators.forces(sys, bias; visit_state=true)`,
-they count towards the same call counter as `add_hill!`.
+[`Molly.add_hill!`](@ref) deposits a hill manually, on every `n_steps`-th call. Force or
+energy calls outside a simulator deposit only when given `visit_state=true`: with a step
+number, as [`forces`](@ref) and [`potential_energy`](@ref) pass (0 by default), they
+follow the step schedule; without one, as in
+`AtomsCalculators.forces(sys, bias; visit_state=true)`, they count towards the same call
+counter as `Molly.add_hill!`.
 
-`tempering` (an [`AbstractTempering`](@ref)) scales each deposited hill's height; the
-default [`NoTempering`](@ref) always deposits the full base height.
+`tempering` (a [`Molly.AbstractTempering`](@ref)) scales each deposited hill's height; the
+default [`Molly.NoTempering`](@ref) always deposits the full base height.
 
 # Arguments
 - `memory::AbstractMetadynamicsMemory`: The CVs, and the storage and evaluation strategy
     for deposited hills.
-- `n_steps::Integer=1`: Number of simulation steps between deposits into
-    `memory`, starting with the start configuration. [`add_hill!`](@ref) calls and visiting
+- `n_steps::Integer=1`: Number of simulation steps between deposits into `memory`,
+    starting with the start configuration. [`Molly.add_hill!`](@ref) calls and visiting
     force calls without a step number use a separate call counter, depositing on every
     `n_steps`-th such call without affecting the simulation schedule.
 - `tempering::AbstractTempering=NoTempering()`: Scales the height of each deposited hill.
@@ -645,17 +647,17 @@ end
 Deposit a new Gaussian hill. A [`GridHills`](@ref) deposits nothing while a CV is outside
 its grid.
 
-Called automatically from `forces!` during a simulation -- there is usually no need to call
-this directly.
+Called automatically from `Molly.forces!` during a simulation -- there is usually no need to
+call this directly.
 
 `cv_value` matches the shape `md` was constructed with (scalar or tuple); the `sys` form
 evaluates the CVs of `md.memory` itself. Calls are counted by a manual call counter, separate from
 the step schedule of automatic deposits during a simulation; only every
 `n_steps`-th call actually updates the memory, at height
-`tempering_height(md.tempering, v_bias, md.memory.height, k)`, where `v_bias` is the bias at
-the deposited CV value (given, or evaluated from `sys`). `k` is the Boltzmann constant, by
-default that of a [`System`](@ref) with the energy units of the memory, and `sys.k` for
-the `sys` form.
+`Molly.tempering_height(md.tempering, v_bias, md.memory.height, k)`, where `v_bias` is the
+bias at the deposited CV value (given, or evaluated from `sys`). `k` is the Boltzmann
+constant, by default that of a [`System`](@ref) with the energy units of the memory, and
+`sys.k` for the `sys` form.
 """
 function add_hill!(md::Metadynamics, cv_value; k=default_k(unit(md.memory.height)))
     if !bias_all_finite(cv_value)
@@ -679,13 +681,6 @@ end
 
 is_history_dependent(::Metadynamics) = true
 
-"""
-    free_energy(bias::Metadynamics, cv_value)
-
-Estimate of the free energy at `cv_value` (scalar, or a tuple for several CVs) from the
-current bias, up to an additive constant. Broadcasts over CV values:
-`free_energy.(bias, cv_values)`.
-"""
 free_energy(md::Metadynamics, cv_value) =
     free_energy_scale(md.tempering) * potential_energy(md.memory, cv_value)
 
@@ -791,15 +786,13 @@ cv_value_type(mem::ListHills) = eltype(mem.centers)
 cv_value_type(mem::GridHills) = typeof(from_dims(mem.grid_min))
 cv_value_type(mem) = Any
 
-"""
-    bias_points_cache(memory, cv_points)
-
-Cache for [`bias_at_points`](@ref): the points over which a [`MetadynamicsLogger`](@ref)
-integrates the bias for its offset c(t), and what `memory` needs to update the bias there.
+#=
+Cache for `bias_at_points`: the points over which a `MetadynamicsLogger` integrates the
+bias for its offset c(t), and what `memory` needs to update the bias there.
 `cv_points` is a uniform grid of CV values, or `nothing` for a memory with its own grid
-such as [`GridHills`](@ref). The default keeps the points; custom memories can add a
-method for a cheaper update.
-"""
+such as `GridHills`. The default keeps the points; custom memories can add a method for
+a cheaper update.
+=#
 function bias_points_cache(mem, cv_points)
     points = points_vector(mem, cv_points)
     potential_energy(mem, first(points)) # Shape and units, before the run
@@ -826,13 +819,10 @@ function bias_points_cache(mem::ListHills, cv_points)
     return ListHillsPoints(points, fill(zero(mem.height), length(points)), 0)
 end
 
-"""
-    bias_at_points(memory, cache)
-
-The bias of `memory` at the points of `cache`, from [`bias_points_cache`](@ref).
-"""
+# The bias of `memory` at the points of `cache`, from `bias_points_cache`.
 bias_at_points(mem, points) = [potential_energy(mem, s) for s in points]
 bias_at_points(mem::GridHills, ::Nothing) = vec(mem.values)
+
 function bias_at_points(mem::ListHills, cache::ListHillsPoints)
     # Adds the hills deposited since the last call, also those of other walkers
     for i in (cache.n_hills + 1):length(mem.centers)

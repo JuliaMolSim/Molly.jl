@@ -16,10 +16,13 @@ export
     total_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                  specific_inter_lists=system.specific_inter_lists,
-                 general_inters=system.general_inters, strictness=:warn)
+                 general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function total_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return total_energy(sys, find_neighbors(sys; n_threads=n_threads);

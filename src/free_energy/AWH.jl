@@ -46,6 +46,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
     energies for adjacent λ windows. Generally improves performance.
 
 Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
+History-dependent general interactions such as [`Metadynamics`](@ref) are not supported.
 """
 mutable struct AWHState{T, ES, AS}
     state_space::ES
@@ -138,6 +139,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   ρ::Union{Nothing, AbstractArray} = nothing,
                   reuse_neighbors::Bool = true)
 
+    check_thermo_states_history_inters(thermo_states, "AWH")
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors=reuse_neighbors)
     active_state = ActiveThermoState(state_space, first_state)
     n_λ = n_states(state_space)

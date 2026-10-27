@@ -622,6 +622,7 @@ function Molly.bias_gradient(bias_fn::MyBias, cv_sim; kwargs...)
     return bias_grad
 end
 ```
+Both methods are given the keyword arguments of the force or energy call, such as `step_n` and `visit_state` (see [General interactions](@ref)).
 
 Once the CV and the bias function have been defined, a [`BiasPotential`](@ref) can be constructed and added as a general interaction in the system setup, e.g. `general_inters = (BiasPotential(cv_type, bias_type),)`.
 A system can be biased along multiple CVs simultaneously by adding several [`BiasPotential`](@ref)s to `general_inters`.
@@ -1125,7 +1126,7 @@ A method for the `AtomsCalculators.potential_energy` function that takes the sam
 A general interaction that changes with the simulation history, such as [`Metadynamics`](@ref), can use the `visit_state` keyword argument.
 This is given to [`forces`](@ref) and [`potential_energy`](@ref) and defaults to `false`.
 It is `true` for a molecular dynamics simulator force call, and `false` for minimizers and loggers, so that only visited states update the interaction.
-[`MetropolisMonteCarlo`](@ref) and [`ReplicaExchangeMD`](@ref) never pass `visit_state=true` and are hence not compatible with these interactions.
+[`MetropolisMonteCarlo`](@ref) never passes `visit_state=true`, and [`ReplicaExchangeMD`](@ref), [`AWHSimulation`](@ref) and [`TSSSimulation`](@ref) evaluate the energies of other thermodynamic states with frozen copies of the interactions, so none of these are compatible with such interactions.
 
 To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia
@@ -1306,7 +1307,8 @@ function Molly.simulate!(sys,
     # Calculate accelerations like this
     # Includes appropriate unit conversion for when the force units are per mol
     # See src/simulators.jl for more efficient code that reuses memory
-    accels_t = accelerations(sys, neighbors, 0; n_threads=n_threads)
+    # visit_state=true lets history-dependent interactions such as Metadynamics update
+    accels_t = accelerations(sys, neighbors, 0; n_threads=n_threads, visit_state=true)
 
     for step_n in 1:n_steps
         # Example velocity Verlet update
@@ -1315,7 +1317,8 @@ function Molly.simulate!(sys,
         # Ensure coordinates stay within the simulation box like this
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
-        accels_t_dt = accelerations(sys, neighbors, step_n; n_threads=n_threads)
+        accels_t_dt = accelerations(sys, neighbors, step_n; n_threads=n_threads,
+                                    visit_state=true)
         sys.velocities .+= (accels_t .+ accels_t_dt) .* sim.dt ./ 2
         accels_t = accels_t_dt
 
