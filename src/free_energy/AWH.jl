@@ -345,7 +345,7 @@ umbrella potential). It is typically not required for standard alchemical transf
 
 # Arguments
 - `awh_state::AWHState{T}`: The [`AWHState`](@ref) containing the λ windows and accumulators.
-- `num_md_steps::Int=10`: Number of MD integration steps to perform between AWH coordinate 
+- `n_md_steps::Int=10`: Number of MD integration steps to perform between AWH coordinate 
     sampling and reweighting.
 - `update_freq::Int=1`: Number of samples to collect before applying an update to the AWH bias.
 - `well_tempered_factor::Real=10.0`: If finite, the AWH target distribution (ρ) is dynamically 
@@ -377,7 +377,7 @@ end
 
 function AWHSimulation(
     awh_state::AWHState{T};
-    num_md_steps::Int = 10,
+    n_md_steps::Int = 10,
     update_freq::Int = 1,
     well_tempered_factor::Real = 10.0,
     coverage_threshold::Real = 1.0,
@@ -403,7 +403,7 @@ function AWHSimulation(
 
     return AWHSimulation(n_win,
                          copy(awh_state.N_bias),
-                         num_md_steps,
+                         n_md_steps,
                          update_freq,
                          T(well_tempered_factor),
                          T(coverage_threshold),

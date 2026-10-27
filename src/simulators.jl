@@ -332,7 +332,7 @@ For a [`ReplicaSystem`](@ref) and [`ReplicaExchangeMD`](@ref) this calls
 
 Alternatively, run an AWH simulation for a given number of molecular dynamics steps.
 The total number of AWH iterations is determined by dividing `n_steps` by the
-`num_md_steps` given to the [`AWHSimulation`](@ref).
+`n_md_steps` given to the [`AWHSimulation`](@ref).
 
 Alternatively, run the cycles of a [`TSSSimulation`](@ref).
 `replica_rngs` supplies one RNG stream per replica, otherwise each replica RNG is reseeded

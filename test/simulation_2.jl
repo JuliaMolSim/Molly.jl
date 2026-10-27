@@ -776,7 +776,7 @@ end
     # Wrap in AWHSimulation
     awh_sim = AWHSimulation(
         awh_state;
-        num_md_steps=10,
+        n_md_steps=10,
         update_freq=5,
         well_tempered_factor=10.0,
         coverage_threshold=1.0,

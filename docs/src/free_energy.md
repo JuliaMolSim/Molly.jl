@@ -1165,7 +1165,7 @@ TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 awh_sim = AWHSimulation(
     awh_state;
-    num_md_steps = N_MD_STEPS,
+    n_md_steps = N_MD_STEPS,
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,
@@ -1388,7 +1388,7 @@ For an alchemical ladder, no PMF deconvolution is needed: the state coordinate a
     awh_state = AWHState(thermo_states; reuse_neighbors = true)
     awh_sim = AWHSimulation(
         awh_state;
-        num_md_steps = N_MD_STEPS,
+        n_md_steps = N_MD_STEPS,
         update_freq = 1,
         well_tempered_factor = FT(Inf),
         log_freq = 10,

@@ -290,7 +290,7 @@ Interactions shared between the states are evaluated once per frame where possib
 - `shift::Bool=false` - if `true`, subtract per-frame row minima from `u` and return the `shifts`.
 
 # Returns
-A [`MBARInput`](@ref) struct, which can be given to [`Molly.mbar_weights`](@ref), with:
+A [`Molly.MBARInput`](@ref) struct, which can be given to [`Molly.mbar_weights`](@ref), with:
 - `u::Matrix{Float64}` - `N×K` reduced potentials.
 - `u_target::Union{Vector{Float64}, Nothing}` - reduced potential at `target_state` or `nothing`.
 - `N::Vector{Int}` - sample counts per window.
@@ -683,7 +683,7 @@ end
     mbar_weights(mbar_generator::MBARInput)
 
 High-level MBAR wrapper that computes free energies and reweighting weights from a
-pre-assembled [`MBARInput`](@ref) struct.
+pre-assembled [`Molly.MBARInput`](@ref) struct.
 
 # Arguments
 `mbar_generator::MBARInput` - result from [`Molly.assemble_mbar_inputs`](@ref) containing:
@@ -822,7 +822,7 @@ Estimate a 1D PMF along a scalar CV and its large-sample uncertainty using MBAR,
 - `kBT=nothing` - if set, also return dimensional `F_energy = F*kBT`.
 
 # Returns
-[`PMF`](@ref) struct with:
+[`Molly.PMF`](@ref) struct with:
   - `centers` - the center of the histogram bins used to sample the CV.
   - `widths` - the width of the histogram bins used to sample the CV.
   - `edges` - the edges of the histogram bins used to sample the CV.
@@ -1031,7 +1031,7 @@ computes the PMF along `CV`.
 - `shift::Bool=false` - subtract per-frame minima from `u` for stability.
 
 # Returns
-Same [`PMF`](@ref) struct as the lower-level [`Molly.pmf_with_uncertainty`](@ref).
+Same [`Molly.PMF`](@ref) struct as the lower-level [`Molly.pmf_with_uncertainty`](@ref).
 """
 function pmf_with_uncertainty(coords_k::AbstractVector,
                               boundaries_k::AbstractVector,
