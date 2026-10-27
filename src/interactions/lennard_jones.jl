@@ -163,17 +163,21 @@ GROMACS leaves excluded pairs out of the averages and only corrects the ``r^{-6}
 its correction differs slightly.
 The forces are zero, with an isotropic virial contribution.
 
-The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
-volume can change).
+The number of atoms is assumed not to change after setup, and changing the σ and ϵ of the
+atoms directly has no effect; [`inject_gradients`](@ref) recomputes the correction from
+injected values, including its gradients.
 Only compatible with 3D systems.
 """
-struct LJDispersionCorrection{F6, F12, EC, C, S, E}
+struct LJDispersionCorrection{F6, F12, EC, C, S, E, P}
     factor_6::F6
     factor_12::F12
     energy_const::EC
     cutoff::C
     σ_mix::S
     ϵ_mix::E
+    # The pairs of groups of atoms with the same parameters, as the index of one atom of each
+    #   group and the number of atom pairs, so that injected parameters can be taken up
+    group_pairs::P
 end
 
 # The cutoffs that the dispersion correction supports, a distance meaning a DistanceCutoff
@@ -181,7 +185,7 @@ disp_corr_cutoff(cutoff::Union{DistanceCutoff, ShiftedPotentialCutoff, Polynomia
 disp_corr_cutoff(dist_cutoff) = DistanceCutoff(dist_cutoff)
 
 function disp_corr_cutoff(cutoff::AbstractCutoff)
-    throw(ArgumentError("the Lennard-Jones dispersion correction supports DistanceCutoff, " *
+    throw(ArgumentError("the dispersion correction supports DistanceCutoff, " *
                         "ShiftedPotentialCutoff and PolynomialCutoff, found $cutoff"))
 end
 
@@ -213,8 +217,10 @@ For n = 6 and 12, the integral of (1 - S) x^(2 - n) from a to 1, where S is the 
 Composite Gauss-Legendre quadrature is used, which is accurate to near machine precision for
     the smooth integrands found for any reasonable a.
 =#
+const gauss_legendre_20 = gauss_legendre(20)
+
 function switched_out_integrals(a)
-    xs, ws = gauss_legendre(20)
+    xs, ws = gauss_legendre_20
     n_intervals = 16
     j6, j12 = 0.0, 0.0
     h = (1 - a) / n_intervals
@@ -279,71 +285,73 @@ ustrip_cutoff(c::PolynomialCutoff) = PolynomialCutoff(ustrip(c.dist_activation),
                                                       ustrip(c.dist_cutoff))
 
 # The correction from the pair averages of ϵσ^6 and ϵσ^12, as factors to be divided by the
-#   volume and a part independent of the volume, in the types of the example terms
-function disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, term_6_example, term_12_example)
+#   volume and a part independent of the volume, in the given types
+function disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, F6, F12, EC)
     Tacc = Float64
-    rc = cutoff.dist_cutoff
     i6, i12 = disp_corr_integrals(cutoff)
     factor_6_acc  = 8 * Tacc(π) * n^2 * (-ϵσ6_mean  * i6 )
     factor_12_acc = 8 * Tacc(π) * n^2 * ( ϵσ12_mean * i12)
     energy_const_acc = disp_corr_energy_const(cutoff, ϵσ6_mean, ϵσ12_mean, n)
-    F6  = typeof(-(term_6_example / rc^3))
-    F12 = typeof(term_12_example / rc^9)
-    EC  = typeof(term_6_example / rc^6)
     return convert(F6, factor_6_acc), convert(F12, factor_12_acc), convert(EC, energy_const_acc)
 end
+
+#=
+The factors of a Lennard-Jones dispersion correction from the atoms, summing over the pairs of
+    groups of atoms in `group_pairs`, with `n` atoms. `pair_params(atom_i, atom_j)` gives the
+    coupling, σ and ϵ of a pair.
+The sums are accumulated in Float64, and this is also how injected parameters are taken up, so
+    it has to stay differentiable.
+=#
+function lj_disp_corr_factors(cutoff, group_pairs, atoms, n, pair_params, F6, F12, EC)
+    Tacc = Float64
+    at = first(atoms)
+    ϵσ6_unit  = unit(first(at.ϵ) * first(at.σ)^6)
+    ϵσ12_unit = unit(first(at.ϵ) * first(at.σ)^12)
+    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
+    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
+    for (i, j, n_pairs_group) in group_pairs
+        λ, σ, ϵ = pair_params(atoms[i], atoms[j])
+        ϵσ6_sum  += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ6_unit,  λ * ϵ * σ^6 )) * ϵσ6_unit
+        ϵσ12_sum += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ12_unit, λ * ϵ * σ^12)) * ϵσ12_unit
+    end
+    n_pairs = n * (n + 1) / 2
+    # Every atom decoupled leaves no pairs, where the correction is zero rather than 0/0
+    ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
+    ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
+    return disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, F6, F12, EC)
+end
+
+# The types of the factors of a Lennard-Jones dispersion correction for an atom
+function lj_disp_corr_types(cutoff, at)
+    rc = cutoff.dist_cutoff
+    term_6_example  = first(at.ϵ) * first(at.σ)^6
+    term_12_example = first(at.ϵ) * first(at.σ)^12
+    return typeof(-(term_6_example / rc^3)), typeof(term_12_example / rc^9),
+           typeof(term_6_example / rc^6)
+end
+
+lj_pair_params(dc) = (atom_i, atom_j) -> (1, σ_mixing(dc.σ_mix, atom_i, atom_j),
+                                          ϵ_mixing(dc.ϵ_mix, atom_i, atom_j))
 
 function LJDispersionCorrection(atoms::AbstractArray,
                                 cutoff,
                                 σ_mix=LorentzMixing(),
                                 ϵ_mix=GeometricMixing())
     cutoff_used = disp_corr_cutoff(cutoff)
-    n_atoms = length(atoms)
     atoms_cpu = from_device(atoms)
-    at = atoms_cpu[1]
+    F6, F12, EC = lj_disp_corr_types(cutoff_used, first(atoms_cpu))
+    dc = LJDispersionCorrection(zero(F6), zero(F12), zero(EC), cutoff_used, σ_mix, ϵ_mix,
+                                identical_group_pairs(atoms_cpu))
+    return update_cached_parameters(dc, atoms_cpu)
+end
 
-    # Representative terms for units and final factor types.
-    term_6_example  = at.ϵ * at.σ^6
-    term_12_example = at.ϵ * at.σ^12
-
-    # Accumulate pair sums in Float64 for precision.
-    Tacc = Float64
-
-    ϵσ6_unit  = unit(term_6_example)
-    ϵσ12_unit = unit(term_12_example)
-
-    # Accumulate with units, but keep the numerical values in Float64.
-    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
-    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
-
-    # The sum runs over each unordered atom pair once, including the pairs of an atom
-    #   with itself
-    # Atoms that only differ in their index give the same terms, so the sum is taken over
-    #   pairs of groups of such atoms weighted by the number of atom pairs, which avoids
-    #   a loop over all n_atoms^2 pairs
-    group_atoms, group_counts = identical_atom_groups(atoms_cpu)
-    for gi in eachindex(group_atoms)
-        atom_i = group_atoms[gi]
-        n_i = group_counts[gi]
-        for gj in 1:gi
-            atom_j = group_atoms[gj]
-            n_j = group_counts[gj]
-            n_pairs_group = (gi == gj ? (n_i * (n_i + 1)) ÷ 2 : n_i * n_j)
-            σ = σ_mixing(σ_mix, atom_i, atom_j)
-            ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
-            ϵσ6_sum  += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ6_unit, ϵ * σ^6)) * ϵσ6_unit
-            ϵσ12_sum += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ12_unit, ϵ * σ^12)) * ϵσ12_unit
-        end
-    end
-
-    n_pairs_acc = Tacc((n_atoms * (n_atoms + 1)) ÷ 2)
-
-    ϵσ6_mean = ϵσ6_sum / n_pairs_acc
-    ϵσ12_mean = ϵσ12_sum / n_pairs_acc
-
-    factor_6, factor_12, energy_const = disp_corr_factors(cutoff_used, ϵσ6_mean, ϵσ12_mean,
-                                            Tacc(n_atoms), term_6_example, term_12_example)
-    return LJDispersionCorrection(factor_6, factor_12, energy_const, cutoff_used, σ_mix, ϵ_mix)
+# Recompute the factors from the atoms, which may have injected parameters
+function update_cached_parameters(dc::LJDispersionCorrection, atoms)
+    factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
+            from_device(dc.group_pairs), atoms, Float64(length(atoms)), lj_pair_params(dc),
+            typeof(dc.factor_6), typeof(dc.factor_12), typeof(dc.energy_const))
+    return LJDispersionCorrection(factor_6, factor_12, energy_const, dc.cutoff, dc.σ_mix,
+                                  dc.ϵ_mix, dc.group_pairs)
 end
 
 # The fields of an atom other than its index, as a tuple
@@ -352,28 +360,35 @@ end
     return Expr(:tuple, (:(getfield(atom, $(QuoteNode(fn)))) for fn in fields)...)
 end
 
-# Group atoms that are identical apart from their index, returning one atom from each
-#   group and the number of atoms in each group, in order of first appearance
-function identical_atom_groups(atoms)
-    group_atoms = eltype(atoms)[]
+#=
+The pairs of groups of atoms that are identical apart from their index, as the index of the
+    first atom of each group and the number of atom pairs, including the pair of each atom
+    with itself, in order of first appearance.
+The sum over atom pairs is taken over these, which avoids a loop over all n_atoms^2 pairs.
+Atoms of the same type are given the same injected parameters, so a group stays identical.
+=#
+function identical_group_pairs(atoms)
+    group_firsts = Int32[]
     group_counts = Int[]
-    isempty(atoms) && return group_atoms, group_counts
     K = (isconcretetype(eltype(atoms)) ? typeof(atom_group_key(first(atoms))) : Any)
     group_inds = Dict{K, Int}()
-    for atom in atoms
+    for (i, atom) in enumerate(atoms)
         gi = get!(group_inds, atom_group_key(atom)) do
-            push!(group_atoms, atom)
+            push!(group_firsts, i)
             push!(group_counts, 0)
-            length(group_atoms)
+            length(group_firsts)
         end
         group_counts[gi] += 1
     end
-    return group_atoms, group_counts
+    return [(group_firsts[gi], group_firsts[gj],
+             gi == gj ? (group_counts[gi] * (group_counts[gi] + 1)) ÷ 2 :
+                        group_counts[gi] * group_counts[gj])
+            for gi in eachindex(group_firsts) for gj in 1:gi]
 end
 
 function Base.zero(dc::LJDispersionCorrection)
     return LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12), zero(dc.energy_const),
-                                  dc.cutoff, dc.σ_mix, dc.ϵ_mix)
+                                  dc.cutoff, dc.σ_mix, dc.ϵ_mix, dc.group_pairs)
 end
 
 function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
@@ -384,13 +399,14 @@ function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
         dc1.cutoff,
         dc1.σ_mix,
         dc1.ϵ_mix,
+        dc1.group_pairs,
     )
 end
 
 function Unitful.ustrip(dc::LJDispersionCorrection)
     return LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12),
                                   ustrip(dc.energy_const), ustrip_cutoff(dc.cutoff), dc.σ_mix,
-                                  dc.ϵ_mix)
+                                  dc.ϵ_mix, dc.group_pairs)
 end
 
 function disp_corr_pe(inter, sys)
@@ -451,101 +467,107 @@ plain Lennard-Jones potential, so no soft-core factor enters here.
 
 The factors are computed once from the `λ` of `atoms`, so changing the `λ` of the atoms
 directly has no effect; [`Molly.set_lambda!`](@ref) recomputes them.
-The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
-volume can change).
+The number of atoms is assumed not to change after setup, and [`inject_gradients`](@ref)
+recomputes the correction from injected σ and ϵ values, including its gradients.
 Only compatible with 3D systems.
 """
-struct LJDispersionCorrectionλ{F6, F12, EC, C, S, E, SCH}
+struct LJDispersionCorrectionλ{F6, F12, EC, C, L, S, E, SCH, P}
     factor_6::F6
     factor_12::F12
     energy_const::EC
     cutoff::C
+    λ_mix::L
     σ_mix::S
     ϵ_mix::E
     # Kept so that `set_lambda!` can rebuild the factors, which are precomputed from the coupling
     scheduler::SCH
+    # The interacting pairs of classes of atoms, as in `lambda_class_pairs`, and the effective
+    #   number of atoms, so that injected parameters can be taken up
+    class_pairs::P
+    n_eff::Float64
 end
 
-# The scheduler is a keyword so that this does not clash with the type's own 6 field constructor
-function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
-    cutoff_used = disp_corr_cutoff(cutoff)
-    T = typeof(ustrip(cutoff_used.dist_cutoff))
-    n_atoms = length(atoms)
-    atoms_cpu = from_device(atoms)
-    at = atoms_cpu[1]
-
-    # Representative terms for units and final factor types.
-    if scheduler.dual
-        term_6_example  = at.ϵ * at.σ^6
-        term_12_example = at.ϵ * at.σ^12
-    else
-        term_6_example  = at.ϵ[1] * at.σ[1]^6
-        term_12_example = at.ϵ[1] * at.σ[1]^12
-    end
-
-    # Accumulate pair sums in Float64 for precision.
-    Tacc = Float64
-
-    ϵσ6_unit  = unit(term_6_example)
-    ϵσ12_unit = unit(term_12_example)
-
-    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
-    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
-
-    # Class the atoms by (σ, ϵ, λ, role) and count them. The counts are plain integer particle
-    # counts: the coupling is applied once per class *pair* below. Folding it into the counts as
-    # well would make a pair pick up s_i·s_j, i.e. λ² for alchemical–alchemical pairs.
-    #
-    # Every atom is classed on its own σ/ϵ. OpenFE zeroes ϵ for the alchemical roles here, but
-    # only because it moves those atoms into a `CustomNonbondedForce` carrying a second
-    # correction of its own; Molly has one correction covering every pair, so zeroing would
-    # simply lose them.
-    S = typeof(at.σ)
-    E = typeof(at.ϵ)
-    E0 = zero.(at.ϵ)
-    classCounts = Dict{Tuple{S, E, T, Int32}, Int}()
-    for i in 1:n_atoms
-        atom_i = atoms_cpu[i]
-        if scheduler isa OpenFEScheduler && atom_i.alch_role != EnvRole
-            key = (atom_i.σ, E0, atom_i.λ, atom_i.alch_role)
-        else
-            key = (atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+#=
+The pairs of classes of atoms with the same type, σ, ϵ, λ and alchemical role that interact, as
+    the index of the first atom of each class and the number of atom pairs, and the effective
+    number of atoms, for the λ dispersion corrections.
+The type is part of the class since atoms of the same type are given the same injected
+    parameters, so a class stays uniform.
+=#
+function lambda_class_pairs(atoms_cpu, scheduler)
+    # Class the atoms and count them. The counts are plain integer particle counts: the coupling
+    # is applied once per class *pair*. Folding it into the counts as well would make a pair pick
+    # up s_i·s_j, i.e. λ² for alchemical–alchemical pairs.
+    class_inds = Dict{Any, Int}()
+    class_firsts, class_counts = Int32[], Int[]
+    for (i, atom_i) in enumerate(atoms_cpu)
+        key = (atom_i.atom_type, atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+        ci = get!(class_inds, key) do
+            push!(class_firsts, i)
+            push!(class_counts, 0)
+            length(class_firsts)
         end
-        classCounts[key] = get(classCounts, key, 0) + 1
+        class_counts[ci] += 1
     end
-    rep(key) = Atom(σ=key[1], ϵ=key[2], λ=key[3], alch_role=key[4])
 
     # A dual topology hybrid excludes every pair of an A side atom with a B side atom, so those
     #   class pairs carry no interaction and must not be counted
     a_side, b_side = (DeleteRole, CoreDRole), (InsertRole, CoreIRole)
     excluded_pair(r1, r2) = (r1 in a_side && r2 in b_side) || (r1 in b_side && r2 in a_side)
-    ks = collect(keys(classCounts))
-    for a in eachindex(ks), b in 1:a
-        k1, k2 = ks[a], ks[b]
-        excluded_pair(k1[4], k2[4]) && continue
-        n1, n2 = classCounts[k1], classCounts[k2]
-        npair = Tacc(a == b ? (n1 * (n1 + 1)) / 2 : n1 * n2)
-        λ, _, _, σ, ϵ = λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, rep(k1), rep(k2), false)
-        ϵσ6_sum  += Tacc(ustrip(ϵσ6_unit,  λ * ϵ * σ^6 )) * npair * ϵσ6_unit
-        ϵσ12_sum += Tacc(ustrip(ϵσ12_unit, λ * ϵ * σ^12)) * npair * ϵσ12_unit
-    end
+    role(ci) = atoms_cpu[class_firsts[ci]].alch_role
+    class_pairs = [(class_firsts[a], class_firsts[b],
+                    a == b ? (class_counts[a] * (class_counts[a] + 1)) ÷ 2 :
+                             class_counts[a] * class_counts[b])
+                   for a in eachindex(class_firsts) for b in 1:a
+                   if !excluded_pair(role(a), role(b))]
 
     # Dual topology duplicates every core site (a real atom plus a massless virtual site) and
     # carries both ligands' unique atoms, so `length(atoms)` is not the physical particle count.
     # Weighting by the steric coupling recovers it: (1-λ)·real + λ·virtual = 1 per site. Single
     # topology returns one(λ) throughout, so this is just the atom count there.
-    n_eff = Tacc(sum(n * first(scale_sterics(scheduler, key[3], key[4], Val(scheduler.dual)))
-                     for (key, n) in classCounts))
-    n_pairs = n_eff * (n_eff + 1) / 2
+    n_eff = Float64(sum(n * first(scale_sterics(scheduler, atoms_cpu[i].λ, atoms_cpu[i].alch_role,
+                                                Val(scheduler.dual)))
+                        for (i, n) in zip(class_firsts, class_counts)))
+    return class_pairs, n_eff
+end
 
-    # Every atom decoupled leaves no pairs, where the correction is zero rather than 0/0
-    ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
-    ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
+# An atom as it enters the λ dispersion corrections. OpenFE zeroes ϵ for the alchemical roles,
+#   since it moves those atoms into a `CustomNonbondedForce` with a correction of its own.
+function lambda_disp_corr_atom(scheduler, atom)
+    if scheduler isa OpenFEScheduler && atom.alch_role != EnvRole
+        return Atom(atom.index, atom.atom_type, atom.mass, atom.charge, atom.σ, zero.(atom.ϵ),
+                    atom.λ, atom.alch_role)
+    else
+        return atom
+    end
+end
 
-    factor_6, factor_12, energy_const = disp_corr_factors(cutoff_used, ϵσ6_mean, ϵσ12_mean,
-                                            n_eff, term_6_example, term_12_example)
-    return LJDispersionCorrectionλ(factor_6, factor_12, energy_const, cutoff_used, σ_mix,
-                                   ϵ_mix, scheduler)
+function lj_lambda_pair_params(dc)
+    return function (atom_i, atom_j)
+        λ, _, _, σ, ϵ = λ_params_function(dc.scheduler, dc.λ_mix, dc.σ_mix, dc.ϵ_mix,
+                                          lambda_disp_corr_atom(dc.scheduler, atom_i),
+                                          lambda_disp_corr_atom(dc.scheduler, atom_j), false)
+        return λ, σ, ϵ
+    end
+end
+
+# The scheduler is a keyword so that this does not clash with the type's own field constructor
+function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
+    cutoff_used = disp_corr_cutoff(cutoff)
+    atoms_cpu = from_device(atoms)
+    F6, F12, EC = lj_disp_corr_types(cutoff_used, first(atoms_cpu))
+    class_pairs, n_eff = lambda_class_pairs(atoms_cpu, scheduler)
+    dc = LJDispersionCorrectionλ(zero(F6), zero(F12), zero(EC), cutoff_used, λ_mix, σ_mix,
+                                 ϵ_mix, scheduler, class_pairs, n_eff)
+    return update_cached_parameters(dc, atoms_cpu)
+end
+
+function update_cached_parameters(dc::LJDispersionCorrectionλ, atoms)
+    factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
+            from_device(dc.class_pairs), atoms, dc.n_eff, lj_lambda_pair_params(dc),
+            typeof(dc.factor_6), typeof(dc.factor_12), typeof(dc.energy_const))
+    return LJDispersionCorrectionλ(factor_6, factor_12, energy_const, dc.cutoff, dc.λ_mix,
+                                   dc.σ_mix, dc.ϵ_mix, dc.scheduler, dc.class_pairs, dc.n_eff)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,

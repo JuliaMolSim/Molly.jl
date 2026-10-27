@@ -271,13 +271,18 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
     end
 
     # visit_state lets history-dependent interactions (e.g. Metadynamics) update at this state
-    for inter in values(general_inters)
-        pe += uconvert(
+    # `map` over the tuple keeps each interaction concretely typed; a loop over general
+    #   interactions of different types gives a Union that Enzyme can not differentiate
+    pes_general = map(values(general_inters)) do inter
+        uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
                                               n_threads=n_threads, strictness=strictness,
                                               visit_state=visit_state),
         )
+    end
+    for pe_general in pes_general
+        pe += pe_general
     end
 
     return pe
@@ -539,13 +544,17 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
     pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
 
-    for inter in values(general_inters)
-        pe += uconvert(
+    # `map` keeps each general interaction concretely typed for Enzyme, as on the CPU
+    pes_general = map(values(general_inters)) do inter
+        uconvert(
             sys.energy_units,
             AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
                                 n_threads=n_threads, strictness=strictness,
                                 visit_state=visit_state),
         )
+    end
+    for pe_general in pes_general
+        pe += pe_general
     end
 
     return pe
