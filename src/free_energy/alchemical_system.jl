@@ -271,6 +271,10 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
             push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff,
                                                   MinimumMixing(), inter.σ_mix, inter.ϵ_mix;
                                                   scheduler=scheduler))
+        elseif inter isa DEXPDispersionCorrection
+            push!(inters, DEXPDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff, inter.α,
+                                                    inter.β, MinimumMixing(), inter.σ_mix,
+                                                    inter.ϵ_mix; scheduler=scheduler))
         else
             @warn "$(typeof(inter).name.name) has no alchemical version yet and is left out of " *
                   "the system, so its contribution is missing at every λ, the end states included"
@@ -286,7 +290,8 @@ Set the global λ of an alchemical system, as set up by [`AbsoluteFESystem`](@re
 [`RelativeFESystem`](@ref), in place without rebuilding it.
 
 Only the λ of the alchemical atoms, the mesh weight of [`Molly.PME_λ`](@ref) and the
-precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
+precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) and
+[`Molly.DEXPDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
 lists, the topology, the constraints and the virtual sites do not, which is what makes this much
 cheaper than building the system again. Environment atoms keep λ = 1.
 
@@ -312,6 +317,9 @@ function set_lambda!(sys::System, λ)
         elseif inter isa LJDispersionCorrectionλ
             LJDispersionCorrectionλ(sys.atoms, inter.cutoff, MinimumMixing(), inter.σ_mix,
                                     inter.ϵ_mix; scheduler=inter.scheduler)
+        elseif inter isa DEXPDispersionCorrectionλ
+            DEXPDispersionCorrectionλ(sys.atoms, inter.cutoff, inter.α, inter.β, MinimumMixing(),
+                                      inter.σ_mix, inter.ϵ_mix; scheduler=inter.scheduler)
         else
             inter
         end

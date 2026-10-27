@@ -431,7 +431,7 @@ The following tags are supported:
 - `<CMAPTorsionForce>`
 - `<NonbondedForce>`: `<UseAttributeFromResidue>` tags other than `<UseAttributeFromResidue name="charge"/>` are not supported, `useDispersionCorrection` is supported and is `true` by default
 - `<CustomTorsionForce>`: the special case where `energy="k*(theta-theta0)^2"` is supported as it is used to define improper torsions in some force fields
-- `<CustomNonbondedForce>`: the special case of the double exponential potential is supported with `bondCutoff="3"`, global parameters `alpha` and `beta`, and per-particle parameters `sigma` and `epsilon`
+- `<CustomNonbondedForce>`: the special case of the double exponential potential is supported with `bondCutoff="3"`, global parameters `alpha` and `beta`, and per-particle parameters `sigma` and `epsilon`. Its long-range dispersion correction, [`DEXPDispersionCorrection`](@ref), is set by the `useDispersionCorrection` attribute of `<NonbondedForce>` as for Lennard-Jones and is used by default, whereas OpenMM does not apply a long-range correction to a `CustomNonbondedForce` read from a force field file
 - `<LennardJonesForce>`: `<NBFixPair>` tags and `sigma14`/`epsilon14` attributes in `<Atom>` tags are supported, `useDispersionCorrection` is supported and is `true` by default
 - `<AmoebaUreyBradleyForce>`: this defines the bond-like part of a general Urey-Bradley interaction and is not specific to the AMOEBA force field, note that `k` is equivalent to the `k/2` harmonic bond factor
 - `<Include>`
@@ -834,6 +834,7 @@ The available general interactions are:
 - [`Ewald`](@ref)
 - [`PME`](@ref)
 - [`LJDispersionCorrection`](@ref)
+- [`DEXPDispersionCorrection`](@ref)
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
 - [`ANIPotential`](@ref)

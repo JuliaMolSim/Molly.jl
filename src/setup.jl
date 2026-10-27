@@ -508,12 +508,12 @@ Each residue is matched to a residue template of the force field, and a
     electrostatic interactions, including implicit solvent unless that sets its own.
 - `lj_cutoff=nothing`: the cutoff method to use for the Lennard-Jones interaction,
     by default uses `DistanceCutoff(dist_cutoff)`. The cutoff distance must not exceed
-    `dist_cutoff`. If the long-range Lennard-Jones dispersion correction is being used,
-    this must be a [`DistanceCutoff`](@ref), [`ShiftedPotentialCutoff`](@ref) or
-    [`PolynomialCutoff`](@ref).
-- `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
-    dispersion correction, [`LJDispersionCorrection`](@ref). Defaults to the force
-    field setting, which defaults to `true`.
+    `dist_cutoff`. If the long-range dispersion correction is being used, this must be a
+    [`DistanceCutoff`](@ref), [`ShiftedPotentialCutoff`](@ref) or [`PolynomialCutoff`](@ref).
+- `dispersion_correction=nothing`: whether to use the long-range dispersion correction,
+    [`LJDispersionCorrection`](@ref), or [`DEXPDispersionCorrection`](@ref) for a double
+    exponential force field. Defaults to the force field setting, which defaults to `true`.
+    Other `lj_cutoff` values then need `dispersion_correction=false`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.
@@ -678,14 +678,12 @@ function System(coord_file::AbstractString,
         end
         disp_corr = dispersion_correction
     end
-    if disp_corr && force_field.custom_nonbonded
-        throw(ArgumentError("dispersion correction is not supported with CustomNonbondedForce"))
-    end
     if disp_corr && !(isnothing(lj_cutoff) ||
                       lj_cutoff isa Union{DistanceCutoff, ShiftedPotentialCutoff, PolynomialCutoff})
         throw(ArgumentError("dispersion correction is not supported with lj_cutoff values " *
                             "other than DistanceCutoff, ShiftedPotentialCutoff and " *
-                            "PolynomialCutoff, found $lj_cutoff"))
+                            "PolynomialCutoff, found $lj_cutoff; pass " *
+                            "dispersion_correction=false to use this cutoff without it"))
     end
     dist_neighbors = dist_cutoff + dist_buffer
     T, TH = float_type, float_type_high
@@ -1736,7 +1734,12 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     end
     # Infinite boundaries give infinite volume, hence no dispersion correction
     if dispersion_correction && !has_infinite_boundary(boundary)
-        general_inters_disp = (LJDispersionCorrection(atoms, cutoff_lj, σ_mix, ϵ_mix),)
+        if lj isa DoubleExponential
+            general_inters_disp = (DEXPDispersionCorrection(atoms, cutoff_lj, lj.α, lj.β, σ_mix,
+                                                            ϵ_mix),)
+        else
+            general_inters_disp = (LJDispersionCorrection(atoms, cutoff_lj, σ_mix, ϵ_mix),)
+        end
     else
         general_inters_disp = ()
     end

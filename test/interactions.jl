@@ -1887,6 +1887,52 @@
     @test virial(sys_switch)[1, 1] ≈ potential_energy(sys_switch) rtol=1e-12
     @test iszero(virial(sys_switch)[1, 2])
 
+    # The double exponential dispersion correction, compared with OpenMM, which integrates the
+    #   long-range correction of a CustomNonbondedForce numerically to about 1e-6
+    α_dexp, β_dexp = 16.766, 4.427
+    for (cutoff, E_openmm) in ((DistanceCutoff(1.0u"nm")             , -1.007956309089448e-03),
+                               (PolynomialCutoff(0.85u"nm", 1.0u"nm"), -2.2610114789034285e-03),
+                               (PolynomialCutoff(0.6u"nm" , 1.0u"nm"), -1.0006835524368521e-02))
+        dc = DEXPDispersionCorrection(grid_atoms, cutoff, α_dexp, β_dexp)
+        sys_dc = System(atoms=grid_atoms, coords=(grid_coords .* u"nm"),
+                        boundary=CubicBoundary(10.0u"nm"), general_inters=(dc,))
+        @test potential_energy(sys_dc) ≈ E_openmm * u"kJ * mol^-1" rtol=1e-5
+    end
+    @test_throws ArgumentError DEXPDispersionCorrection(grid_atoms, ShiftedForceCutoff(1.0u"nm"),
+                                                        α_dexp, β_dexp)
+
+    # One atom type, without units, against quadrature of the pair potential and its derivative
+    dexp_ref = DoubleExponential(α=α_dexp, β=β_dexp)
+    V_dexp(r) = potential_energy(dexp_ref, SVector(r, 0.0, 0.0), grid_atoms_1[1],
+                                 grid_atoms_1[1], NoUnits)
+    dV_dexp(r) = (V_dexp(r + 1e-6) - V_dexp(r - 1e-6)) / 2e-6
+    simpson(f, a, b) = (b - a) / 3n_quad * sum((i in (0, n_quad) ? 1 : (isodd(i) ? 4 : 2)) *
+                                               f(a + i * (b - a) / n_quad) for i in 0:n_quad)
+    function dexp_disp_sys(cutoff)
+        dc = DEXPDispersionCorrection(grid_atoms_1, cutoff, α_dexp, β_dexp)
+        return System(atoms=grid_atoms_1, coords=grid_coords, boundary=CubicBoundary(10.0),
+                      general_inters=(dc,), energy_units=NoUnits, force_units=NoUnits)
+    end
+    sys_cut, sys_shift = dexp_disp_sys(DistanceCutoff(rc_dc)), dexp_disp_sys(ShiftedPotentialCutoff(rc_dc))
+    sys_switch = dexp_disp_sys(PolynomialCutoff(rs_dc, rc_dc))
+    E_factor = 2π * n_dc^2 / V_dc
+    V_rc = V_dexp(rc_dc)
+    I_tail = simpson(r -> r^2 * V_dexp(r), rc_dc, rc_dc + 10)
+    I_sw = simpson(r -> r^2 * (1 - S_sw(r)) * V_dexp(r), rs_dc, rc_dc)
+    @test potential_energy(sys_cut) ≈ E_factor * I_tail rtol=1e-9
+    # The shift is left out within the cutoff, with one fewer partner per atom as in GROMACS
+    @test potential_energy(sys_shift) ≈ E_factor * (I_tail + rc_dc^3 * V_rc / 3) -
+                                        n_dc / 2 * V_rc rtol=1e-9
+    @test potential_energy(sys_switch) ≈ E_factor * (I_tail + I_sw) rtol=1e-9
+    # The virial of the pairs left out, -r^3 times the derivative of the part left out
+    W_tail = simpson(r -> -r^3 * dV_dexp(r), rc_dc, rc_dc + 10) / 3
+    W_sw = simpson(r -> -r^3 * ((1 - S_sw(r)) * dV_dexp(r) - dS_sw(r) * V_dexp(r)),
+                   rs_dc, rc_dc) / 3
+    @test virial(sys_cut)[1, 1] ≈ E_factor * W_tail rtol=1e-7
+    @test virial(sys_shift) ≈ virial(sys_cut) rtol=1e-12
+    @test virial(sys_switch)[1, 1] ≈ E_factor * (W_sw + W_tail) rtol=1e-7
+    @test iszero(virial(sys_switch)[1, 2])
+
     InteractionList2Atoms([1, 2], [3, 4], [0.0, 0.0])
     @test_throws ArgumentError InteractionList2Atoms([1, 2], [3, 4], [0.0])
 
