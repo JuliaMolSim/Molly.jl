@@ -29,7 +29,7 @@ end
 
 @testset "ANI AEV: N₂ dimer matches TorchANI reference" begin
     ref_path = joinpath(REF_DIR, "n2_aevs.json")
-    ref = JSON3.read(read(ref_path, String))
+    ref = JSON.parsefile(ref_path)
     aev_ref = Float32.(reduce(hcat, ref.aevs)')   # (2, 1008) reference
 
     # Build the same N₂ dimer system
@@ -128,7 +128,7 @@ end
         energy_units   = u"eV",
     )
     E     = potential_energy(sys)
-    E_ref = Float64(JSON3.read(read(ref_path, String)).energy_eV)u"eV"
+    E_ref = Float64(JSON.parsefile(ref_path).energy_eV)u"eV"
     @test E < 0u"eV"                       # binding energy is negative
     @test isapprox(E, E_ref; rtol=1e-3)
 end
@@ -140,7 +140,7 @@ end
 @testset "ANIPotential: N₂ dimer forces match TorchANI" begin
     ref_path = joinpath(REF_DIR, "n2_dimer_ani2x.json")
     h5_path  = joinpath(ANI_DIR, "ani2x.h5")
-    ref = JSON3.read(read(ref_path, String))
+    ref = JSON.parsefile(ref_path)
     # forces_eV_per_A is a 2×3 array: [[fx1,fy1,fz1], [fx2,fy2,fz2]]
     f_ref = [SVector{3,Float64}(row...) for row in ref.forces_eV_per_A]
 
@@ -311,7 +311,7 @@ end
 @testset "ANIPotential: H₂O AEV matches TorchANI" begin
     ref_path = joinpath(REF_DIR, "water_aevs.json")
     h5_path  = joinpath(ANI_DIR, "ani2x.h5")
-    ref = JSON3.read(read(ref_path, String))
+    ref = JSON.parsefile(ref_path)
     # ref.aevs is a 3×1008 nested array
     aev_ref = Float32.(reduce(hcat, ref.aevs)')   # (3, 1008)
 
@@ -320,7 +320,7 @@ end
 
     # Read coordinates DIRECTLY from the reference JSON to use the exact same
     # Float32 positions TorchANI used when computing the reference AEVs.
-    water_ref = JSON3.read(read(joinpath(REF_DIR, "water_ani2x.json"), String))
+    water_ref = JSON.parsefile(joinpath(REF_DIR, "water_ani2x.json"))
     coords = [SVector{3, Float32}(row...) for row in water_ref.coordinates_A]
     species_idx = [pot.species_map[s] for s in ["O", "H", "H"]]
     boundary    = CubicBoundary(1000f0)
@@ -339,7 +339,7 @@ end
 @testset "ANIPotential: H₂O forces match TorchANI" begin
     ref_path = joinpath(REF_DIR, "water_ani2x.json")
     h5_path  = joinpath(ANI_DIR, "ani2x.h5")
-    ref = JSON3.read(read(ref_path, String))
+    ref = JSON.parsefile(ref_path)
     f_ref = [SVector{3,Float64}(row...) for row in ref.forces_eV_per_A]
 
     pot    = ANIPotential(h5_path; ensemble_idx=1)
@@ -401,7 +401,7 @@ end
     E = potential_energy(sys)
     @test E < 0u"eV"
     # Cross-validate against TorchANI (single member vs ensemble: 1% tolerance)
-    ref = JSON3.read(read(joinpath(ANI_DIR, "6mrr_ani2x.json"), String))
+    ref = JSON.parsefile(joinpath(ANI_DIR, "6mrr_ani2x.json"))
     @test isapprox(ustrip(u"eV", E), Float64(ref.energy_eV); rtol=0.01)
 end
 
@@ -421,7 +421,7 @@ end
     bdy        = CubicBoundary(1000f0)
     aevs_n2_cpu = Molly.compute_aevs(coords_n2, species_n2, nothing, bdy, p, n_sp)
 
-    water_ref  = JSON3.read(read(joinpath(REF_DIR, "water_ani2x.json"), String))
+    water_ref  = JSON.parsefile(joinpath(REF_DIR, "water_ani2x.json"))
     coords_w   = [SVector{3,Float32}(row...) for row in water_ref.coordinates_A]
     species_w  = [pot.species_map[s] for s in ["O","H","H"]]
     aevs_w_cpu = Molly.compute_aevs(coords_w, species_w, nothing, bdy, p, n_sp)
@@ -663,7 +663,7 @@ end
              "F"=>18.998, "S"=>32.06, "Cl"=>35.45)
 
     for jf in ("n2_dimer_ani2x.json", "water_ani2x.json")
-        ref   = JSON3.read(read(joinpath(REF_DIR, jf), String))
+        ref   = JSON.parsefile(joinpath(REF_DIR, jf))
         elems = String.(ref.species)
         crd   = [SVector{3,Float64}(r...) for r in ref.coordinates_A]
         f_ref = [SVector{3,Float64}(r...) for r in ref.forces_eV_per_A]

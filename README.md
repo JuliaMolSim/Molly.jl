@@ -27,7 +27,7 @@ Implemented features include:
 - Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
-- Periodic, triclinic and infinite boundary conditions.
+- Periodic, triclinic and infinite boundary conditions. Simulate in 2D or 3D.
 - Constraints with SHAKE and RATTLE.
 - Virtual sites.
 - Flexible loggers to track arbitrary properties throughout simulations.

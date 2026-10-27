@@ -61,7 +61,7 @@ const init_code_block = quote
     using GPUArrays
     using HDF5
     using JET
-    using JSON3
+    using JSON
     using KernelAbstractions
     using KernelDensity
     using Lux
