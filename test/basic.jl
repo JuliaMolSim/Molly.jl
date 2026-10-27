@@ -666,11 +666,11 @@ end
 
 @testset "Force field XML options" begin
     ff_garnet = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml"); units=false)
-    @test ff_garnet.dispersion_correction == true
+    @test ff_garnet.dispersion_correction == false
     @test ff_garnet.custom_nonbonded == true
     @test ff_garnet.global_params == [12.159626, 4.326311]
-    # By default the double exponential gets its own dispersion correction rather than the
-    #   Lennard-Jones one
+    # The double exponential gets its own dispersion correction rather than the Lennard-Jones
+    #   one
     sys_garnet_dc = System(
         joinpath(data_dir, "ethanol_garnet.pdb"),
         MolecularForceField(
@@ -679,10 +679,11 @@ end
             units=false,
         );
         units=false,
+        dispersion_correction=true,
         strictness=:nowarn,
     )
     dc_garnet = only(gi for gi in sys_garnet_dc.general_inters
-                     if gi isa DEXPDispersionCorrection)
+                     if gi isa DExpDispersionCorrection)
     @test (dc_garnet.α, dc_garnet.β) == (12.159626, 4.326311)
     @test !any(gi -> gi isa LJDispersionCorrection, sys_garnet_dc.general_inters)
     @test potential_energy(sys_garnet_dc; pairwise_inters=(), specific_inter_lists=()) < 0
@@ -704,8 +705,6 @@ end
         ff;
         nonbonded_method=SetupCoulombReactionField(),
         dist_cutoff=1.0u"nm",
-        # The reference energy is without the long-range correction
-        dispersion_correction=false,
     )
 
     dexp = only(inter for inter in sys.pairwise_inters if inter isa DoubleExponential)

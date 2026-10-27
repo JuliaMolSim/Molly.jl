@@ -1,9 +1,9 @@
 export 
     DoubleExponential,
     DoubleExponentialSoftCore,
-    DEXPDispersionCorrection
+    DExpDispersionCorrection
 
-@public DEXPDispersionCorrectionλ
+@public DExpDispersionCorrectionλ
 
 @doc raw"""
     DoubleExponential(; cutoff, use_neighbors, α, β, shortcut, σ_mixing, ϵ_mixing,
@@ -359,7 +359,7 @@ end
 end
 
 @doc raw"""
-    DEXPDispersionCorrection(atoms, cutoff, α, β, σ_mixing=LorentzMixing(),
+    DExpDispersionCorrection(atoms, cutoff, α, β, σ_mixing=LorentzMixing(),
                              ϵ_mixing=GeometricMixing())
 
 The long-range dispersion correction for the [`DoubleExponential`](@ref) interaction, the
@@ -391,7 +391,7 @@ recomputes the correction from injected σ, ϵ, `α` and `β`, which share their
 pairwise interaction, including its gradients.
 Only compatible with 3D systems.
 """
-struct DEXPDispersionCorrection{F, EC, C, T, S, E, P}
+struct DExpDispersionCorrection{F, EC, C, T, S, E, P}
     factor::F
     factor_vir::F
     energy_const::EC
@@ -513,7 +513,7 @@ end
 # The types of the factors of a double exponential dispersion correction for an atom
 dexp_disp_corr_types(at) = typeof(first(at.ϵ) * first(at.σ)^3), typeof(first(at.ϵ))
 
-function DEXPDispersionCorrection(atoms::AbstractArray,
+function DExpDispersionCorrection(atoms::AbstractArray,
                                   cutoff,
                                   α,
                                   β,
@@ -522,29 +522,29 @@ function DEXPDispersionCorrection(atoms::AbstractArray,
     cutoff_used = disp_corr_cutoff(cutoff)
     atoms_cpu = from_device(atoms)
     F, EC = dexp_disp_corr_types(first(atoms_cpu))
-    dc = DEXPDispersionCorrection(zero(F), zero(F), zero(EC), cutoff_used, α, β, σ_mix, ϵ_mix,
+    dc = DExpDispersionCorrection(zero(F), zero(F), zero(EC), cutoff_used, α, β, σ_mix, ϵ_mix,
                                   identical_group_pairs(atoms_cpu))
     return update_cached_parameters(dc, atoms_cpu)
 end
 
 # Recompute the factors from the atoms and α and β, which may have injected values
-function update_cached_parameters(dc::DEXPDispersionCorrection, atoms)
+function update_cached_parameters(dc::DExpDispersionCorrection, atoms)
     pair_params(atom_i, atom_j) = (1, dc.α, dc.β, σ_mixing(dc.σ_mix, atom_i, atom_j),
                                    ϵ_mixing(dc.ϵ_mix, atom_i, atom_j))
     factor, factor_vir, energy_const = dexp_disp_corr_factors(dc.cutoff,
             from_device(dc.group_pairs), atoms, Float64(length(atoms)), pair_params,
             typeof(dc.factor), typeof(dc.energy_const))
-    return DEXPDispersionCorrection(factor, factor_vir, energy_const, dc.cutoff, dc.α, dc.β,
+    return DExpDispersionCorrection(factor, factor_vir, energy_const, dc.cutoff, dc.α, dc.β,
                                     dc.σ_mix, dc.ϵ_mix, dc.group_pairs)
 end
 
-function Base.zero(dc::DEXPDispersionCorrection)
-    return DEXPDispersionCorrection(zero(dc.factor), zero(dc.factor_vir), zero(dc.energy_const),
+function Base.zero(dc::DExpDispersionCorrection)
+    return DExpDispersionCorrection(zero(dc.factor), zero(dc.factor_vir), zero(dc.energy_const),
                                     dc.cutoff, dc.α, dc.β, dc.σ_mix, dc.ϵ_mix, dc.group_pairs)
 end
 
-function Base.:+(dc1::DEXPDispersionCorrection, dc2::DEXPDispersionCorrection)
-    return DEXPDispersionCorrection(
+function Base.:+(dc1::DExpDispersionCorrection, dc2::DExpDispersionCorrection)
+    return DExpDispersionCorrection(
         dc1.factor + dc2.factor,
         dc1.factor_vir + dc2.factor_vir,
         dc1.energy_const + dc2.energy_const,
@@ -557,20 +557,20 @@ function Base.:+(dc1::DEXPDispersionCorrection, dc2::DEXPDispersionCorrection)
     )
 end
 
-function Unitful.ustrip(dc::DEXPDispersionCorrection)
-    return DEXPDispersionCorrection(ustrip(dc.factor), ustrip(dc.factor_vir),
+function Unitful.ustrip(dc::DExpDispersionCorrection)
+    return DExpDispersionCorrection(ustrip(dc.factor), ustrip(dc.factor_vir),
                                     ustrip(dc.energy_const), ustrip_cutoff(dc.cutoff), dc.α,
                                     dc.β, dc.σ_mix, dc.ϵ_mix, dc.group_pairs)
 end
 
 @doc raw"""
-    DEXPDispersionCorrectionλ(atoms, cutoff, α, β, λ_mix, σ_mix, ϵ_mix; scheduler)
+    DExpDispersionCorrectionλ(atoms, cutoff, α, β, λ_mix, σ_mix, ϵ_mix; scheduler)
 
 The long-range dispersion correction for the [`DoubleExponentialSoftCore`](@ref) interaction,
-the λ version of [`DEXPDispersionCorrection`](@ref).
+the λ version of [`DExpDispersionCorrection`](@ref).
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`DEXPDispersionCorrection`](@ref) to this type.
+[`DExpDispersionCorrection`](@ref) to this type.
 For a [`DistanceCutoff`](@ref) the potential energy is
 ```math
 E = \frac{2 \pi N^2}{V} \left< \lambda_{ij} \int_{r_c}^\infty r^2 V_{ij}(r; \alpha_s, \beta_s) \, dr \right>
@@ -581,17 +581,17 @@ Unlike for Lennard-Jones, the soft core changes the potential at every distance,
 coupling enters through ``\alpha_s`` and ``\beta_s`` as well as ``\lambda_{ij}``.
 The averages, ``\lambda_{ij}`` and the effective number of atoms ``N`` are as for
 [`Molly.LJDispersionCorrectionλ`](@ref), and the other cutoffs as for
-[`DEXPDispersionCorrection`](@ref).
+[`DExpDispersionCorrection`](@ref).
 The forces are zero, with an isotropic virial contribution.
 
 The factors are computed from the `λ` of `atoms` at setup; [`Molly.set_lambda!`](@ref)
 recomputes them.
 The number of atoms is otherwise assumed not to change after setup, and
 [`inject_gradients`](@ref) takes up injected σ, ϵ, `α` and `β` as for
-[`DEXPDispersionCorrection`](@ref).
+[`DExpDispersionCorrection`](@ref).
 Only compatible with 3D systems.
 """
-struct DEXPDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
+struct DExpDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
     factor::F
     factor_vir::F
     energy_const::EC
@@ -609,21 +609,21 @@ struct DEXPDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
 end
 
 # α and β share their keys with the pairwise interaction, so they are injected with it
-parameter_prefix(::Union{DEXPDispersionCorrection, DEXPDispersionCorrectionλ}) = "inter_DEXP_"
-parameter_fields(::Type{<:Union{DEXPDispersionCorrection, DEXPDispersionCorrectionλ}}) =
+parameter_prefix(::Union{DExpDispersionCorrection, DExpDispersionCorrectionλ}) = "inter_DEXP_"
+parameter_fields(::Type{<:Union{DExpDispersionCorrection, DExpDispersionCorrectionλ}}) =
     ((:α, "alpha"), (:β, "beta"))
 
-function DEXPDispersionCorrectionλ(atoms, cutoff, α, β, λ_mix, σ_mix, ϵ_mix; scheduler)
+function DExpDispersionCorrectionλ(atoms, cutoff, α, β, λ_mix, σ_mix, ϵ_mix; scheduler)
     cutoff_used = disp_corr_cutoff(cutoff)
     atoms_cpu = from_device(atoms)
     F, EC = dexp_disp_corr_types(first(atoms_cpu))
     class_pairs, n_eff = lambda_class_pairs(atoms_cpu, scheduler)
-    dc = DEXPDispersionCorrectionλ(zero(F), zero(F), zero(EC), cutoff_used, α, β, λ_mix, σ_mix,
+    dc = DExpDispersionCorrectionλ(zero(F), zero(F), zero(EC), cutoff_used, α, β, λ_mix, σ_mix,
                                    ϵ_mix, scheduler, class_pairs, n_eff)
     return update_cached_parameters(dc, atoms_cpu)
 end
 
-function update_cached_parameters(dc::DEXPDispersionCorrectionλ, atoms)
+function update_cached_parameters(dc::DExpDispersionCorrectionλ, atoms)
     function pair_params(atom_i, atom_j)
         λ, λR, _, σ, ϵ = λ_params_function(dc.scheduler, dc.λ_mix, dc.σ_mix, dc.ϵ_mix,
                                            lambda_disp_corr_atom(dc.scheduler, atom_i),
@@ -635,7 +635,7 @@ function update_cached_parameters(dc::DEXPDispersionCorrectionλ, atoms)
     factor, factor_vir, energy_const = dexp_disp_corr_factors(dc.cutoff,
             from_device(dc.class_pairs), atoms, dc.n_eff, pair_params, typeof(dc.factor),
             typeof(dc.energy_const))
-    return DEXPDispersionCorrectionλ(factor, factor_vir, energy_const, dc.cutoff, dc.α, dc.β,
+    return DExpDispersionCorrectionλ(factor, factor_vir, energy_const, dc.cutoff, dc.α, dc.β,
                                      dc.λ_mix, dc.σ_mix, dc.ϵ_mix, dc.scheduler,
                                      dc.class_pairs, dc.n_eff)
 end
@@ -649,12 +649,12 @@ function dexp_disp_corr_virial!(buffers, sys, inter)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
-                                                    inter::DEXPDispersionCorrection; kwargs...)
+                                                    inter::DExpDispersionCorrection; kwargs...)
     return inter.factor / volume(sys) + inter.energy_const
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
-        fs, sys, inter::DEXPDispersionCorrection;
+        fs, sys, inter::DExpDispersionCorrection;
         buffers=nothing,
         needs_vir=false,
         kwargs...)
@@ -665,12 +665,12 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
-                                                    inter::DEXPDispersionCorrectionλ; kwargs...)
+                                                    inter::DExpDispersionCorrectionλ; kwargs...)
     return inter.factor / volume(sys) + inter.energy_const
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
-        fs, sys, inter::DEXPDispersionCorrectionλ;
+        fs, sys, inter::DExpDispersionCorrectionλ;
         buffers=nothing,
         needs_vir=false,
         kwargs...)

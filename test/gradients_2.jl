@@ -1220,6 +1220,7 @@ end
             float_type=Float64,
             nonbonded_method=SetupCoulombReactionField(),
             dist_cutoff=(units ? 1.0u"nm" : 1.0),
+            dispersion_correction=true,
             strictness=:nowarn,
         )
     end
@@ -1317,7 +1318,7 @@ end
         MolecularForceField(garnet_mod; units=false,
             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
         units=false, float_type=Float64, nonbonded_method=SetupCoulombReactionField(),
-        dist_cutoff=1.0, strictness=:nowarn,
+        dist_cutoff=1.0, dispersion_correction=true, strictness=:nowarn,
     )
     disp(s) = potential_energy(s; pairwise_inters=(), specific_inter_lists=())
     @test disp(sys_mod_nounits) ≈ disp(sys_rebuilt) rtol=1e-12
@@ -1377,6 +1378,7 @@ end
             nonbonded_method=nonbonded_method,
             dist_cutoff=1.0,
             grad_safe=grad_safe,
+            dispersion_correction=true,
             strictness=:nowarn,
         )
     end
@@ -1430,7 +1432,7 @@ end
         # The dispersion correction alongside the PME checks that Enzyme handles general
         #   interactions of different types
         gis = sys.general_inters
-        @test any(gi -> gi isa DEXPDispersionCorrection, gis)
+        @test any(gi -> gi isa DExpDispersionCorrection, gis)
         @test all(gi -> !(gi isa PME) || gi.grad_safe, gis)
         grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
         autodiff(
@@ -1603,7 +1605,7 @@ end
         ff = MolecularForceField(joinpath.(ff_dir, ff_files)...; units=false, kwargs...)
         return System(joinpath(data_dir, pdb), ff; units=false, float_type=Float64,
                       nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0,
-                      strictness=:nowarn)
+                      dispersion_correction=true, strictness=:nowarn)
     end
     garnet_templates = joinpath(ff_dir, "ethanol_garnet_residues.xml")
     sys_dexp = build(["ethanol_garnet.xml"], "ethanol_solv.pdb";
@@ -1611,10 +1613,10 @@ end
     sys_lj = build(["tip3p_standard.xml", "benzene.xml"], "benzene_solv.pdb")
     cases = (
         ("DEXP", sys_dexp, ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
-         DEXPDispersionCorrection),
+         DExpDispersionCorrection),
         ("DEXP λ", AbsoluteFESystem(sys_dexp, 0.8, collect(1:9)),
          ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
-         Molly.DEXPDispersionCorrectionλ),
+         Molly.DExpDispersionCorrectionλ),
         ("LJ", sys_lj, ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_σ"),
          LJDispersionCorrection),
         ("LJ λ", AbsoluteFESystem(sys_lj, 0.8, collect(1:12)),

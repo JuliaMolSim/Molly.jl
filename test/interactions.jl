@@ -1893,12 +1893,12 @@
     for (cutoff, E_openmm) in ((DistanceCutoff(1.0u"nm")             , -1.007956309089448e-03),
                                (PolynomialCutoff(0.85u"nm", 1.0u"nm"), -2.2610114789034285e-03),
                                (PolynomialCutoff(0.6u"nm" , 1.0u"nm"), -1.0006835524368521e-02))
-        dc = DEXPDispersionCorrection(grid_atoms, cutoff, α_dexp, β_dexp)
+        dc = DExpDispersionCorrection(grid_atoms, cutoff, α_dexp, β_dexp)
         sys_dc = System(atoms=grid_atoms, coords=(grid_coords .* u"nm"),
                         boundary=CubicBoundary(10.0u"nm"), general_inters=(dc,))
         @test potential_energy(sys_dc) ≈ E_openmm * u"kJ * mol^-1" rtol=1e-5
     end
-    @test_throws ArgumentError DEXPDispersionCorrection(grid_atoms, ShiftedForceCutoff(1.0u"nm"),
+    @test_throws ArgumentError DExpDispersionCorrection(grid_atoms, ShiftedForceCutoff(1.0u"nm"),
                                                         α_dexp, β_dexp)
 
     # One atom type, without units, against quadrature of the pair potential and its derivative
@@ -1909,7 +1909,7 @@
     simpson(f, a, b) = (b - a) / 3n_quad * sum((i in (0, n_quad) ? 1 : (isodd(i) ? 4 : 2)) *
                                                f(a + i * (b - a) / n_quad) for i in 0:n_quad)
     function dexp_disp_sys(cutoff)
-        dc = DEXPDispersionCorrection(grid_atoms_1, cutoff, α_dexp, β_dexp)
+        dc = DExpDispersionCorrection(grid_atoms_1, cutoff, α_dexp, β_dexp)
         return System(atoms=grid_atoms_1, coords=grid_coords, boundary=CubicBoundary(10.0),
                       general_inters=(dc,), energy_units=NoUnits, force_units=NoUnits)
     end

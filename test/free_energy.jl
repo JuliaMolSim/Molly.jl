@@ -397,7 +397,7 @@ end
                              custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
     for nonbonded in (SetupPME(), SetupCoulombReactionField())
         sys = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; nonbonded_method=nonbonded,
-                     dist_cutoff=1.0u"nm", strictness=:nowarn)
+                     dist_cutoff=1.0u"nm", dispersion_correction=true, strictness=:nowarn)
         @test any(inter isa DoubleExponential for inter in values(sys.pairwise_inters))
         E_ref, F_ref = potential_energy(sys), forces(sys)
         solvent = setdiff(eachindex(sys.atoms), solute)
@@ -413,8 +413,8 @@ end
             # As in OpenFE, the OpenFE scheduler leaves the alchemical atoms out of the
             #   dispersion correction, so it is compared without it
             if S == Molly.OpenFEScheduler
-                no_disp(s) = Tuple(g for g in s.general_inters if !(g isa DEXPDispersionCorrection ||
-                                                                g isa Molly.DEXPDispersionCorrectionλ))
+                no_disp(s) = Tuple(g for g in s.general_inters if !(g isa DExpDispersionCorrection ||
+                                                                g isa Molly.DExpDispersionCorrectionλ))
                 @test abs(potential_energy(sys_0; general_inters=no_disp(sys_0)) -
                           potential_energy(sys; general_inters=no_disp(sys))) < etol
             else
@@ -447,7 +447,7 @@ end
             boundary=CubicBoundary(8.0u"nm"),
             atoms_data=[AtomData(element="C") for _ in atoms],
             pairwise_inters=(DoubleExponential(α=α, β=β, cutoff=cutoff, use_neighbors=false),),
-            general_inters=(DEXPDispersionCorrection(atoms, cutoff, α, β),),
+            general_inters=(DExpDispersionCorrection(atoms, cutoff, α, β),),
         )
         for S in (Molly.DefaultLambdaScheduler, Molly.LinearLambdaScheduler,
                   Molly.GROMACSLambdaABFEScheduler)
@@ -511,11 +511,12 @@ end
             joinpath(data_dir, "ethanol_solv.pdb"),
             MolecularForceField(file;
                 custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
-            nonbonded_method=nonbonded, dist_cutoff=1.0u"nm", strictness=:nowarn,
+            nonbonded_method=nonbonded, dist_cutoff=1.0u"nm", dispersion_correction=true,
+            strictness=:nowarn,
         )
         sysA, sysB = build(garnet), build(garnet_B)
         @test abs(potential_energy(sysA) - potential_energy(sysB)) > 1.0u"kJ * mol^-1"
-        is_disp(g) = g isa DEXPDispersionCorrection || g isa Molly.DEXPDispersionCorrectionλ
+        is_disp(g) = g isa DExpDispersionCorrection || g isa Molly.DExpDispersionCorrectionλ
         no_disp(s) = System(s; general_inters=Tuple(g for g in s.general_inters if !is_disp(g)))
         disp(s) = potential_energy(s; pairwise_inters=(), specific_inter_lists=(),
                                    general_inters=Tuple(g for g in s.general_inters if is_disp(g)))

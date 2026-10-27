@@ -1248,7 +1248,12 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
     weight_14_coulomb = ff_param_array[2]
     # Use LennardJonesForce 1-4 weighting if present
     weight_14_lj = (ff_param_array[7] ? ff_param_array[6] : ff_param_array[4])
-    dispersion_correction = (isnothing(ff_param_array[12]) ? true : ff_param_array[12])
+    # As in OpenMM, a CustomNonbondedForce (the double exponential) has no correction by default
+    dispersion_correction = if isnothing(ff_param_array[12])
+        !ff_param_array[13]
+    else
+        ff_param_array[12]
+    end
 
     double_exp_alpha = (ff_param_array[9] ? ff_param_array[8] : zero(T))
     double_exp_beta  = (ff_param_array[11] ? ff_param_array[10] : zero(T))

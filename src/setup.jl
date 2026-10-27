@@ -511,9 +511,10 @@ Each residue is matched to a residue template of the force field, and a
     `dist_cutoff`. If the long-range dispersion correction is being used, this must be a
     [`DistanceCutoff`](@ref), [`ShiftedPotentialCutoff`](@ref) or [`PolynomialCutoff`](@ref).
 - `dispersion_correction=nothing`: whether to use the long-range dispersion correction,
-    [`LJDispersionCorrection`](@ref), or [`DEXPDispersionCorrection`](@ref) for a double
-    exponential force field. Defaults to the force field setting, which defaults to `true`.
-    Other `lj_cutoff` values then need `dispersion_correction=false`.
+    [`LJDispersionCorrection`](@ref), or [`DExpDispersionCorrection`](@ref) for a double
+    exponential force field. Defaults to the force field setting, which defaults to `true`
+    for Lennard-Jones and `false` for the double exponential, as in OpenMM. Other `lj_cutoff`
+    values need `dispersion_correction=false`.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.
@@ -1735,7 +1736,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     # Infinite boundaries give infinite volume, hence no dispersion correction
     if dispersion_correction && !has_infinite_boundary(boundary)
         if lj isa DoubleExponential
-            general_inters_disp = (DEXPDispersionCorrection(atoms, cutoff_lj, lj.α, lj.β, σ_mix,
+            general_inters_disp = (DExpDispersionCorrection(atoms, cutoff_lj, lj.α, lj.β, σ_mix,
                                                             ϵ_mix),)
         else
             general_inters_disp = (LJDispersionCorrection(atoms, cutoff_lj, σ_mix, ϵ_mix),)

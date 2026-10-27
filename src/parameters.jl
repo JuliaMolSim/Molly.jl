@@ -463,7 +463,7 @@ Gradients are only supported for systems without units.
 When charges are injected, the charge sums that a [`PME`](@ref) with `fixed_charges=true`
 caches are recomputed from the new charges. The dispersion corrections, such as
 [`LJDispersionCorrection`](@ref), are recomputed from the injected σ and ϵ values (and `α` and
-`β` for [`DEXPDispersionCorrection`](@ref)), so their gradients are included.
+`β` for [`DExpDispersionCorrection`](@ref)), so their gradients are included.
 """
 inject_gradients(sys::System, params_dic) =
     inject_gradients(sys, params_dic, ParameterPlan(sys, params_dic))

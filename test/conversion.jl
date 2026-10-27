@@ -443,7 +443,7 @@ end
             Molly.EwaldExclusionData(T(1.0)),
             Ewald(T(1.0)),
             LJDispersionCorrection(atoms, T(1.0)),
-            DEXPDispersionCorrection(atoms, T(1.0), T(16.766), T(4.427)),
+            DExpDispersionCorrection(atoms, T(1.0), T(16.766), T(4.427)),
             MullerBrown(),
         )
         for inter in inters
