@@ -442,7 +442,7 @@ end
             EwaldExclusion(),
             Molly.EwaldExclusionData(T(1.0)),
             CoulombReactionFieldExclusion(self=true),
-            CoulombReactionFieldExclusionData(dist_cutoff=T(1.0), solvent_dielectric=T(30.0),
+            Molly.CoulombReactionFieldExclusionData(dist_cutoff=T(1.0), solvent_dielectric=T(30.0),
                                               solute_dielectric=T(2.5), coulomb_const=cc),
             Ewald(T(1.0)),
             LJDispersionCorrection(atoms, T(1.0)),

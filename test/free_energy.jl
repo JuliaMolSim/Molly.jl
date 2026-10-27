@@ -543,7 +543,7 @@ end
                 sys = RelativeFESystem(sysA, sysB, 0.5, deepcopy(mapping), core_mapAB;
                                        scheduler=Molly.LinearLambdaScheduler(dual=dual))
                 il = only(il for il in sys.specific_inter_lists
-                          if il.data isa CoulombReactionFieldExclusionData)
+                          if il.data isa Molly.CoulombReactionFieldExclusionData)
                 roles = [atom.alch_role for atom in sys.atoms]
                 @test !any(minmax(roles[i], roles[j]) == minmax(Molly.InsertRole, Molly.DeleteRole)
                            for (i, j) in zip(il.is, il.js))

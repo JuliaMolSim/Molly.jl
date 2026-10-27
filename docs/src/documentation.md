@@ -397,7 +397,7 @@ This can be set with `float_type_high` but should generally be left as the defau
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method), [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref) (Ewald summation, slow), [`SetupCoulomb`](@ref) or a cutoff like [`DistanceCutoff`](@ref) (short range only).
 Setting `exclusion_correction=true` also applies the reaction field to the excluded and special pairs and to each atom with itself, using the [`CoulombReactionFieldExclusion`](@ref) specific interaction.
-For a system set up without files, [`reaction_field_exclusions`](@ref) gives this list of interactions.
+For a system set up without files, [`Molly.reaction_field_exclusions`](@ref) gives this list of interactions.
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 [`SHAKE_RATTLE`](@ref) (`constraint_algorithm=SetupSHAKE_RATTLE()`) only supports clusters of constraints around a central atom, such as `:hbonds` and rigid water, so use the default [`SetupLINCS`](@ref) with `:allbonds`.
 Neither algorithm supports angle constraints that share atoms with other constraints, so `:hangles` currently fails for proteins and most small molecules.

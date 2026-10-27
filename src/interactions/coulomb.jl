@@ -6,8 +6,6 @@ export
     CoulombReactionField,
     SetupCoulombReactionField,
     CoulombReactionFieldExclusion,
-    CoulombReactionFieldExclusionData,
-    reaction_field_exclusions,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
     CoulombEwald,
@@ -18,6 +16,8 @@ export
 @public coulomb_const,
     CoulombScaled,
     CoulombReactionFieldScaled,
+    CoulombReactionFieldExclusionData,
+    reaction_field_exclusions,
     CoulombEwaldScaled
 
 "The Coulomb constant, 1 / 4πϵ0, where ϵ0 is the vacuum permittivity."
@@ -816,6 +816,8 @@ end
     return krf, crf
 end
 
+abstract type AbstractReactionField <: PairwiseInteraction end
+
 @doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric, solute_dielectric, use_neighbors,
                          weight_special, coulomb_const)
@@ -849,7 +851,7 @@ Special (1-4) pairs use the plain Coulomb interaction without the reaction field
 [`SetupCoulombReactionField`](@ref) provides reaction field parameters when setting up a
 system from a file.
 """
-struct CoulombReactionField{D, S, E, W, T} <: PairwiseInteraction
+struct CoulombReactionField{D, S, E, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S
     solute_dielectric::E
@@ -1016,7 +1018,7 @@ the electrostatic coupling of the pair, which `scheduler`, a
 and their alchemical roles.
 In single topology the charges are interpolated between the end states.
 """
-struct CoulombReactionFieldScaled{D, S, E, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombReactionFieldScaled{D, S, E, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S
     solute_dielectric::E
@@ -1177,7 +1179,7 @@ At ``\lambda = 0`` the interaction is zero.
 Special (1-4) pairs disable the reaction field correction and use plain soft-core Coulomb
 scaled by `weight_special` and divided by `solute_dielectric`.
 """
-struct CoulombSoftCoreBeutlerReactionField{D, S, E, A, SM, EM, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombSoftCoreBeutlerReactionField{D, S, E, A, SM, EM, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S 
     solute_dielectric::E
@@ -1417,7 +1419,7 @@ At ``\lambda = 0`` the interaction is zero.
 Special (1-4) pairs disable the reaction field correction and use the standard Gapsys
 polynomial scaled by `weight_special` and divided by `solute_dielectric`.
 """
-struct CoulombSoftCoreGapsysReactionField{D, S, E, A, SQ, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombSoftCoreGapsysReactionField{D, S, E, A, SQ, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S 
     solute_dielectric::E
@@ -1630,10 +1632,6 @@ end
     end
 end
 
-const ReactionFieldInteraction = Union{CoulombReactionField, CoulombReactionFieldScaled,
-                                       CoulombSoftCoreBeutlerReactionField,
-                                       CoulombSoftCoreGapsysReactionField}
-
 @doc raw"""
     CoulombReactionFieldExclusion(; self=false)
 
@@ -1659,8 +1657,8 @@ This matches GROMACS, whereas OpenMM does not apply the correction.
 
 Since the properties of the interaction are the same for all pairs, they are stored once
 in the `data` field of the [`InteractionList2Atoms`](@ref) with
-[`CoulombReactionFieldExclusionData`](@ref).
-[`reaction_field_exclusions`](@ref) sets up the list of excluded pairs and atoms.
+[`Molly.CoulombReactionFieldExclusionData`](@ref).
+[`Molly.reaction_field_exclusions`](@ref) sets up the list of excluded pairs and atoms.
 """
 @kwdef struct CoulombReactionFieldExclusion
     self::Bool = false
@@ -1700,7 +1698,7 @@ function CoulombReactionFieldExclusionData(; dist_cutoff,
                                              coulomb_const, scheduler)
 end
 
-function CoulombReactionFieldExclusionData(inter::ReactionFieldInteraction;
+function CoulombReactionFieldExclusionData(inter::AbstractReactionField;
                                            scheduler=(hasproperty(inter, :scheduler) ?
                                                 inter.scheduler : DefaultLambdaScheduler()))
     return CoulombReactionFieldExclusionData(
@@ -1775,7 +1773,7 @@ interactions that applies the reaction field correction to excluded pairs and,
 if `self` is `true`, to each atom with itself.
 
 `inter` is the reaction field pairwise interaction of the system, from which the parameters
-are taken with [`CoulombReactionFieldExclusionData`](@ref).
+are taken with [`Molly.CoulombReactionFieldExclusionData`](@ref).
 It must have `use_neighbors=true`, since otherwise the excluded pairs are not removed from
 the pairwise interaction.
 The excluded pairs are either given as `excluded_pairs`, a list of atom index pairs, or are
@@ -1784,18 +1782,18 @@ finder.
 Special (1-4) pairs get the correction with their full charges, whereas
 `weight_special` only scales their direct Coulomb interaction.
 """
-function reaction_field_exclusions(inter::ReactionFieldInteraction, eligible, special=nothing;
+function reaction_field_exclusions(inter::AbstractReactionField, eligible, special=nothing;
                                    kwargs...)
     return reaction_field_exclusions(inter, size(eligible, 1),
                                      find_excluded_pairs(eligible, special); kwargs...)
 end
 
-function reaction_field_exclusions(inter::ReactionFieldInteraction, n_atoms::Integer,
+function reaction_field_exclusions(inter::AbstractReactionField, n_atoms::Integer,
                                    excluded_pairs; self::Bool=true, array_type=Array,
                                    kwargs...)
     use_neighbors(inter) || throw(ArgumentError("the reaction field interaction must use " *
                     "the neighbor list, otherwise excluded pairs are counted twice"))
-    data =CoulombReactionFieldExclusionData(inter; kwargs...)
+    data = CoulombReactionFieldExclusionData(inter; kwargs...)
     return reaction_field_exclusions(data, n_atoms, excluded_pairs, self, array_type)
 end
 
@@ -1824,7 +1822,7 @@ function check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
     for il in values(specific_inter_lists)
         il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData || continue
         for inter in values(pairwise_inters)
-            inter isa ReactionFieldInteraction || continue
+            inter isa AbstractReactionField || continue
             for field in (:dist_cutoff, :solvent_dielectric, :solute_dielectric, :coulomb_const)
                 if !isapprox(getfield(il.data, field), getfield(inter, field))
                     throw(ArgumentError("the $field of the reaction field exclusions, " *
@@ -1840,7 +1838,7 @@ end
 @inline function inject_list_data(il::InteractionList2Atoms{<:Any, <:Any,
                                                            <:CoulombReactionFieldExclusionData},
                                   pis)
-    rfs = filter(inter -> inter isa ReactionFieldInteraction, pis)
+    rfs = filter(inter -> inter isa AbstractReactionField, pis)
     isempty(rfs) && return il
     inter = first(rfs)
     data = CoulombReactionFieldExclusionData(inter.dist_cutoff, inter.solvent_dielectric,

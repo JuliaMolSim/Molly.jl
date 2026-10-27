@@ -299,7 +299,7 @@ end
     nf = DistanceNeighborFinder(eligible=eligible, n_steps=1, dist_cutoff=T(1.5))
     crf = CoulombReactionField(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
                                solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc)
-    excl = reaction_field_exclusions(crf, eligible)
+    excl = Molly.reaction_field_exclusions(crf, eligible)
 
     function pe_rf(coords, atoms, boundary, pairwise_inters, specific_inter_lists,
                    neighbor_finder, neighbors)
@@ -355,7 +355,7 @@ end
     crf_scaled = Molly.CoulombReactionFieldScaled(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
                                     solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc,
                                     scheduler=Molly.LinearLambdaScheduler())
-    excl_scaled = reaction_field_exclusions(crf_scaled, eligible)
+    excl_scaled = Molly.reaction_field_exclusions(crf_scaled, eligible)
 
     function pe_λ(λ, coords, boundary, pairwise_inters, specific_inter_lists, neighbor_finder,
                   neighbors, charges)
