@@ -224,11 +224,14 @@ function autotune_benchmark_ms!(prepare!::F, run!::G;
     return best_ms
 end
 
+# The box matrix with the basis vectors as columns, so that its inverse gives fractional
+#   coordinates, see `kernel_min_max_triclinic!`
+# The arguments are in column-major order
 @inline function triclinic_boundary_matrix(boundary::TriclinicBoundary, ::Type{T}) where T
     return SMatrix{3, 3, T}(
-        ustrip(boundary.basis_vectors[1][1]), ustrip(boundary.basis_vectors[2][1]), ustrip(boundary.basis_vectors[3][1]),
-        ustrip(boundary.basis_vectors[1][2]), ustrip(boundary.basis_vectors[2][2]), ustrip(boundary.basis_vectors[3][2]),
-        ustrip(boundary.basis_vectors[1][3]), ustrip(boundary.basis_vectors[2][3]), ustrip(boundary.basis_vectors[3][3]),
+        ustrip(boundary.basis_vectors[1][1]), ustrip(boundary.basis_vectors[1][2]), ustrip(boundary.basis_vectors[1][3]),
+        ustrip(boundary.basis_vectors[2][1]), ustrip(boundary.basis_vectors[2][2]), ustrip(boundary.basis_vectors[2][3]),
+        ustrip(boundary.basis_vectors[3][1]), ustrip(boundary.basis_vectors[3][2]), ustrip(boundary.basis_vectors[3][3]),
     )
 end
 
@@ -1179,25 +1182,33 @@ function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVecto
     return SVector(ntuple(d -> r1_min[d] - r2_max[d] <= zero(T) && r2_min[d] - r1_max[d] <= zero(T) ? zero(T) : ifelse(a[d] < b[d], a[d], b[d]), D))
 end
 
-# Triclinic boxes case is treated only in 3 dimensions
-function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
-    r3 = r2_max - r1_min
-    r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
-    r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
-    r_a = boundary.basis_vectors[1] .* round(r1[1] / boundary.basis_vectors[1][1])
-    a = SVector(abs(r_a[1]), abs(r_a[2]), abs(r_a[3]))
-    r3 = r1_max - r2_min
-    r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
-    r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
-    r_b = boundary.basis_vectors[1] .* round(r1[1] / boundary.basis_vectors[1][1])
-    b = SVector(abs(r_b[1]), abs(r_b[2]), abs(r_b[3]))
+#=
+Triclinic boxes case is treated only in 3 dimensions.
 
-    return SVector(
-        r_a[1] >= zero(T) && r_b[1] >= zero(T) ? zero(T) : ifelse(a[1] < b[1], a[1], b[1]),
-        r_a[2] >= zero(T) && r_b[2] >= zero(T) ? zero(T) : ifelse(a[2] < b[2], a[2], b[2]),
-        r_a[3] >= zero(T) && r_b[3] >= zero(T) ? zero(T) : ifelse(a[3] < b[3], a[3], b[3])
-    )
+The block bounds are in fractional coordinates in [0, 1), see `kernel_min_max_triclinic!`,
+which carry the length unit of the coordinates. The periodic gap between the blocks along
+each box vector is found as for a cubic box of side one and converted to a distance with
+the distance between the box faces spanned by the other two vectors. Since the box
+vectors are not orthogonal these distances do not add in quadrature, so the largest of
+them is used. It is a lower bound on the distance between any atom of one block and any
+image of an atom of the other, and is returned as the first component.
+=#
+function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
+    frac_side = oneunit(T)
+    widths = Molly.cell_list_box_widths(boundary)
+    d = zero(T)
+    for k in 1:3
+        overlap = (r1_min[k] - r2_max[k] <= zero(T)) && (r2_min[k] - r1_max[k] <= zero(T))
+        gap_a = abs(Molly.vector_1D(r2_max[k], r1_min[k], frac_side))
+        gap_b = abs(Molly.vector_1D(r1_max[k], r2_min[k], frac_side))
+        gap = ifelse(overlap, zero(T), min(gap_a, gap_b))
+        d = max(d, gap * ustrip(unit(T), widths[k]))
+    end
+    return SVector(d, zero(T), zero(T))
 end
+
+# Wrap a fractional coordinate, which carries the length unit of the coordinates, into [0, 1)
+@inline wrap_fractional(s) = s - floor(s / oneunit(s)) * oneunit(s)
 
 """
     reorder_system_gpu!(buffers, sys)
@@ -1404,6 +1415,8 @@ function kernel_min_max_triclinic!(
             for j in a:b
                 val += Hinv[k,j]*r_i[j]
             end
+            # Wrapped so that the periodic gaps in `boxes_dist` are valid for any coordinates
+            val = wrap_fractional(val)
             @inbounds mins_smem[local_i, k] = val
             @inbounds maxs_smem[local_i, k] = val
         end
@@ -1448,7 +1461,8 @@ function kernel_min_max_triclinic!(
             @inbounds for j in a:b
                 val += Hinv[k,j]*r_i[j]
             end
-            @inbounds r_smem[local_i, k] = val # Transform to fractional space: s = Hinv * r
+            # Transform to fractional space: s = Hinv * r, wrapped into [0, 1)
+            @inbounds r_smem[local_i, k] = wrap_fractional(val)
         end
     end
     xyz_min = CuStaticSharedArray(C, b)

@@ -630,18 +630,21 @@ end
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
         scaled_coord = floor.(Int32, coords[i] ./ w)
-        morton_seq[i] = generalized_morton_code(scaled_coord, bits, D)
+        morton_seq[i] = generalized_morton_code(scaled_coord, bits, Val(D))
     end
 end
 
 # See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
 # and https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN for
 # the bit-interleaving pattern used in the specialized 2D/3D fast paths.
-function generalized_morton_code(indices, bits::Integer, D::Integer)
+# The indices are negative for coordinates below zero, which wrapped coordinates in a
+#   triclinic box with negative off-diagonal components can be. `% UInt32` keeps the bits
+#   rather than erroring like `UInt32`, so the masks below take them modulo the grid size.
+function generalized_morton_code(indices, bits::Integer, ::Val{D}) where D
     if D == 3 && bits <= 10
-        x = UInt32(indices[1]) & 0x000003ff
-        y = UInt32(indices[2]) & 0x000003ff
-        z = UInt32(indices[3]) & 0x000003ff
+        x = (indices[1] % UInt32) & 0x000003ff
+        y = (indices[2] % UInt32) & 0x000003ff
+        z = (indices[3] % UInt32) & 0x000003ff
         
         x = (x | (x << 16)) & 0x030000ff
         x = (x | (x << 8))  & 0x0300f00f
@@ -660,8 +663,8 @@ function generalized_morton_code(indices, bits::Integer, D::Integer)
 
         return Int32(x | (y << 1) | (z << 2))
     elseif D == 2 && bits <= 15
-        x = UInt32(indices[1]) & 0x00007fff
-        y = UInt32(indices[2]) & 0x00007fff
+        x = (indices[1] % UInt32) & 0x00007fff
+        y = (indices[2] % UInt32) & 0x00007fff
 
         x = (x | (x << 8)) & 0x00ff00ff
         x = (x | (x << 4)) & 0x0f0f0f0f

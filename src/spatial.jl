@@ -204,11 +204,13 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     γ = NT(ustrip(bond_angle(bv[1], bv[2])))
 
     # Cotangent of the angle between b_yz and c_yz.
+    # This is negative when c has a negative y component, and the sign is needed to wrap
+    #   coordinates in that case. cross_yz is positive due to the checks above.
     by, bz = bv[2][2], bv[2][3]
     cy, cz = bv[3][2], bv[3][3]
     cross_yz = ustrip(by * cz - bz * cy)
     dot_yz = ustrip(by * cy + bz * cz)
-    cot_bprojyz_cprojyz = NT(abs(dot_yz / cross_yz))
+    cot_bprojyz_cprojyz = NT(dot_yz / cross_yz)
 
     # Direct ratios used to project along c into the xy plane.
     cx, cy2, cz2 = bv[3][1], bv[3][2], bv[3][3]
@@ -269,11 +271,14 @@ Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
 
+# Chemfiles.jl passes the matrix memory to the row-major C library, which takes the
+#   columns there as the basis vectors, so the basis vectors are the rows here
 function Chemfiles.UnitCell(b::TriclinicBoundary)
+    bv_rows = permutedims(hcat(b.basis_vectors...))
     if unit(eltype(eltype(b.basis_vectors))) == NoUnits
-        Chemfiles.UnitCell(Float64.(Array(hcat(b.basis_vectors...))) .* 10) # Assume nm
+        Chemfiles.UnitCell(Float64.(Array(bv_rows)) .* 10) # Assume nm
     else
-        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", hcat(b.basis_vectors...)))))
+        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", bv_rows))))
     end
 end
 
@@ -313,9 +318,13 @@ Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
-Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
-Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
-                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
+function Unitful.ustrip(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors); approx_images=A)
+end
+
+function Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(u, bv), b.basis_vectors); approx_images=A)
+end
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)
@@ -444,13 +453,24 @@ For a 3D bounding box the volume scales as the cube of the scaling factor.
 scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
 scale_boundary(b::RectangularBoundary, scale) = RectangularBoundary(b.side_lengths .* scale)
 
-function scale_boundary(b::TriclinicBoundary, scale)
-    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale)
+function scale_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, scale) where A
+    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale; approx_images=A)
 end
 
-# The minimum cubic box surrounding the bounding box, used for visualization
+# The upper and lower corners of the minimum cubic box surrounding the bounding box, used
+#   for visualization
+# The lower corner is below the origin for a triclinic box with negative off-diagonal
+#   components, which has coordinates below zero
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-cubic_bounding_box(b::TriclinicBoundary) = sum(b.basis_vectors)
+cubic_bounding_box(b::TriclinicBoundary) = max.(triclinic_box_corners(b)...)
+
+cubic_bounding_box_min(b::Union{CubicBoundary, RectangularBoundary}) = zero(b.side_lengths)
+cubic_bounding_box_min(b::TriclinicBoundary) = min.(triclinic_box_corners(b)...)
+
+function triclinic_box_corners(b::TriclinicBoundary)
+    v1, v2, v3 = b.basis_vectors
+    return (zero(v1), v1, v2, v3, v1 + v2, v1 + v3, v2 + v3, v1 + v2 + v3)
+end
 
 # Coordinates for visualizing bounding box
 function bounding_box_lines(boundary::CubicBoundary, dist_unit)
@@ -1242,7 +1262,10 @@ end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
-rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
+
+function rebuild_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, box) where A
+    return TriclinicBoundary(box; approx_images=A)
+end
 
 # Check that the interaction cutoff still fits in the box after the boundary is changed,
 #   for example by a barostat

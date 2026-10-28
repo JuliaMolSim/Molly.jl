@@ -264,6 +264,52 @@
         @test wrap_coords(coord, b_skewed) ≈ expected
     end
 
+    # Negative off-diagonal components, for which wrapped coordinates can be negative
+    #   e.g. a truncated octahedron, given as basis vectors and as basis vector angles
+    d_to = 5.0
+    b_to = TriclinicBoundary(
+        SVector(d_to, 0.0, 0.0),
+        SVector(d_to / 3, 2 * sqrt(2) * d_to / 3, 0.0),
+        SVector(-d_to / 3, sqrt(2) * d_to / 3, sqrt(6) * d_to / 3),
+    )
+    θ_to = acos(-1 / 3)
+    b_to_angles = TriclinicBoundary(SVector(d_to, d_to, d_to), SVector(θ_to, θ_to, θ_to))
+    @test b_to_angles.basis_vectors[3][2] < 0
+    rng_to = Xoshiro(10)
+    for b_neg in (b_to, b_to_angles)
+        H_neg = Molly.box_matrix(b_neg)
+        @test all(1:1_000) do _
+            coord = (rand(rng_to, SVector{3, Float64}) .- 0.5) .* 30
+            wrapped = wrap_coords(coord, b_neg)
+            fractional = H_neg \ wrapped
+            shift = H_neg \ (coord - wrapped)
+            return all(f -> 0 <= f < 1, fractional) && isapprox(shift, round.(shift); atol=1e-8)
+        end
+    end
+    @test Molly.cubic_bounding_box_min(b_to) ≈ SVector(-d_to / 3, 0.0, 0.0)
+    @test Molly.cubic_bounding_box(b_to) ≈ SVector(4 * d_to / 3, sqrt(2) * d_to, sqrt(6) * d_to / 3)
+    lims_to = Molly.axis_limits(Molly.cubic_bounding_box(b_to), CoordinatesLogger(1), 1,
+                                Molly.cubic_bounding_box_min(b_to))
+    @test lims_to[1] ≈ -d_to / 3
+    @test lims_to[2] ≈ 4 * d_to / 3
+
+    # The box given to Chemfiles, which is used to write trajectories, has the same lengths
+    #   and angles and gives back the same basis vectors
+    for b_cf in (b, b_to_angles) # Units of nm, and no units which are taken as nm
+        cell_cf = Chemfiles.UnitCell(b_cf)
+        lengths_nm = [norm(ustrip.(bv)) for bv in b_cf.basis_vectors]
+        @test Chemfiles.lengths(cell_cf) ≈ 10 .* lengths_nm
+        @test Chemfiles.angles(cell_cf) ≈ rad2deg.([b_cf.α, b_cf.β, b_cf.γ])
+    end
+    b_cf_back = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(b))
+    @test all(isapprox.(b_cf_back.basis_vectors, b.basis_vectors; atol=1e-6u"nm"))
+
+    # The minimum image setting is kept when the box is changed
+    b_exact_images = TriclinicBoundary(H_skewed; approx_images=false)
+    @test typeof(scale_boundary(b_exact_images, 1.1)) == typeof(b_exact_images)
+    @test typeof(Molly.rebuild_boundary(b_exact_images, 1.1 * H_skewed)) == typeof(b_exact_images)
+    @test typeof(ustrip(b_exact_images)) == typeof(b_exact_images)
+
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
     @test isapprox(Molly.box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
