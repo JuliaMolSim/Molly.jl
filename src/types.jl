@@ -769,18 +769,27 @@ work on the GPU.
 end
 
 """
-    MolecularTopology(bond_is, bond_js, n_atoms)
-    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms=[])
+    MolecularTopology(bond_is, bond_js, n_atoms; array_type=Array)
+    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms=[];
+                      array_type=Array)
 
 Topology information for a system.
 
 Stores the index of the molecule each atom belongs to, the number of
 atoms in each molecule and the list of bonded atom pairs.
+`array_type` sets where the arrays for the GPU unwrap live; host arrays are uploaded on first
+GPU use.
 """
-struct MolecularTopology
+struct MolecularTopology{VI <: AbstractVector{Int32}}
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
+    parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
+    cluster_inds::VI # length N; bonded cluster (spanning tree) index per atom
+    sort_perm::VI    # length N; permutation grouping atoms contiguously by bonded cluster
+    cluster_offsets::VI # length n_clusters+1; 0-based prefix boundaries into sort_perm order
+    n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
+    gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -791,9 +800,9 @@ function bond_graph(bond_is, bond_js, n_atoms)
     return g
 end
 
-MolecularTopology(amis, macs) = MolecularTopology(amis, macs, [])
+MolecularTopology(amis, macs; kwargs...) = MolecularTopology(amis, macs, []; kwargs...)
 
-function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
+function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     g = bond_graph(bond_is, bond_js, n_atoms)
     cc = connected_components(g)
     atom_molecule_inds = zeros(Int32, n_atoms)
@@ -804,7 +813,87 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g; kwargs...)
+end
+
+# Spanning forest of the bond graph (parent per atom, roots point to themselves), for the
+# pointer doubling of the GPU unwrap_molecules; any spanning tree gives a valid unwrap
+function molecule_spanning_forest(g)
+    n_atoms = nv(g)
+    parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
+    cluster = zeros(Int32, n_atoms)
+    depth = zeros(Int, n_atoms)
+    visited = falses(n_atoms)
+    n_clusters = 0
+    for seed in 1:n_atoms
+        visited[seed] && continue
+        visited[seed] = true
+        n_clusters += 1
+        cluster[seed] = n_clusters
+        stack = Int[seed]
+        while !isempty(stack)
+            i = pop!(stack)
+            for j in neighbors(g, i)
+                visited[j] && continue
+                parent[j] = i
+                cluster[j] = n_clusters
+                depth[j] = depth[i] + 1
+                visited[j] = true
+                push!(stack, j)
+            end
+        end
+    end
+    max_depth = maximum(depth; init=0)
+    n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) # 2^n_rounds >= max_depth
+    return parent, cluster, n_clusters, n_rounds
+end
+
+function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
+                           array_type::Type{AT}=Array) where AT
+    n_atoms = length(atom_molecule_inds)
+    bond_is = isempty(bonded_atoms) ? Int[] : first.(bonded_atoms)
+    bond_js = isempty(bonded_atoms) ? Int[] : last.(bonded_atoms)
+    g = bond_graph(bond_is, bond_js, n_atoms)
+    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                    array_type=AT)
+end
+
+# Shared by both constructors, which pass the bond graph they have built
+function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
+                                  array_type::Type{AT}=Array) where AT
+    parent_cpu, cluster_cpu, n_clusters, n_rounds = molecule_spanning_forest(g)
+
+    # Segments for the GPU unwrap are bonded clusters, as in the CPU unwrap, which can be
+    # smaller than the molecules given by atom_molecule_inds
+    sort_perm_cpu = Int32.(sortperm(cluster_cpu))
+    cluster_offsets_cpu = zeros(Int32, n_clusters + 1)
+    for c in cluster_cpu
+        cluster_offsets_cpu[c + 1] += 1
+    end
+    cumsum!(cluster_offsets_cpu, cluster_offsets_cpu)
+
+    return MolecularTopology(
+        Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
+        Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
+        to_device(parent_cpu, AT), to_device(cluster_cpu, AT), to_device(sort_perm_cpu, AT),
+        to_device(cluster_offsets_cpu, AT), n_rounds, Base.RefValue{Any}(nothing),
+    )
+end
+
+# The spanning-forest arrays on device AT for the GPU unwrap_molecules, uploaded once and cached
+function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
+    cached = topology.gpu_cache[]
+    !isnothing(cached) && cached.array_type === AT && return cached.arrays
+    arrays = (
+        parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
+        cluster_inds = topology.cluster_inds isa AT ? topology.cluster_inds :
+                           to_device(topology.cluster_inds, AT),
+        sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
+        cluster_offsets = topology.cluster_offsets isa AT ? topology.cluster_offsets :
+                              to_device(topology.cluster_offsets, AT),
+    )
+    topology.gpu_cache[] = (array_type=AT, arrays=arrays)
+    return arrays
 end
 
 """
