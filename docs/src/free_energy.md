@@ -12,11 +12,11 @@ Through the years, researchers have developed a collection of techniques to solv
 \Delta F_{A \rightarrow B} = F_B - F_A = k_B T \ln \left \langle \exp\left( - \frac{E_B - E_A}{k_B T} \right) \right \rangle _A
 ```
 
-This states that, for a given system, the change of FE in going from state *A* to state *B* is equal to the FE difference between the two states and, more importantly, directly related to the total energy difference of states *A* and *B* through Botzmann statistics. In this equation, the angle brackets represent the expected value of the Boltzmann-weighted energy difference of the two states, but sampled only from conformations extracted from state *A*. This implies that, even when sampling only one state, we are able to infer information from the other, given that some niceness criteria is met, i.e. the energy difference between the two states is small enough. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.
+This expresses the free-energy difference in terms of configurations sampled from state *A*. In practice it is useful when states *A* and *B* have sufficient configurational overlap, so that re-evaluating state *B* on samples from *A* is statistically meaningful. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.
 
 A little over 20 years after Zwanzig introduced FE perturbation, Charles H Bennett expanded on this and developed the [Bennett Acceptance Ratio](https://doi.org/10.1016/0021-9991(76)90078-4) (BAR). Bennett built directly upon the statistical foundation of the Zwanzig equation, and recognized that both forward and reverse energy differences between two states contain complementary information; that is, while Zwanzig’s formulation reweights configurations from a single ensemble to estimate the free energy of another, BAR symmetrizes this process. It combines samples from both states and determines the free energy shift $\Delta F$ that makes each ensemble equally probable under some weighting derived from Boltzmann statistics. In this sense, BAR can be viewed as a generalization of Zwanzig’s exponential averaging, reducing to the Zwanzig equation when only one direction of sampling is available. However, it is because of this that BAR still suffers from the same issue as Zwanzig's reweighting method: the energy difference between states $A$ and $B$ must be small enough such that there is sufficient overlap between their configurational spaces, otherwise the necessary statistics for FE estimation will be very poor and intermediate steps between $A$ and $B$ are needed.
 
-Thus, in 2008 Michael R Shirts and John D Chodera introduced the [Multistate Bennett Acceptance Ratio](https://doi.org/10.1063/1.2978177) (MBAR) method. MBAR expands on BAR by instead of just using two states *A* and *B*, considering a collection of *k* $\in$ *K* different thermodynamic states. The only thing that is expected from these states is that they must be sampled from equivalent thermodynamic ensembles, this is, all states should be NVT or NPT, etc.; but other than that, the specific Hamiltonian for each evaluated state can differ in an arbitrary manner. Then, a series of $n_k$ samples are drawn from each thermodynamic state, until a total of $N = \sum_{k}^{K} n_k$ samples are obtained. By evaluating each sample $n \in N$ with each Hamiltonian $\mathcal{H}_{k}; k \in K$, one obtains a matrix of reduced potentials $u_{nk} = \beta_{k} \left[ E_{k}(n)+p_{k}V(n) \right]$. MBAR then solves a set of self-consistent equations that yield the relative free energies $f_k$ of all states simultaneously, using every sample across all simulations to estimate each state’s free energy in a statistically optimal way. In this sense, MBAR generalizes BAR to an arbitrary number of thermodynamic states and provides the maximum-likelihood, minimum-variance estimator for free energies and ensemble averages, efficiently combining data from overlapping simulations into a unified framework. MBAR also allows the reweighting of any observable to a completely unsampled thermodynamic state. Because this themodynamic state is compared to a collection of sampled states, instead of just one, the conformational space between states is much more likely to overlap, therefore increasing the probability of the reweighting to be meaningful.
+Thus, in 2008 Shirts and Chodera introduced the [Multistate Bennett Acceptance Ratio](https://doi.org/10.1063/1.2978177) (MBAR) method. Instead of just using two states *A* and *B*, MBAR considers a collection of thermodynamic states. These states should belong to compatible ensembles, such as all NVT or all NPT, but the Hamiltonian in each state may differ. If state `k` contributes `n_k` samples, with a total of `N = \sum_k n_k`, then evaluating each sample under each Hamiltonian yields the reduced potentials `u_{nk} = \beta_k [E_k(n) + p_k V(n)]`. MBAR solves for the relative free energies `f_k` of all states simultaneously, using all of the data at once. It also supports reweighting observables to unsampled target states, which is practical when the sampled states provide enough overlap.
 
 ## How to run MBAR with Molly
 
@@ -212,10 +212,10 @@ dR     = FT(6)u"deg"           # Increment in CV (torsion angle) in each consecu
 K_bias = FT(250)u"kJ * mol^-1" # Energy constant for restraint potential
 Δt     = FT(1)u"fs"            # Simulation timestep
 T0     = FT(310)u"K"           # Simulation temperature
-P0     = FT(1)u"bar"           # Simulation pessure
+P0     = FT(1)u"bar"           # Simulation pressure
 ```
 
-One must take into account that the simulations will start from an initial (ideally equilibrated) configuration, and therefore an arbitrarirly imposed restraint may be too far away from the equilibrium distribution of the CV to be biased, causing numerical issues. Thus, we will begin our setup by gently pulling the system along the CV in a series of short, sequential simulations. How short? The answer to that question depends on the system to be simulated; the pulling simulations should be long enough so that the system has time to move towards and stabilize around the imposed biased equilibrium, but also sufficiently short as to not waste time in this initial sequential part, as once each umbrella window is equilibrated it can run in parallel with the rest. For this simple study case, equilibrating each window for 0.5 ns is enough. We can define:
+The simulations start from an initial, ideally equilibrated, configuration. If a restraint is imposed too far from the current CV value, the system may respond poorly and the dynamics can become unstable. We therefore begin by gently pulling the system along the CV in a series of short sequential simulations. The required pulling length is system-dependent; for this example, 0.5 ns per window is enough.
 
 ```julia
 # pulling.jl
@@ -349,7 +349,7 @@ dR     = FT(6)u"deg"           # Increment in CV (torsion angle) in each consecu
 K_bias = FT(250)u"kJ * mol^-1" # Energy constant for restraint potential
 Δt     = FT(1)u"fs"            # Simulation timestep
 T0     = FT(310)u"K"           # Simulation temperature
-P0     = FT(1)u"bar"           # Simulation pessure
+P0     = FT(1)u"bar"           # Simulation pressure
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
@@ -550,7 +550,7 @@ Threads.@threads for nt in 1:N_TRJ
 end
 ```
 
-Next, we define a vector of thermodynamic states to represent each Hamiltonian used to produce the simulations, as well a single state that represents the system in the absence of bias potentials. We will use the [`ThermoState`](@ref) struct provided by Molly:
+Next, we define a vector of thermodynamic states to represent each Hamiltonian used to produce the simulations, plus a single target state for the unbiased system. In Molly, [`ThermoState`](@ref) stores a system together with an integrator that defines the ensemble:
 
 ```julia
 # MBAR.jl

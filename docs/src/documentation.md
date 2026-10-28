@@ -2099,6 +2099,16 @@ The available neighbor finders are:
 
 The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
 
+The [`find_neighbors`](@ref) function returns an object that can be indexed into, and all pairs can be extracted with [`neighbor_pairs`](@ref):
+```julia
+nbs = find_neighbors(sys)
+for i in eachindex(nbs)
+    println(nbs[i])
+end
+
+neighbor_pairs(nbs)
+```
+
 Pairwise interactions use the neighbor list by default, i.e. [`use_neighbors`](@ref) returns `true`, so a [`System`](@ref) with pairwise interactions needs a neighbor finder unless the interactions are given `use_neighbors=false`.
 A pairwise interaction with `use_neighbors=false` considers all pairs of atoms, without the excluded and special pairs of the neighbor finder.
 
