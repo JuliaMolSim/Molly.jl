@@ -1155,7 +1155,8 @@ function Molly.force(inter::MyPairwiseInter,
                      boundary,
                      velocity_i,
                      velocity_j,
-                     step_n)
+                     step_n,
+                     args...)
     r = norm(vec_ij)
     params = (inter.param,)
     f = Molly.force_cutoff(inter.cutoff, inter, r, params)
@@ -1221,7 +1222,8 @@ function Molly.potential_energy(inter::MyPairwiseInter,
                                 boundary,
                                 velocity_i,
                                 velocity_j,
-                                step_n)
+                                step_n,
+                                args...)
     r = norm(vec_ij)
     params = (inter.param,)
     return Molly.pe_cutoff(inter.cutoff, inter, r, params)
