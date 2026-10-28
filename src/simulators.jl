@@ -290,7 +290,7 @@ threads.
             break
         end
 
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -312,7 +312,7 @@ threads.
                 sys, sys.neighbor_finder, neighbors_copy, step_n, true;
                 n_threads=n_threads)
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
             hn = hn / 5
             println(sim.log_stream, "Step ", step_n, " - potential energy ",
@@ -665,7 +665,7 @@ end
             g_dot_p = -sum_dot(F, p)
         end
 
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         coords_prev .= sys.coords
         neighbors_prev = neighbors
         E_prev = E
@@ -714,7 +714,7 @@ end
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
                                        n_threads=n_threads)
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
             n_hist = 0
         end
@@ -3048,7 +3048,7 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -3069,7 +3069,7 @@ end
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
                                        n_threads=n_threads)
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
             apply_loggers!(sys, neighbors, step_n, nothing, run_loggers; n_threads=n_threads,
                            strictness=strictness, current_potential_energy=E_old, success=false,

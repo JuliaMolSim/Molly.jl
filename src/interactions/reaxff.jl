@@ -468,7 +468,7 @@ end
 """
     System(coord_file_path::AbstractString, reaxff::ReaxFF; eem_tolerance=1e-6,
            eem_max_iterations=200, eem_float_type=Float64, initial_charges=nothing,
-           neighbor_skin_angstrom=0.0, neighbor_refresh_n_steps=1, boundary=nothing,
+           neighbor_skin=0.0, neighbor_refresh_n_steps=1, boundary=nothing,
            array_type=Array, velocities=nothing, units=true, loggers=())
 
 Construct a ReaxFF system from a coordinate file supported by Chemfiles.jl.
@@ -482,8 +482,9 @@ failure to converge raises an error. `initial_charges` contains the initial
 atomic partial charges in units of elementary charge and defaults to zeros. Its sum sets
 the total system charge that is conserved by charge equilibration.
 
-`neighbor_skin_angstrom` is a non-negative distance in angstroms added to the
-largest ReaxFF distance cutoff, regardless of `units`. `neighbor_refresh_n_steps`
+`neighbor_skin` is a non-negative distance added to the largest ReaxFF distance
+cutoff. It accepts lengths with units; unitless values are interpreted as
+nanometers, regardless of `units`. `neighbor_refresh_n_steps`
 sets the scheduled neighbor finder rebuild interval and must be at least one. An interval
 greater than one requires a positive skin distance. Select a skin large enough to cover
 atomic motion between rebuilds.
@@ -503,7 +504,7 @@ function System(coord_file_path::AbstractString,
                 eem_max_iterations=200,
                 eem_float_type::Type{QT}=Float64,
                 initial_charges=nothing,
-                neighbor_skin_angstrom::Real=0.0,
+                neighbor_skin=0.0,
                 neighbor_refresh_n_steps::Integer=1,
                 boundary=nothing,
                 array_type::Type{AT}=Array,
@@ -619,8 +620,14 @@ function System(coord_file_path::AbstractString,
     end
 
     # create neighbor finder
+    neighbor_skin_angstrom = if unit(neighbor_skin) == NoUnits
+        10 * neighbor_skin
+    else
+        ustrip(u"Å", neighbor_skin)
+    end
+
     if neighbor_skin_angstrom < zero(neighbor_skin_angstrom)
-        throw(ArgumentError("neighbor_skin_angstrom must be non-negative"))
+        throw(ArgumentError("neighbor_skin must be non-negative"))
     end
 
     if neighbor_refresh_n_steps < 1

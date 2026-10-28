@@ -885,8 +885,8 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
     end
 end
 
-save_mc_trial_state(inter) = nothing
-restore_mc_trial_state!(sys, inter, ::Nothing) = nothing
+save_trial_state(inter) = nothing
+restore_trial_state!(sys, inter, ::Nothing) = nothing
 
 function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarloBarostat, sim,
                          neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
@@ -926,7 +926,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
     for attempt_n in 1:barostat.n_iterations
         E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                               strictness=strictness)
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V  = volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
 
@@ -967,7 +967,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
         end
         if barostat.trial_find_neighbors
@@ -990,7 +990,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                      strictness=strictness)
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -1042,7 +1042,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
         end
         if barostat.trial_find_neighbors
@@ -1065,7 +1065,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                      strictness=strictness)
-        trial_states = map(save_mc_trial_state, values(sys.general_inters))
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -1118,7 +1118,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
-                restore_mc_trial_state!(sys, inter, snapshot)
+                restore_trial_state!(sys, inter, snapshot)
             end
         end
         if barostat.trial_find_neighbors

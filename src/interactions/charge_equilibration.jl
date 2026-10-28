@@ -98,7 +98,7 @@ end
 
 evaluate_before_pairwise(::EEM) = true
 
-save_mc_trial_state(eem::EEM) = (
+save_trial_state(eem::EEM) = (
     q=copy(eem.state.q),
     q_prev_1=copy(eem.state.q_prev_1),
     q_prev_2=copy(eem.state.q_prev_2),
@@ -109,7 +109,7 @@ save_mc_trial_state(eem::EEM) = (
     last_history_step=eem.state.last_history_step,
 )
 
-function restore_mc_trial_state!(sys, eem::EEM, snapshot::NamedTuple)
+function restore_trial_state!(sys, eem::EEM, snapshot::NamedTuple)
     eem.state.q .= snapshot.q
     eem.state.q_prev_1 .= snapshot.q_prev_1
     eem.state.q_prev_2 .= snapshot.q_prev_2
@@ -815,29 +815,6 @@ end
 function qeq_reduction_ndrange(n_atoms)
     return cld(n_atoms, QEQ_THREADS_PER_GROUP) * QEQ_THREADS_PER_GROUP
 end
-
-
-
-
-# projects the residual vector r to the zero-sum subspace using projection operator P = I - (1/N)I(I^T)
-# then preconditions this initial projected residual using a Jacobi preconditioner: M^(-1)*r
-# M = H_diag_inv and r_shift = (1/N)1(1^T)
-@kernel function project_and_precondition!(
-    r,
-    z,
-    r_shift,
-    H_diag_inv,
-)
-    ti = @index(Global, Linear)
-
-    @inbounds begin
-        projected_residual = r[ti] - r_shift
-        r[ti] = projected_residual
-        preconditioned_residual = projected_residual * H_diag_inv[ti]
-        z[ti] = preconditioned_residual     # this needs to be projected again after this kernel
-    end
-end
-
 
 
 # returns scalar conversion factor (no units) from System length units to those required by the coupling in eem_hij() 
