@@ -1062,7 +1062,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                              if Int(i) in unique_B_set || Int(j) in unique_B_set])
         end
         append!(bonded, [(v.atom_ind, v.atom_1) for v in virtual_sites])
-        topology = MolecularTopology(first.(bonded), last.(bonded), n_atoms)
+        topology = MolecularTopology(first.(bonded), last.(bonded), n_atoms; array_type=AT)
     end
 
     return alchemical_system(sysA, Atoms, Coords, Data, Boundary, temp;

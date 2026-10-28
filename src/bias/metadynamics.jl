@@ -1091,11 +1091,11 @@ bias_description(md::Metadynamics) =
 
 # Host copies of the system made once per call: the coordinates each CV is evaluated on
 #   (unwrapped for correction=:pbc, as stored for :wrap), the atoms and the velocities
-function metadynamics_host_state(md::Metadynamics, sys)
+function metadynamics_host_state(md::Metadynamics, sys, buffers=nothing, step_n=nothing)
     cvs = md.memory.cvs
     coords = any(cv -> cv.correction != :pbc, cvs) ? from_device(sys.coords) : nothing
-    coords_pbc = any(cv -> cv.correction == :pbc, cvs) ? from_device(unwrap_molecules(sys)) :
-                                                          nothing
+    coords_pbc = any(cv -> cv.correction == :pbc, cvs) ?
+                 from_device(unwrapped_coords(sys, buffers, step_n)) : nothing
     cv_coords = map(cv -> cv.correction == :pbc ? coords_pbc : coords, cvs)
     return cv_coords, from_device(sys.atoms), from_device(sys.velocities)
 end
@@ -1135,7 +1135,7 @@ function metadynamics_forces!(fs, sys, md::Metadynamics; needs_vir::Bool=false,
                               visit_state::Bool=false, strictness=default_strictness())
     visit_state && check_logger_kT(md.logger, md, sys.k) # Only a deposit uses kT
     cvs = md.memory.cvs
-    cv_coords, atoms, velocities = metadynamics_host_state(md, sys)
+    cv_coords, atoms, velocities = metadynamics_host_state(md, sys, buffers, step_n)
 
     # CV gradients and values, each CV on the coordinates its own correction asks for
     grads = map(cvs, cv_coords) do cv, coords

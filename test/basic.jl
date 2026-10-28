@@ -348,6 +348,126 @@
     mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
+    # GPU vs CPU unwrap_molecules; host topologies, so the GPU path also uploads them
+    coords_chain = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
+                    SVector(1.0 , 1.0, 1.0)]
+    boundary_chain = CubicBoundary(2.0)
+    topology_chain = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
+    uw_cpu = Molly.unwrap_molecules(coords_chain, boundary_chain, topology_chain)
+    for AT in array_list
+        uw_gpu = Molly.unwrap_molecules(AT(coords_chain), boundary_chain, topology_chain)
+        @test isapprox(from_device(uw_gpu), uw_cpu; atol=1e-9)
+    end
+
+    # A ring: the closing bond (4, 1) isn't part of the spanning tree
+    coords_ring = [SVector(0.0, 0.0, 0.0), SVector(1.0, 0.0, 0.0),
+                   SVector(1.0, 1.0, 0.0), SVector(0.0, 1.0, 0.0)]
+    boundary_ring = CubicBoundary(10.0)
+    topology_ring = MolecularTopology([1, 1, 1, 1], [4], [(1, 2), (2, 3), (3, 4), (4, 1)])
+    uw_ring_cpu = Molly.unwrap_molecules(coords_ring, boundary_ring, topology_ring)
+    for AT in array_list
+        uw_ring_gpu = Molly.unwrap_molecules(AT(coords_ring), boundary_ring, topology_ring)
+        @test isapprox(from_device(uw_ring_gpu), uw_ring_cpu; atol=1e-9)
+    end
+
+    # Two 3-atom molecules, a 5-atom chain (depth 4, so n_rounds > 1) and two isolated atoms
+    coords_mixed = [
+        SVector(0.0, 0.0, 0.0), SVector(0.1, 0.0, 0.0), SVector(-0.1, 0.0, 0.0),
+        SVector(5.0, 0.0, 0.0), SVector(5.1, 0.0, 0.0), SVector(4.9, 0.0, 0.0),
+        SVector(10.0, 0.0, 0.0), SVector(10.1, 0.0, 0.0), SVector(10.2, 0.0, 0.0),
+        SVector(10.3, 0.0, 0.0), SVector(10.4, 0.0, 0.0),
+        SVector(15.0, 0.0, 0.0), SVector(2.0, 2.0, 2.0),
+    ]
+    boundary_mixed = CubicBoundary(20.0)
+    topology_mixed = MolecularTopology(
+        [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5],
+        [3, 3, 5, 1, 1],
+        [(1, 2), (1, 3), (4, 5), (4, 6), (7, 8), (8, 9), (9, 10), (10, 11)],
+    )
+    uw_mixed_cpu = Molly.unwrap_molecules(coords_mixed, boundary_mixed, topology_mixed)
+    for AT in array_list
+        uw_mixed_gpu = Molly.unwrap_molecules(AT(coords_mixed), boundary_mixed, topology_mixed)
+        @test isapprox(from_device(uw_mixed_gpu), uw_mixed_cpu; atol=1e-9)
+    end
+    # Bond-free atoms are their own root and pass through unchanged (mod box wrap)
+    @test isapprox(uw_mixed_cpu[12], coords_mixed[12]; atol=1e-9)
+    @test isapprox(uw_mixed_cpu[13], coords_mixed[13]; atol=1e-9)
+
+    # One molecule made of two bonded clusters, the bonded pair crossing the boundary: each
+    # cluster is placed in the box on its own
+    coords_split = [SVector(1.9, 0.0, 0.0), SVector(0.1, 0.0, 0.0), SVector(1.9, 0.0, 0.0)]
+    boundary_split = CubicBoundary(2.0)
+    topology_split = MolecularTopology([1, 1, 1], [3], [(1, 2)])
+    uw_split_cpu = Molly.unwrap_molecules(coords_split, boundary_split, topology_split)
+    @test isapprox(uw_split_cpu, [SVector(-0.1, 0.0, 0.0), SVector(0.1, 0.0, 0.0),
+                                  SVector(1.9, 0.0, 0.0)]; atol=1e-9)
+    for AT in array_list
+        uw_split_gpu = Molly.unwrap_molecules(AT(coords_split), boundary_split, topology_split)
+        @test isapprox(from_device(uw_split_gpu), uw_split_cpu; atol=1e-9)
+    end
+
+    # Triclinic box: bonded 4-atom chains placed at random and wrapped
+    rng_tri = Xoshiro(1)
+    boundary_tri = TriclinicBoundary(SVector(SVector(3.0, 0.0, 0.0), SVector(0.8, 2.5, 0.0),
+                                             SVector(0.5, 0.4, 2.2))u"nm")
+    coords_tri = typeof(SVector(1.0, 1.0, 1.0)u"nm")[]
+    bonds_tri_i, bonds_tri_j = Int[], Int[]
+    for _ in 1:50
+        c = random_coord(boundary_tri; rng=rng_tri)
+        base = length(coords_tri)
+        for k in 0:3
+            push!(coords_tri, wrap_coords(c .+ SVector(0.12k, 0.05k, 0.0)u"nm", boundary_tri))
+            k > 0 && (push!(bonds_tri_i, base + k); push!(bonds_tri_j, base + k + 1))
+        end
+    end
+    topology_tri = MolecularTopology(bonds_tri_i, bonds_tri_j, length(coords_tri))
+    uw_tri_cpu = Molly.unwrap_molecules(coords_tri, boundary_tri, topology_tri)
+    for AT in array_list
+        uw_tri_gpu = Molly.unwrap_molecules(AT(coords_tri), boundary_tri, topology_tri)
+        @test maximum(norm.(from_device(uw_tri_gpu) .- uw_tri_cpu)) < 1e-9u"nm"
+    end
+
+    # 2D
+    coords_2d = [SVector(1.95, 0.5), SVector(0.05, 0.5), SVector(0.15, 0.6), SVector(1.0, 1.0)]
+    boundary_2d = RectangularBoundary(2.0)
+    topology_2d = MolecularTopology([1, 2], [2, 3], 4)
+    uw_2d_cpu = Molly.unwrap_molecules(coords_2d, boundary_2d, topology_2d)
+    for AT in array_list
+        uw_2d_gpu = Molly.unwrap_molecules(AT(coords_2d), boundary_2d, topology_2d)
+        @test isapprox(from_device(uw_2d_gpu), uw_2d_cpu; atol=1e-9)
+    end
+
+    # GPU unwrap of a Float32 system: the cluster means accumulate in Float64, so no molecule
+    # lands in the wrong periodic image, against a Float64 reference
+    if CUDA.functional()
+        n_mol = 5_000
+        rng_f32 = Xoshiro(42)
+        box_f32 = 50.0f0u"nm"
+        coords_f32 = Vector{SVector{3, Float32}}(undef, n_mol * 3)
+        bonds_i, bonds_j = Int[], Int[]
+        for m in 1:n_mol
+            base = (m - 1) * 3
+            c = SVector{3, Float32}(rand(rng_f32, Float32), rand(rng_f32, Float32),
+                                    rand(rng_f32, Float32)) .* ustrip(box_f32)
+            coords_f32[base + 1] = c
+            coords_f32[base + 2] = c .+ SVector(0.1f0, 0f0, 0f0)
+            coords_f32[base + 3] = c .+ SVector(0f0, 0.1f0, 0f0)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 2)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 3)
+        end
+        boundary_f32 = CubicBoundary(box_f32)
+        topology_f32 = MolecularTopology(bonds_i, bonds_j, n_mol * 3)
+
+        coords_f64 = SVector{3, Float64}.(ustrip_vec.(coords_f32)) .* u"nm"
+        boundary_f64 = CubicBoundary(Float64(ustrip(box_f32)) * u"nm")
+        uw_f32 = from_device(Molly.unwrap_molecules(CuArray(coords_f32 .* u"nm"), boundary_f32,
+                                                     topology_f32))
+        uw_f64_ref = Molly.unwrap_molecules(coords_f64, boundary_f64, topology_f32)
+
+        max_atom_dist = ustrip(maximum(norm.(uw_f32 .- uw_f64_ref)))
+        @test max_atom_dist < 0.1 * ustrip(box_f32) # no molecule a full box vector away
+    end
+
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     for AT in array_list
         sys = System(
