@@ -2365,8 +2365,38 @@ end
     return neighbors
 end
 
+#=
+Whether CellListMap.jl can give a pair more than once.
+
+From CellListMap.jl v0.10.7 the box can be less than twice the cutoff, in which case a
+pair is given once for each periodic image within the cutoff, including an atom paired
+with its own image. The force and energy loops use the minimum image of each listed pair,
+so such a pair would be counted more than once. Two images can only be within the cutoff
+if a lattice vector is shorter than twice the cutoff, and no lattice vector is shorter
+than the shortest box side, which is a diagonal element for a `TriclinicBoundary`.
+=#
+function clm_lists_images(boundary, dist_cutoff)
+    has_infinite_boundary(boundary) && return false
+    return minimum(box_sides(boundary)) <= 2 * dist_cutoff
+end
+
+# Add a pair to the pair list only for the image that `vector` gives, so that each pair is
+#   listed once when CellListMap.jl gives more than one image
+# Other images differ from that one by a lattice vector, which is at least as long as the
+#   shortest box side
+@inline function push_pair_min_image!(pair, neighbors::NeighborList, eligible, special,
+                                      boundary, min_side_sq)
+    if pair.i != pair.j
+        image_diff = (pair.y - pair.x) - vector(pair.x, pair.y, boundary)
+        if 4 * sum(abs2, image_diff) < min_side_sq
+            push_pair!(pair, neighbors, eligible, special)
+        end
+    end
+    return neighbors
+end
+
 # Parallelization interface for custom output of CellListMap
-CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list)) 
+CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list))
 CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
 
 function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vector{<:NeighborList})
@@ -2428,10 +2458,20 @@ function find_neighbors(sys::System{D, AT},
 
     # Update the neighbor list
     eligible, special = kernel_matrix(nf.eligible), kernel_matrix(nf.special)
-    neighbors = CellListMap.pairwise!(
-        (p, neighbors) -> push_pair!(p, neighbors, eligible, special),
-        nf.clm_particlesystem,
-    )
+    boundary = sys.boundary
+    if clm_lists_images(boundary, nf.dist_cutoff)
+        min_side_sq = minimum(box_sides(boundary))^2
+        neighbors = CellListMap.pairwise!(
+            (p, neighbors) -> push_pair_min_image!(p, neighbors, eligible, special,
+                                                   boundary, min_side_sq),
+            nf.clm_particlesystem,
+        )
+    else
+        neighbors = CellListMap.pairwise!(
+            (p, neighbors) -> push_pair!(p, neighbors, eligible, special),
+            nf.clm_particlesystem,
+        )
+    end
 
     if AT <: AbstractGPUArray
         return NeighborList(neighbors.n, to_device(neighbors.list, AT))

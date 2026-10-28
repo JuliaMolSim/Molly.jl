@@ -887,6 +887,36 @@ end
     end
     @test neighbors_dist == sort_nbs(neighbors.list)
 
+    # Boxes less than twice the cutoff, where CellListMap.jl can give a pair once for each
+    #   image within the cutoff, should still list each pair once
+    for boundary_small in (
+                CubicBoundary(1.5u"nm"),
+                TriclinicBoundary(
+                    SVector( 1.5,  0.0, 0.0)u"nm",
+                    SVector(-0.4,  1.5, 0.0)u"nm",
+                    SVector( 0.3, -0.5, 1.5)u"nm",
+                ),
+            )
+        n_atoms_small = 200
+        coords_small = place_atoms(n_atoms_small, boundary_small; min_dist=0.05u"nm")
+        dist_cutoff_small = 1.0u"nm"
+        nf_small = CellListMapNeighborFinder(n_atoms=n_atoms_small,
+                                             dist_cutoff=dist_cutoff_small,
+                                             boundary=boundary_small)
+        sys_small = System(atoms=fill(Atom(), n_atoms_small), coords=coords_small,
+                           boundary=boundary_small, neighbor_finder=nf_small)
+        neighbors_small_dist = Tuple{Int32, Int32, Bool}[]
+        for i in 1:n_atoms_small, j in (i + 1):n_atoms_small
+            if norm(vector(coords_small[i], coords_small[j], boundary_small)) <= dist_cutoff_small
+                push!(neighbors_small_dist, (Int32(i), Int32(j), false))
+            end
+        end
+        for n_threads in (1, Threads.nthreads())
+            neighbors_small = find_neighbors(sys_small; n_threads=n_threads)
+            @test sort_nbs(neighbors_small.list[1:neighbors_small.n]) == neighbors_small_dist
+        end
+    end
+
     # Test all neighbor finders agree for a larger system
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     dist_cutoff = 1.2u"nm"
