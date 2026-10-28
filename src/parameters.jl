@@ -395,6 +395,14 @@ end
     (inject_list(first(ils), first(hosts), flat, plan, target, AT),
      inject_lists(Base.tail(ils), Base.tail(hosts), flat, plan, target + 1, AT)...)
 
+# Lists whose data repeats parameters of a pairwise interaction, such as the reaction field
+#   exclusions, take the injected values
+@inline inject_list_data(il, pis) = il
+
+@inline inject_lists_data(::Tuple{}, pis) = ()
+@inline inject_lists_data(ils::Tuple, pis) =
+    (inject_list_data(first(ils), pis), inject_lists_data(Base.tail(ils), pis)...)
+
 @inline inject_inters(::Tuple{}, flat, plan, target) = ()
 @inline inject_inters(inters::Tuple, flat, plan, target) =
     (inject_inter(first(inters), flat, plan, target),
@@ -483,6 +491,7 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic, plan::ParameterPla
     n_pairwise = length(sys.pairwise_inters)
     sis = inject_lists(sys.specific_inter_lists, plan.inters_host, flat, plan, 2, AT)
     pis = inject_inters(sys.pairwise_inters, flat, plan, 2 + n_lists)
+    sis = inject_lists_data(sis, pis)
     gis = inject_generals(sys.general_inters, flat, plan, 2 + n_lists + n_pairwise,
                           params_dic, sys)
     if injects_charges(plan)

@@ -396,6 +396,8 @@ Certain quantities such as the [`potential_energy`](@ref) and the [`virial`](@re
 This can be set with `float_type_high` but should generally be left as the default `Float64`.
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method), [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref) (Ewald summation, slow), [`SetupCoulomb`](@ref) or a cutoff like [`DistanceCutoff`](@ref) (short range only).
+Setting `exclusion_correction=true` also applies the reaction field to the excluded and special pairs and to each atom with itself, using the [`CoulombReactionFieldExclusion`](@ref) specific interaction.
+For a system set up without files, [`Molly.reaction_field_exclusions`](@ref) gives this list of interactions.
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 [`SHAKE_RATTLE`](@ref) (`constraint_algorithm=SetupSHAKE_RATTLE()`) only supports clusters of constraints around a central atom, such as `:hbonds` and rigid water, so use the default [`SetupLINCS`](@ref) with `:allbonds`.
 Neither algorithm supports angle constraints that share atoms with other constraints, so `:hangles` currently fails for proteins and most small molecules.
@@ -822,6 +824,7 @@ The available specific interactions (1-5 atoms) are:
 - [`LennardJones14SoftCoreBeutler`](@ref) - 2 atoms
 - [`LennardJones14SoftCoreGapsys`](@ref) - 2 atoms
 - [`EwaldExclusion`](@ref) - 2 atoms
+- [`CoulombReactionFieldExclusion`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
 - [`UreyBradley`](@ref) - 3 atoms
@@ -844,6 +847,7 @@ The available general interactions are:
 In addition there are lambda-scaled variants for many of the above interactions (`λ` or `Scaled` suffixes).
 Some interactions combine instances of the above.
 For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction, the [`EwaldExclusion`](@ref) specific interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
+Similarly, the reaction field with `exclusion_correction` uses the [`CoulombReactionField`](@ref) pairwise interaction and the [`CoulombReactionFieldExclusion`](@ref) specific interaction for the excluded pairs and the self terms.
 
 By default, functions like [`potential_energy`](@ref) and [`forces`](@ref) use the interactions in the system.
 However, different interactions can be passed as keyword arguments.

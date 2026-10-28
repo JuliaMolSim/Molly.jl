@@ -18,6 +18,22 @@ function check_env_alignment(sysA, sysB, env_A, env_B)
     return nothing
 end
 
+# The hybrid takes the reaction field exclusions of system A, so B must have the same ones
+function check_reaction_field_exclusions(sysA, sysB)
+    function rf_exclusions(sys)
+        return [(il.data.dist_cutoff, il.data.solvent_dielectric, il.data.solute_dielectric,
+                 il.data.coulomb_const, has_self_exclusions(il))
+                for il in sys.specific_inter_lists
+                if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData]
+    end
+    if rf_exclusions(sysA) != rf_exclusions(sysB)
+        throw(ArgumentError("the reaction field exclusion corrections of the two systems " *
+                            "differ; use the same exclusion_correction and reaction field " *
+                            "parameters for both"))
+    end
+    return nothing
+end
+
 # Env-Uniq bonds -> should be Core-Uniq
 function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_lists)
     unique_set = Set(unique_inds)
@@ -447,6 +463,12 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                                    coulomb_const=d.coulomb_const, scheduler=scheduler,
                                    λ_mix=d.λ_mixing),
             ))
+        elseif inter_list isa InteractionList2Atoms &&
+                    inter_list.data isa CoulombReactionFieldExclusionData
+            push!(SpecificInteraction, InteractionList2Atoms(
+                inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
+                replace_fields(inter_list.data, (scheduler=scheduler,)),
+            ))
         else
             push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, LJsoftcore_params))
         end
@@ -529,10 +551,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                             "use a scheduler with dual=true or intraLJ=false"))
     end
 
+    check_reaction_field_exclusions(sysA, sysB)
+
     atomsA, coordsA = from_device(sysA.atoms), from_device(sysA.coords)
     atomsB, coordsB = from_device(sysB.atoms), from_device(sysB.coords)
     host_lists(sys) = [to_device(il, Array) for il in sys.specific_inter_lists
-                       if !(eltype(il.inters) <: EwaldExclusion)]
+                       if !(eltype(il.inters) <: Union{EwaldExclusion,
+                                                       CoulombReactionFieldExclusion})]
 
     # Check/add mappings by including mapping between environment A and environment B
     mapping, core_mapAB = deepcopy(mapping), copy(core_mapAB)
@@ -922,6 +947,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
+    excluded_ends = copy(excluded_hybrid)
+
     # The unique alchemical groups are excluded from interating
     for i in unique_groups["sysA"], j in unique_groups["sysB"]
         push!(excluded_hybrid, (i, j))
@@ -988,6 +1015,18 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 exclusion_data,
             )
             push!(Interactions, ewald_exclusions)
+        end
+    end
+
+    # The reaction field exclusions follow the exclusions of the end states, with self terms for
+    #   all atoms if system A has them. Unlike Ewald, the pairs between the unique groups are
+    #   left out, since the neighbor list already removes their reaction field.
+    for il in sysA.specific_inter_lists
+        if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData
+            eligible_ends = SparsePairMatrix(n_atoms, excluded_ends; listed=false)
+            push!(Interactions, reaction_field_exclusions(
+                replace_fields(il.data, (scheduler=scheduler,)), n_atoms,
+                find_excluded_pairs(eligible_ends, special), has_self_exclusions(il), AT))
         end
     end
 

@@ -1448,6 +1448,7 @@ function System(;
     end
 
     check_specific_inter_lists(specific_inter_lists, n_atoms, on_gpu)
+    check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
     check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary, on_gpu, strictness)
     max_sqdist = max_zero_beyond(pairwise_inters)
     if !isnothing(max_sqdist) && !iszero(max_sqdist)

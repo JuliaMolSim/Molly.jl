@@ -1139,7 +1139,7 @@
         end
     end
 
-    @testset "AlchemicalPartition charge-dependent Ewald terms" begin
+    @testset "AlchemicalPartition charge-dependent Ewald and reaction field terms" begin
         boundary_pme = CubicBoundary(2.4u"nm")
         coords_pme = [
             SVector(0.2, 0.2, 0.2)u"nm",
@@ -1234,6 +1234,32 @@
             special=special,
         )
         test_partition_matches_direct(exclusion_states, PME; has_exclusions=true)
+
+        # The reaction field exclusions depend on the charges of the λ atoms through the self
+        #   terms, so they are moved to the λ systems
+        crf_scaled = Molly.CoulombReactionFieldScaled(dist_cutoff=rc, use_neighbors=true)
+        rf_states = [
+            begin
+                sys = System(
+                    atoms=atoms_λ(λ),
+                    coords=coords_pme,
+                    boundary=boundary_pme,
+                    pairwise_inters=(crf_scaled,),
+                    specific_inter_lists=(
+                        Molly.reaction_field_exclusions(crf_scaled, 3, [(1, 2)]),),
+                    neighbor_finder=DistanceNeighborFinder(eligible=eligible, dist_cutoff=rc),
+                )
+                ThermoState(sys, VelocityVerlet(dt=dt); temperature=temp)
+            end for λ in λs
+        ]
+        partition = Molly.AlchemicalPartition(rf_states)
+        partitioned = Molly.evaluate_energy_all!(partition, coords_pme, boundary_pme)
+        @test all(isapprox(pe_p, potential_energy(ts.system); rtol=1e-8, atol=1e-8u"kJ * mol^-1")
+                  for (pe_p, ts) in zip(partitioned, rf_states))
+        is_rf_exclusion_list(il) = il.data isa Molly.CoulombReactionFieldExclusionData
+        @test !any(is_rf_exclusion_list, partition.master_sys.specific_inter_lists)
+        @test all(any(is_rf_exclusion_list, λ_sys.specific_inter_lists)
+                  for λ_sys in partition.λ_systems)
     end
 
     @testset "AlchemicalPartition without a neighbor finder" begin
@@ -2103,6 +2129,160 @@ end
                          (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
     test_energy_gradient(HarmonicTorsion(1000.0u"kJ * mol^-1", -1.8),
                          (c1_fd, c2_fd, c3_fd, c4_fd), boundary_fd)
+end
+
+@testset "Reaction field exclusion correction" begin
+    rc = 1.1u"nm"
+    boundary = CubicBoundary(3.0u"nm")
+    eu, fu = u"kJ * mol^-1", u"kJ * mol^-1 * nm^-1"
+    ke0 = Molly.coulomb_const
+
+    @testset "single pair" begin
+        # A ±1 pair 0.404 nm apart through the periodic boundary
+        ϵr, ϵrf = 2.5, 80.0
+        r = 0.404u"nm"
+        atoms = [Atom(charge=1.0, mass=72.0u"g/mol"), Atom(charge=-1.0, mass=72.0u"g/mol")]
+        coords = [SVector(0.2, 1.0, 1.0)u"nm", SVector(3.2u"nm" - r, 1.0u"nm", 1.0u"nm")]
+        crf = CoulombReactionField(dist_cutoff=rc, solvent_dielectric=ϵrf, solute_dielectric=ϵr)
+        ke = ke0 / ϵr
+        krf, crf_c = Molly.reaction_field_constants(rc, ϵrf, ϵr)
+        E_pair = -ke * (krf * r^2 - crf_c)
+        E_self = -ke * crf_c
+        excl(; kwargs...) = (Molly.reaction_field_exclusions(crf, 2, [(1, 2)]; kwargs...),)
+        sys = System(atoms=atoms, coords=coords, boundary=boundary, specific_inter_lists=excl())
+        @test isapprox(potential_energy(sys), E_pair + E_self; rtol=1e-12)
+        @test isapprox(forces(sys)[1], SVector(2 * ke * krf * r, 0.0fu, 0.0fu); rtol=1e-12)
+        sys_noself = System(sys; specific_inter_lists=excl(self=false))
+        @test isapprox(potential_energy(sys_noself), E_pair; rtol=1e-12)
+
+        # An isotropic deformation of the box gives the trace of the virial
+        ε = 1e-6
+        E_scaled(s) = potential_energy(System(sys; coords=coords .* (1 + s),
+                                              boundary=CubicBoundary(3.0u"nm" * (1 + s))))
+        dE_dε = (E_scaled(ε) - E_scaled(-ε)) / 2ε
+        @test isapprox(tr(virial(sys, nothing; n_threads=1)), -dE_dε; atol=1e-6eu)
+
+        # Beyond the cutoff only the self terms remain
+        sys_far = System(sys; coords=[coords[1], coords[1] + SVector(1.2, 0.0, 0.0)u"nm"])
+        @test isapprox(potential_energy(sys_far), E_self; rtol=1e-12)
+        @test all(iszero, forces(sys_far))
+    end
+
+    @testset "matches GROMACS" begin
+        # Coulomb (SR) and Coulomb-14 from gmx energy (GROMACS 2026.0, mixed precision) for a
+        #   rerun of these coordinates with coulombtype = reaction-field, rcoulomb = 1.1, no
+        #   LJ, a bonded ±1 pair (nrexcl = 1), a chain of 4 beads (nrexcl = 3, bonds 1-2, 2-3,
+        #   3-4, [ pairs ] 1 4, fudgeQQ = 0.5) and two ions in a 3 nm cubic box
+        charges = [1.0, -1.0, 0.5, -0.3, 0.2, -0.4, 1.0, -1.0]
+        coords = [SVector(1.0, 1.0, 1.0), SVector(1.404, 1.0, 1.0), SVector(1.2, 1.7, 1.3),
+                  SVector(1.5, 1.85, 1.35), SVector(1.75, 1.7, 1.15), SVector(2.05, 1.8, 1.0),
+                  SVector(2.2, 0.9, 1.9), SVector(0.6, 2.6, 2.5)]u"nm"
+        atoms = [Atom(charge=q, mass=72.0u"g/mol") for q in charges]
+        eligible = trues(8, 8)
+        for (i, j) in ((1, 2), (3, 4), (4, 5), (5, 6), (3, 5), (4, 6))
+            eligible[i, j] = eligible[j, i] = false
+        end
+        special = falses(8, 8)
+        special[3, 6] = special[6, 3] = true
+        nf = DistanceNeighborFinder(eligible=eligible, special=special, dist_cutoff=1.2u"nm")
+
+        for (ϵr, ϵrf, E_sr_gmx, E_14_gmx) in ((15.0, Inf, -13.707364, -1.021301),
+                                              (2.5, 80.0, -80.766075, -6.127808))
+            crf = CoulombReactionField(dist_cutoff=rc, solvent_dielectric=ϵrf,
+                                       solute_dielectric=ϵr, weight_special=0.5)
+            sys = System(atoms=atoms, coords=coords, boundary=boundary, pairwise_inters=(crf,),
+                         specific_inter_lists=(
+                                Molly.reaction_field_exclusions(crf, eligible, special),),
+                         neighbor_finder=nf)
+            dr_14 = vector(coords[3], coords[6], boundary)
+            E_14 = potential_energy(crf, dr_14, atoms[3], atoms[6], eu, true)
+            @test isapprox(E_14, E_14_gmx * eu; atol=1e-5eu)
+            @test isapprox(potential_energy(sys) - E_14, E_sr_gmx * eu; atol=1e-4eu)
+
+            # The exclusions keep the parameters they were built with
+            crf_new = CoulombReactionField(dist_cutoff=1.0u"nm", solvent_dielectric=ϵrf,
+                                           solute_dielectric=ϵr)
+            @test_throws ArgumentError System(sys; pairwise_inters=(crf_new,))
+        end
+    end
+
+    @testset "Float32 and devices match Float64 on CPU" begin
+        function exclusion_system(T, AT)
+            crf = CoulombReactionField(dist_cutoff=T(1.1), solvent_dielectric=T(Inf),
+                                       solute_dielectric=T(15), coulomb_const=T(ustrip(ke0)))
+            return System(
+                atoms=to_device([Atom(charge=T(q), mass=T(10.0), σ=T(0.0), ϵ=T(0.0), λ=T(1.0))
+                                 for q in (0.8, -0.5)], AT),
+                coords=to_device([SVector{3, T}(0.1, 0.2, 0.15), SVector{3, T}(2.9, 2.8, 2.9)],
+                                 AT),
+                boundary=CubicBoundary(T(3.0)),
+                specific_inter_lists=(Molly.reaction_field_exclusions(crf, 2, [(1, 2)];
+                                                                      array_type=AT),),
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+        end
+        sys_ref = exclusion_system(Float64, Array)
+        E_ref, fs_ref = potential_energy(sys_ref), forces(sys_ref)
+        for AT in array_list_metal, T in (Float32, Float64)
+            (T == Float64 && AT <: MtlArray) && continue
+            sys = exclusion_system(T, AT)
+            @test isapprox(potential_energy(sys), E_ref; rtol=(T == Float32 ? 1e-5 : 1e-12))
+            @test maximum(norm.(from_device(forces(sys)) .- fs_ref)) <
+                        (T == Float32 ? 1e-4 : 1e-10)
+        end
+    end
+
+    @testset "λ scaling" begin
+        # A ±1 pair being inserted next to an environment ion
+        coords = [SVector(1.0, 1.0, 1.0), SVector(1.3, 1.1, 1.0), SVector(1.6, 1.5, 1.2)]u"nm"
+        dr12 = norm(vector(coords[1], coords[2], boundary))
+        ϵr, ϵrf, λ = 2.5, 30.0, 0.3
+        ke = ke0 / ϵr
+        krf, crf_c = Molly.reaction_field_constants(rc, ϵrf, ϵr)
+        # The correction and self terms of the inserted pair at full coupling
+        E_ins = -ke * (krf * dr12^2 - crf_c) - ke * crf_c
+        E_env = -ke * crf_c / 2 * 0.6^2
+        atoms = [Atom(charge=1.0, mass=10.0u"g/mol", λ=λ, alch_role=Molly.InsertRole),
+                 Atom(charge=-1.0, mass=10.0u"g/mol", λ=λ, alch_role=Molly.InsertRole),
+                 Atom(charge=0.6, mass=10.0u"g/mol")]
+        # The linear scheduler scales the effective charges by λ, so their product by λ^2,
+        #   whereas GROMACS mixes the products of the end state charges linearly
+        for (scheduler, E_ref) in ((Molly.LinearLambdaScheduler(), E_env + λ^2 * E_ins),
+                                   (Molly.GROMACSLambdaRBFEScheduler(), E_env + λ * E_ins))
+            crf = Molly.CoulombReactionFieldScaled(dist_cutoff=rc, solvent_dielectric=ϵrf,
+                                                   solute_dielectric=ϵr, scheduler=scheduler)
+            sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                         specific_inter_lists=(Molly.reaction_field_exclusions(crf, 3, [(1, 2)]),))
+            @test isapprox(potential_energy(sys), E_ref; rtol=1e-10)
+        end
+    end
+
+    @testset "invalid input" begin
+        @test_throws ArgumentError Molly.reaction_field_exclusions(
+                    CoulombReactionField(dist_cutoff=rc), 2, [(1, 3)])
+        @test_throws ArgumentError Molly.reaction_field_exclusions(
+                    CoulombReactionField(dist_cutoff=rc, use_neighbors=false), trues(2, 2))
+        @test_throws ArgumentError Molly.CoulombReactionFieldExclusionData(dist_cutoff=rc,
+                            solvent_dielectric=10.0, solute_dielectric=15.0)
+    end
+
+    @testset "setup" begin
+        ff = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml");
+                    custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+        build(ec; kwargs...) = System(joinpath(data_dir, "ethanol_garnet.pdb"), ff;
+                    nonbonded_method=SetupCoulombReactionField(exclusion_correction=ec),
+                    dist_cutoff=1.0u"nm", kwargs...)
+        sys_off, sys_on = build(false), build(true)
+        excl = only(il for il in sys_on.specific_inter_lists
+                    if il.data isa Molly.CoulombReactionFieldExclusionData)
+        nf = sys_on.neighbor_finder
+        @test length(excl.inters) ==
+                length(Molly.find_excluded_pairs(nf.eligible, nf.special)) + length(sys_on)
+        @test potential_energy(sys_on) ≈ potential_energy(sys_off) +
+                potential_energy(sys_on; pairwise_inters=(), specific_inter_lists=(excl,))
+        @test_throws ArgumentError build(true; neighbor_finder_type=Nothing)
+    end
 end
 
 @testset "Ewald and PME" begin

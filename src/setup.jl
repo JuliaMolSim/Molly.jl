@@ -645,6 +645,13 @@ function System(coord_file::AbstractString,
                   "that bonded atoms will not be excluded from the non-bonded interactions"
         report_issue(err_str, strictness)
     end
+    if nonbonded_method isa SetupCoulombReactionField && nonbonded_method.exclusion_correction &&
+            neighbor_finder_type === Nothing
+        throw(ArgumentError("exclusion_correction=true needs a neighbor finder, since without " *
+                            "one excluded pairs are not removed from the pairwise reaction " *
+                            "field and would be counted twice; use a neighbor_finder_type other " *
+                            "than Nothing or set exclusion_correction=false"))
+    end
     if neighbor_finder_n_steps <= 0
         throw(ArgumentError("neighbor_finder_n_steps ($neighbor_finder_n_steps) must be positive"))
     end
@@ -1636,6 +1643,10 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     else # SetupCoulomb and SetupCoulombReactionField
         coul = setup_coulomb_pairwise(nonbonded_method, dist_cutoff, weight_14_coulomb,
                                       using_neighbors, units, T)
+        if nonbonded_method isa SetupCoulombReactionField && nonbonded_method.exclusion_correction
+            push!(specific_inter_array, reaction_field_exclusions(coul, eligible, special;
+                                                                  array_type=AT))
+        end
         general_inters_ewald = ()
     end
 
