@@ -3,7 +3,7 @@ export PeriodicTorsion
 @public PeriodicTorsionλ
 
 @doc raw"""
-    PeriodicTorsion(; periodicities, phases, ks, proper)
+    PeriodicTorsion(; periodicities, phases, ks, proper=true)
 
 A periodic torsion angle between four atoms.
 
@@ -130,7 +130,7 @@ end
 end
 
 @doc raw"""
-    PeriodicTorsionλ(; periodicities, phases, ks, proper, λ_mixing=MinimumMixing(),
+    PeriodicTorsionλ(; periodicities, phases, ks, proper=true, λ_mixing=MinimumMixing(),
                      scheduler=Molly.DefaultLambdaScheduler())
 
 A periodic torsion angle between four atoms in an alchemical system, the λ version of

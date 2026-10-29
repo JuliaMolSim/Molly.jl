@@ -1,7 +1,8 @@
 export SoftSphere
 
 @doc raw"""
-    SoftSphere(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
+    SoftSphere(; cutoff=NoCutoff(), use_neighbors=true, shortcut=LJZeroShortcut(),
+               σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing())
 
 The soft-sphere potential.
 

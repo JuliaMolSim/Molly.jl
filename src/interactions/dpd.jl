@@ -1,7 +1,8 @@
 export DPDInteraction
 
 @doc raw"""
-    DPDInteraction(; a, γ, σ, r_c, dt, use_neighbors, key)
+    DPDInteraction(; a=25.0, γ=4.5, σ=3.0, r_c=1.0, dt=0.01, use_neighbors=true,
+                   key=rand(UInt64))
 
 The dissipative particle dynamics (DPD) interaction between two particles.
 

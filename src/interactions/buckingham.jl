@@ -1,8 +1,9 @@
 export Buckingham
 
 @doc raw"""
-    Buckingham(; cutoff, use_neighbors, shortcut, A_mixing, B_mixing,
-               C_mixing, weight_special)
+    Buckingham(; cutoff=NoCutoff(), use_neighbors=true, shortcut=BuckinghamZeroShortcut(),
+               A_mixing=GeometricMixing(), B_mixing=InverseMixing(),
+               C_mixing=GeometricMixing(), weight_special=1)
 
 The Buckingham interaction between two atoms.
 

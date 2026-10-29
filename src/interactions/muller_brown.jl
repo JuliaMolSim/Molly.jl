@@ -1,7 +1,12 @@
 export MullerBrown
 
 @doc raw"""
-    MullerBrown(; A, a, b, c, x0, y0, force_units, energy_units)
+    MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
+                a=SVector(-1.0, -1.0, -6.5, 0.7)u"nm^-2",
+                b=SVector(0.0, 0.0, 11.0, 0.6)u"nm^-2",
+                c=SVector(-10.0, -10.0, -6.5, 0.7)u"nm^-2",
+                x0=SVector(1.0, 0.0, -0.5, -1.0)u"nm", y0=SVector(0.0, 0.5, 1.5, 1.0)u"nm",
+                force_units=u"kJ * mol^-1 * nm^-1", energy_units=u"kJ * mol^-1")
 
 The Müller-Brown potential energy surface implemented as an AtomsCalculators.jl calculator.
 

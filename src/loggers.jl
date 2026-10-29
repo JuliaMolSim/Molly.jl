@@ -1297,12 +1297,11 @@ function finish_logs!(rexl::ReplicaExchangeLogger;
 end
 
 @doc raw"""
-    MonteCarloLogger()
-    MonteCarloLogger(T)
+    MonteCarloLogger(T=Float64)
 
 A logger that records acceptances in a Monte Carlo simulation.
 
-The logged quantities include the number of new selections (`n_select`),
+The logged quantities include the number of trial moves (`n_trials`),
 the number of successful acceptances (`n_accept`), an array named `energy_rates` which stores
 the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states,
 and a `BitVector` named `state_changed` that stores whether a new state was accepted for the

@@ -1,7 +1,7 @@
 export Gravity
 
 @doc raw"""
-    Gravity(; cutoff, G, use_neighbors)
+    Gravity(; cutoff=NoCutoff(), G=Unitful.G, use_neighbors=true)
 
 The gravitational interaction between two atoms.
 

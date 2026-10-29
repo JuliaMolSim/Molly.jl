@@ -11,7 +11,7 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100,
+    place_atoms(n_atoms, boundary; min_dist=zero(length_type(boundary)), max_attempts=100,
                 rng=Random.default_rng())
 
 Generate random coordinates.
@@ -64,8 +64,9 @@ function place_atoms(n_atoms::Integer,
 end
 
 """
-    place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
-                    max_attempts=100, aligned=false, rng=Random.default_rng())
+    place_diatomics(n_molecules, boundary, bond_length;
+                    min_dist=zero(length_type(boundary)), max_attempts=100, aligned=false,
+                    rng=Random.default_rng())
 
 Generate random diatomic molecule coordinates.
 
