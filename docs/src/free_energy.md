@@ -811,7 +811,7 @@ The reaction field correction of excluded pairs and self terms, [`CoulombReactio
 
 ### Matching OpenFE default settings
 
-Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
+Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `lj_softcore=:gapsys, coulomb_softcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
 
 - Only using a softcore potential for the LennardJones potential, the CoulombEwald direct space is scaled by lambda directly without using a softcore.
 - In CoulombEwald potential, the charges are individually scaled for the regular interactions: 
@@ -838,10 +838,10 @@ scheduler = Molly.OpenFEScheduler(
     intraLJ=false,       # LJ between alchemical atoms is decoupled
 )
 
-# For system setup, set LJsoftcore=:gapsys, Csoftcore=:scaled
+# For system setup, set lj_softcore=:gapsys, coulomb_softcore=:scaled
 # More on system setup, see the example below
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
-                       scheduler=scheduler, LJsoftcore=:gapsys, Csoftcore=:scaled)
+                       scheduler=scheduler, lj_softcore=:gapsys, coulomb_softcore=:scaled)
 ```
 
 All the settings have been tested by comparing energies and forces between Molly and OpenFE, and the comparison is part of the test suite (`test/free_energy.jl`).
@@ -910,16 +910,16 @@ sys_solv = AbsoluteFESystem(sysb_solv, global_λ, mapping;
                              temp=298.0u"K",
                              scheduler=scheduler,
                              loggers=(),
-                             LJsoftcore=:beutler,
-                             Csoftcore=:scaled
+                             lj_softcore=:beutler,
+                             coulomb_softcore=:scaled
                             )
 
 sys_vac = AbsoluteFESystem(sysb_vac, global_λ, mapping;
                             temp=298.0u"K",
                             scheduler=scheduler,
                             loggers=(),
-                            LJsoftcore=:beutler,
-                            Csoftcore=:scaled
+                            lj_softcore=:beutler,
+                            coulomb_softcore=:scaled
                           )
 ```
 
@@ -1001,8 +1001,8 @@ sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
                        temp=298.0u"K", 
                        scheduler=Molly.OpenFEScheduler(dual=false),
                        loggers=(),
-                       LJsoftcore=:gapsys,
-                       Csoftcore=:scaled)
+                       lj_softcore=:gapsys,
+                       coulomb_softcore=:scaled)
 ```
 
 This system can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
@@ -1374,8 +1374,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -1904,8 +1904,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -2323,8 +2323,8 @@ After minimization and equilibration, the function checks the box against the cu
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))

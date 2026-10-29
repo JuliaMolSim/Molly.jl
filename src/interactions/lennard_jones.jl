@@ -649,7 +649,7 @@ The Lennard-Jones 6-12 interaction between two atoms scaled by λ without a soft
 version of [`LennardJones`](@ref).
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`LennardJones`](@ref) to this type with `LJsoftcore=:scaled`.
+[`LennardJones`](@ref) to this type with `lj_softcore=:scaled`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = 4\lambda\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
@@ -802,7 +802,7 @@ the appearing and disappearing of atoms.
 
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`LennardJones`](@ref) to this type with `LJsoftcore=:beutler`.
+[`LennardJones`](@ref) to this type with `lj_softcore=:beutler`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda \left(\frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}\right)
@@ -1037,7 +1037,7 @@ the appearing and disappearing of atoms.
 
 See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`LennardJones`](@ref) to this type with `LJsoftcore=:gapsys`.
+[`LennardJones`](@ref) to this type with `lj_softcore=:gapsys`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
@@ -1502,7 +1502,7 @@ end
 
 The 1-4 Lennard-Jones interaction of a pair of atoms scaled by λ without a soft core, the λ
 version of [`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and
-[`RelativeFESystem`](@ref) convert to this type with `LJsoftcore=:scaled`.
+[`RelativeFESystem`](@ref) convert to this type with `lj_softcore=:scaled`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
@@ -1598,7 +1598,7 @@ end
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Beutler soft core, the λ version of
 [`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
-convert to this type with `LJsoftcore=:beutler`.
+convert to this type with `lj_softcore=:beutler`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
@@ -1723,7 +1723,7 @@ end
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Gapsys soft core, the λ version of
 [`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
-convert to this type with `LJsoftcore=:gapsys`.
+convert to this type with `lj_softcore=:gapsys`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force

@@ -178,8 +178,7 @@ const softcores = (:beutler, :gapsys, :scaled)
         # --- Hybrid system at the OpenMM positions ---
         sys = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB;
                                scheduler=Molly.OpenFEScheduler(dual=false),
-                               LJsoftcore=:gapsys,
-                               Csoftcore=:scaled)
+                               lj_softcore=:gapsys, coulomb_softcore=:scaled)
 
         new_coords = typeof(sys.coords[1])[]
         OP_map_idx = []
@@ -288,13 +287,13 @@ end
 
     # A CHARMM protein carries backbone CMAP terms, whose grid single topology can not interpolate
     @test_throws ArgumentError RelativeFESystem(sysA, sysB, FT(0), mapping, core_mapAB;
-                        scheduler=Molly.OpenFEScheduler(dual=false), LJsoftcore=:gapsys,
-                        Csoftcore=:gapsys)
+                        scheduler=Molly.OpenFEScheduler(dual=false), lj_softcore=:gapsys,
+                        coulomb_softcore=:gapsys)
 
     for scheduler in (Molly.DefaultLambdaScheduler(dual=true),)
         for (λ, ref, state) in ((0.0, sysA, :A), (1.0, sysB, :B))
             sys = RelativeFESystem(sysA, sysB, FT(λ), mapping, core_mapAB; scheduler=scheduler,
-                                   LJsoftcore=:gapsys, Csoftcore=:gapsys)
+                                   lj_softcore=:gapsys, coulomb_softcore=:gapsys)
             inter_types = [eltype(il.inters) for il in sys.specific_inter_lists]
             @test any(T -> T <: Molly.LennardJones14SoftCoreGapsys, inter_types)
             @test any(T -> T <: Molly.CMAPTorsionλ, inter_types)
@@ -333,13 +332,13 @@ end
         F_decoupled = forces(System(sys; atoms=zeroed))
 
         # Every scheduler and every soft core combination, at both end states. 
-        for S in lambda_schedulers, LJsoftcore in softcores, Csoftcore in softcores
+        for S in lambda_schedulers, lj_softcore in softcores, coulomb_softcore in softcores
             sys_0 = AbsoluteFESystem(sys, 0.0, solute; scheduler=S(dual=true),
-                                     LJsoftcore=LJsoftcore, Csoftcore=Csoftcore)
+                                     lj_softcore=lj_softcore, coulomb_softcore=coulomb_softcore)
             @test abs(potential_energy(sys_0; general_inters=without_disp(sys_0)) - E_ref) < etol
             @test maximum(norm.(forces(sys_0; general_inters=without_disp(sys_0)) .- F_ref)) < ftol
             sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true),
-                                     LJsoftcore=LJsoftcore, Csoftcore=Csoftcore)
+                                     lj_softcore=lj_softcore, coulomb_softcore=coulomb_softcore)
             @test maximum(norm.(forces(sys_1)[solvent] .- F_decoupled[solvent])) < ftol
             S(dual=true) isa Molly.OpenFEScheduler || @test abs(disp(sys_0) - disp(sys)) < etol
         end
@@ -377,19 +376,21 @@ end
 @testset "Unitless alchemical systems" begin
     # The soft core parameters with units, such as the σQ of the Gapsys Coulomb soft cores,
     #   follow the units of the system
-    function benzene_λ(units, nonbonded, Csoftcore)
+    function benzene_λ(units, nonbonded, coulomb_softcore)
         ff = MolecularForceField(joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"])...;
                                  units=units)
         sys = System(joinpath(data_dir, "benzene_solv.pdb"), ff; units=units,
                      nonbonded_method=nonbonded, dist_cutoff=(units ? 1.0u"nm" : 1.0),
                      center_coords=false)
-        return AbsoluteFESystem(sys, 0.5, collect(1:12); Csoftcore=Csoftcore)
+        return AbsoluteFESystem(sys, 0.5, collect(1:12); coulomb_softcore=coulomb_softcore)
     end
     for nonbonded in (SetupPME(), SetupCoulombReactionField(),
-                      SetupCoulombReactionField(exclusion_correction=true)), Csoftcore in softcores
-        E_units = potential_energy(benzene_λ(true, nonbonded, Csoftcore); n_threads=1)
-        E_nounits = potential_energy(benzene_λ(false, nonbonded, Csoftcore); n_threads=1)
-        @test E_nounits ≈ ustrip(u"kJ * mol^-1", E_units) rtol=1e-12
+                      SetupCoulombReactionField(exclusion_correction=true))
+        for coulomb_softcore in softcores
+            E_units = potential_energy(benzene_λ(true, nonbonded, coulomb_softcore); n_threads=1)
+            E_nounits = potential_energy(benzene_λ(false, nonbonded, coulomb_softcore); n_threads=1)
+            @test E_nounits ≈ ustrip(u"kJ * mol^-1", E_units) rtol=1e-12
+        end
     end
 end
 
@@ -410,8 +411,8 @@ end
 
         # The double exponential has its own soft core, whichever soft core is chosen for
         #   Lennard-Jones
-        for S in lambda_schedulers, LJsoftcore in softcores
-            sys_0 = AbsoluteFESystem(sys, 0.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
+        for S in lambda_schedulers, lj_softcore in softcores
+            sys_0 = AbsoluteFESystem(sys, 0.0, solute; scheduler=S(dual=true), lj_softcore=lj_softcore)
             @test any(inter isa DoubleExponentialSoftCore for inter in values(sys_0.pairwise_inters))
             # As in OpenFE, the OpenFE scheduler leaves the alchemical atoms out of the
             #   dispersion correction, so it is compared without it
@@ -424,7 +425,7 @@ end
                 @test abs(potential_energy(sys_0) - E_ref) < etol
             end
             @test maximum(norm.(forces(sys_0) .- F_ref)) < ftol
-            sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
+            sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true), lj_softcore=lj_softcore)
             @test maximum(norm.(forces(sys_1)[solvent] .- F_decoupled[solvent])) < ftol
         end
     end
@@ -726,8 +727,8 @@ end
     sysA = build_tyk2("ejm31")
     ligand = [i for i in eachindex(sysA) if sysA.atoms_data[i].res_name in ("LIG", "UNK")]
     charmm_prefixes = ("inter_HB_", "inter_HA_", "inter_PT_", "inter_LJ14_")
-    for (λ, LJsoftcore) in ((0.0, :gapsys), (0.5, :beutler), (1.0, :scaled))
-        check_keys(sysA, s -> AbsoluteFESystem(s, λ, ligand; LJsoftcore=LJsoftcore), ligand,
+    for (λ, lj_softcore) in ((0.0, :gapsys), (0.5, :beutler), (1.0, :scaled))
+        check_keys(sysA, s -> AbsoluteFESystem(s, λ, ligand; lj_softcore=lj_softcore), ligand,
                    charmm_prefixes)
     end
     check_keys(sysA, s -> RelativeFESystem(s, s, 0.5,

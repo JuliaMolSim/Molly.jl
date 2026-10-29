@@ -152,7 +152,7 @@ The Coulomb electrostatic interaction between two atoms scaled by λ without a s
 the λ version of [`Coulomb`](@ref).
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`Coulomb`](@ref)
-to this type with `Csoftcore=:scaled`.
+to this type with `coulomb_softcore=:scaled`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
@@ -345,7 +345,7 @@ the appearing and disappearing of atoms.
 
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`Coulomb`](@ref)
-to this type with `Csoftcore=:beutler`.
+to this type with `coulomb_softcore=:beutler`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda \frac{1}{4\pi\varepsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
@@ -571,7 +571,7 @@ the appearing and disappearing of atoms.
 
 See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each [`Coulomb`](@ref)
-to this type with `Csoftcore=:gapsys`.
+to this type with `coulomb_softcore=:gapsys`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
@@ -1020,7 +1020,7 @@ The reaction field Coulomb interaction between two atoms scaled by λ without a 
 the λ version of [`CoulombReactionField`](@ref).
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombReactionField`](@ref) to this type with `Csoftcore=:scaled`.
+[`CoulombReactionField`](@ref) to this type with `coulomb_softcore=:scaled`.
 The potential energy is that of [`CoulombReactionField`](@ref) multiplied by ``\lambda``,
 the electrostatic coupling of the pair, which `scheduler`, a
 [`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing`
@@ -1184,7 +1184,7 @@ The Coulomb electrostatic interaction with Beutler soft core and reaction field 
 used for the appearing and disappearing of atoms in alchemical simulations.
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombReactionField`](@ref) to this type with `Csoftcore=:beutler`.
+[`CoulombReactionField`](@ref) to this type with `coulomb_softcore=:beutler`.
 The soft core and ``\lambda``, the electrostatic coupling of the pair, are as for
 [`CoulombSoftCoreBeutler`](@ref).
 At ``\lambda = 1`` this reduces to [`CoulombReactionField`](@ref).
@@ -1426,7 +1426,7 @@ The Coulomb electrostatic interaction with Gapsys soft core and reaction field c
 used for the appearing and disappearing of atoms in alchemical simulations.
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombReactionField`](@ref) to this type with `Csoftcore=:gapsys`.
+[`CoulombReactionField`](@ref) to this type with `coulomb_softcore=:gapsys`.
 The soft core and ``\lambda``, the electrostatic coupling of the pair, are as for
 [`CoulombSoftCoreGapsys`](@ref).
 At ``\lambda = 1`` this reduces to [`CoulombReactionField`](@ref).
@@ -2007,7 +2007,7 @@ The short-range Ewald electrostatic interaction between two atoms scaled by λ w
 soft core, the λ version of [`CoulombEwald`](@ref).
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombEwald`](@ref) to this type with `Csoftcore=:scaled`.
+[`CoulombEwald`](@ref) to this type with `coulomb_softcore=:scaled`.
 The potential energy is that of [`CoulombEwald`](@ref) multiplied by ``\lambda``, the
 electrostatic coupling of the pair, which `scheduler`, a [`Molly.LambdaScheduler`](@ref),
 gives from the `λ` of the atoms mixed with `λ_mixing` and their alchemical roles.
@@ -2190,7 +2190,7 @@ The short-range Ewald electrostatic interaction between two atoms with the
 Beutler soft-core distance modification.
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombEwald`](@ref) to this type with `Csoftcore=:beutler`.
+[`CoulombEwald`](@ref) to this type with `coulomb_softcore=:beutler`.
 The soft core and ``\lambda``, the electrostatic coupling of the pair, are as for
 [`CoulombSoftCoreBeutler`](@ref).
 Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the same
@@ -2391,7 +2391,7 @@ The short-range Ewald electrostatic interaction between two atoms with the
 Gapsys soft-core polynomial near the origin.
 
 [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
-[`CoulombEwald`](@ref) to this type with `Csoftcore=:gapsys`.
+[`CoulombEwald`](@ref) to this type with `coulomb_softcore=:gapsys`.
 The soft core and ``\lambda``, the electrostatic coupling of the pair, are as for
 [`CoulombSoftCoreGapsys`](@ref).
 Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the same
