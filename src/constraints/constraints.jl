@@ -210,7 +210,7 @@ end
 
 function constrained_pairs(constraint_clusters)
     pairs = Tuple{Int32, Int32}[]
-    for interaction_list in cluster_interactions.(host_constraint_clusters(constraint_clusters))
+    for interaction_list in cluster_interactions.(from_device(constraint_clusters))
         for (i, j, _) in interaction_list
             i32 = Int32(i)
             j32 = Int32(j)
@@ -241,7 +241,7 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         exclude_pairs!(neighbor_finder.eligible, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
-    atom_interactions = cluster_interactions.(host_constraint_clusters(constraint_clusters))
+    atom_interactions = cluster_interactions.(from_device(constraint_clusters))
     if isa(neighbor_finder.eligible, AbstractGPUArray)
         i_idx, j_idx = Int[], Int[]
 
@@ -531,10 +531,6 @@ n_constraints(::AbstractConstraintKernelData{<:Any, N}) where {N} = N
 n_constraints(::Type{<:AbstractConstraintKernelData{<:Any, N}}) where {N} = N
 n_atoms_cluster(::AbstractConstraintKernelData{<:Any, <:Any, M}) where {M} = M
 n_atoms_cluster(::Type{<:AbstractConstraintKernelData{<:Any, <:Any, M}}) where {M} = M
-
-host_constraint_clusters(constraint_clusters) = constraint_clusters
-host_constraint_clusters(constraint_clusters::StructArray) =
-    replace_storage(Array, constraint_clusters)
 
 struct NoClusterData <: AbstractConstraintKernelData{Nothing, 0, 0} end
 

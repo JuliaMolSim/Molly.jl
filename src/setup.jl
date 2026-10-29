@@ -513,8 +513,7 @@ Each residue is matched to a residue template of the force field, and a
 - `dispersion_correction=nothing`: whether to use the long-range dispersion correction,
     [`LJDispersionCorrection`](@ref), or [`DExpDispersionCorrection`](@ref) for a double
     exponential force field. Defaults to the force field setting, which defaults to `true`
-    for Lennard-Jones and `false` for the double exponential, as in OpenMM. Other `lj_cutoff`
-    values need `dispersion_correction=false`.
+    for Lennard-Jones and `false` for double exponential.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.

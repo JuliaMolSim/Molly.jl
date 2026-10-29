@@ -164,7 +164,7 @@ function constrained_atom_inds(sr::SHAKE_RATTLE)
     for cl in from_device(sr.clusters34)
         push!(atom_inds, cl.k1, cl.k2, cl.k3, cl.k4)
     end
-    for cl in host_constraint_clusters(sr.angle_clusters)
+    for cl in from_device(sr.angle_clusters)
         push!(atom_inds, cl.k1, cl.k2, cl.k3)
     end
     return unique_ind_list(atom_inds)
@@ -184,7 +184,7 @@ function constrained_atom_pairs(sr::SHAKE_RATTLE{D}) where D
                           sort_pair(cl.k1, cl.k3, cl.dist13),
                           sort_pair(cl.k1, cl.k4, cl.dist14))
     end
-    for cl in sr.angle_clusters
+    for cl in from_device(sr.angle_clusters)
         push!(atom_pairs, sort_pair(cl.k1, cl.k2, cl.dist12),
                           sort_pair(cl.k1, cl.k3, cl.dist13),
                           sort_pair(cl.k2, cl.k3, cl.dist23))
@@ -1409,7 +1409,7 @@ end
 # Constraints are converted on the CPU, the System constructor moves them to the device
 function convert_component(c::SystemConversion, sr::SHAKE_RATTLE)
     clusters = map((sr.clusters12, sr.clusters23, sr.clusters34, sr.angle_clusters)) do cl
-        cl_cpu = host_constraint_clusters(cl)
+        cl_cpu = from_device(cl)
         if length(cl_cpu) == 0
             return cl_cpu
         else
