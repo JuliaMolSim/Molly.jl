@@ -486,12 +486,13 @@ const QEQ_THREADS_PER_GROUP = 256
     q_target,
     q_predicted
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)     # global index indentifies which atom the thread processes
-    li = @index(Local, Linear)      # local index identifies slot in shared local memory, 1 -> QEQ_THREADS_PER_GROUP
+    li = @index(Local, Linear)      # local index identifies slot in shared local memory, 1 -> group_size
     n_atoms = length(q_target)
 
-    q_target_partial_sums = @localmem eltype(q_target) (QEQ_THREADS_PER_GROUP,)
-    q_predicted_partial_sums = @localmem eltype(q_predicted) (QEQ_THREADS_PER_GROUP,)
+    q_target_partial_sums = @localmem eltype(q_target) (group_size,)
+    q_predicted_partial_sums = @localmem eltype(q_predicted) (group_size,)
 
     @inbounds begin
         # one atom per thread, with threads beyond atom count padded with zero
@@ -500,9 +501,9 @@ const QEQ_THREADS_PER_GROUP = 256
     end
 
     # parallel tree reduction
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds begin
                 q_target_partial_sums[li] += q_target_partial_sums[li + offset]
@@ -538,12 +539,13 @@ end
     Hq,
     buffers
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n_atoms = length(r)
 
     # shared storage for workgroup's residual sum reduction
-    partial_sum = @localmem eltype(r) (QEQ_THREADS_PER_GROUP,)
+    partial_sum = @localmem eltype(r) (group_size,)
 
     # if thread maps to padded indices, value is zero
     val = zero(eltype(r))
@@ -558,9 +560,9 @@ end
     @inbounds partial_sum[li] = val
 
     # parallel tree reduction
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sum[li] += partial_sum[li + offset]
         end
@@ -583,11 +585,12 @@ end
     buffers,
     H_diag_inv,
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n_atoms = length(r)
 
-    partial_sum = @localmem eltype(r) (QEQ_THREADS_PER_GROUP,)
+    partial_sum = @localmem eltype(r) (group_size,)
 
     preconditioned_residual = zero(eltype(r))
 
@@ -603,9 +606,9 @@ end
 
     @inbounds partial_sum[li] = preconditioned_residual
 
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sum[li] += partial_sum[li + offset]
         end
@@ -626,12 +629,13 @@ end
     d,
     buffers,
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n_atoms = length(r)
 
     # stores dot(r, z)
-    partial_sum = @localmem eltype(r) (QEQ_THREADS_PER_GROUP,)
+    partial_sum = @localmem eltype(r) (group_size,)
 
     rz_value = zero(eltype(r))
 
@@ -647,9 +651,9 @@ end
 
     @inbounds partial_sum[li] = rz_value
 
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sum[li] += partial_sum[li + offset]
         end
@@ -667,17 +671,18 @@ end
     a,
     b,
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n = length(a)
 
-    partial_sums = @localmem eltype(a) (QEQ_THREADS_PER_GROUP,)
+    partial_sums = @localmem eltype(a) (group_size,)
 
     @inbounds partial_sums[li] = ti <= n ? a[ti] * b[ti] : zero(eltype(a))
 
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sums[li] += partial_sums[li + offset]
         end
@@ -700,11 +705,12 @@ end
     buffers,
     rz,
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n_atoms = length(q)
 
-    partial_sums = @localmem eltype(q) (QEQ_THREADS_PER_GROUP,)
+    partial_sums = @localmem eltype(q) (group_size,)
 
     # read previously calculated curvature and reject non-positive values
     dHd = buffers[4]
@@ -732,9 +738,9 @@ end
 
     @inbounds partial_sums[li] = r_value
 
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sums[li] += partial_sums[li + offset]
         end
@@ -753,11 +759,12 @@ end
     z,
     buffers,
 )
+    group_size = @uniform prod(@groupsize())
     ti = @index(Global, Linear)
     li = @index(Local, Linear)
     n_atoms = length(r)
 
-    partial_sums = @localmem eltype(r) (QEQ_THREADS_PER_GROUP,)
+    partial_sums = @localmem eltype(r) (group_size,)
 
     failed = buffers[5] != zero(eltype(r))
 
@@ -774,9 +781,9 @@ end
 
     @inbounds partial_sums[li] = rz_value
 
-    for stage in 1:trailing_zeros(QEQ_THREADS_PER_GROUP)
+    for stage in 1:trailing_zeros(group_size)
         @synchronize
-        offset = QEQ_THREADS_PER_GROUP >> stage
+        offset = group_size >> stage
         if li <= offset
             @inbounds partial_sums[li] += partial_sums[li + offset]
         end
@@ -806,8 +813,8 @@ end
 
 
 # rounds atom count up to whole number of reduction workgroups
-function qeq_reduction_ndrange(n_atoms)
-    return cld(n_atoms, QEQ_THREADS_PER_GROUP) * QEQ_THREADS_PER_GROUP
+function qeq_reduction_ndrange(n_atoms, group_size=QEQ_THREADS_PER_GROUP)
+    return cld(n_atoms, group_size) * group_size
 end
 
 
@@ -886,10 +893,14 @@ function charge_equilibration!(
     sys::System,
     neighbors::Union{NeighborList, GPUCellListNeighborList},    # far neighbors list
     step_n::Int,
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where {C, VI, VQ, QT}
     n_pairs = length(neighbors)
     n_atoms = eem.n_atoms
+    limit_threads = n_threads < Threads.nthreads()
+    pair_workgroupsize = limit_threads ? backend_workgroupsize(backend, n_pairs, n_threads) : nothing
+    atom_workgroupsize = limit_threads ? backend_workgroupsize(backend, n_atoms, n_threads) : nothing
 
     num_csr_entries = n_pairs * 2
     num_csr_entries_buffered = ceil(Int, num_csr_entries * 1.2)
@@ -921,7 +932,8 @@ function charge_equilibration!(
                 count_csr_kernel!(
                     eem.state.row_counts,
                     neighbors.list;
-                    ndrange=n_pairs
+                    ndrange=n_pairs,
+                    workgroupsize=pair_workgroupsize
                 )
             end
         end
@@ -935,7 +947,8 @@ function charge_equilibration!(
             eem.state.rowptr,
             eem.state.write_ptr,
             eem.state.row_counts;
-            ndrange=n_atoms
+            ndrange=n_atoms,
+            workgroupsize=atom_workgroupsize
         )
 
         # populate colidx and pair_ptr
@@ -946,7 +959,8 @@ function charge_equilibration!(
                 eem.state.pair_ptr,
                 eem.state.write_ptr,
                 neighbors.list;
-                ndrange=n_pairs
+                ndrange=n_pairs,
+                workgroupsize=pair_workgroupsize
             )
         end
     end
@@ -966,14 +980,19 @@ function charge_equilibration!(
             sys.coords,
             sys.boundary,
             conversion_factor;
-            ndrange=n_pairs
+            ndrange=n_pairs,
+            workgroupsize=pair_workgroupsize
         )
     end
 
     eem.state.q_backup .= eem.state.q   # create backup in case of failure
 
-    reduction_ndrange = qeq_reduction_ndrange(n_atoms)
-    reduction_workgroup_size = (QEQ_THREADS_PER_GROUP,)
+    group_size = QEQ_THREADS_PER_GROUP
+    if backend isa KernelAbstractions.CPU && n_threads < Threads.nthreads()
+        group_size = max(group_size, nextpow(2, backend_workgroupsize(backend, n_atoms, n_threads)))
+    end
+    reduction_ndrange = qeq_reduction_ndrange(n_atoms, group_size)
+    reduction_workgroup_size = (group_size,)
 
     # predict next time step's charges using charge history only if new MD step
     if step_n != eem.state.last_history_step
@@ -985,7 +1004,8 @@ function charge_equilibration!(
             eem.state.q_prev_3,
             eem.state.q_prev_4,
             eem.state.history_count;
-            ndrange=n_atoms
+            ndrange=n_atoms,
+            workgroupsize=atom_workgroupsize
         )
 
         # correct any extrapolation roundoff to preserve net charge
@@ -1002,7 +1022,8 @@ function charge_equilibration!(
         correct_charge_kernel!(
             eem.state.q,
             eem.state.buffers;
-            ndrange=n_atoms
+            ndrange=n_atoms,
+            workgroupsize=atom_workgroupsize
         )
     end
 
@@ -1017,7 +1038,8 @@ function charge_equilibration!(
         eem.state.rowptr,
         eem.state.colidx,
         eem.state.q;
-        ndrange=smm_kernel_ndrange      # global range might be (32, 13200) but workgroup size is (32, 8)
+        ndrange=smm_kernel_ndrange,     # global range might be (32, 13200) but workgroup size is (32, 8)
+        workgroupsize=atom_workgroupsize
     )
 
     # calculate initial unprojected residual r_0 = -χ - Hq and its sum
@@ -1082,7 +1104,8 @@ function charge_equilibration!(
             eem.state.rowptr,
             eem.state.colidx,
             eem.state.d;
-            ndrange=smm_kernel_ndrange
+            ndrange=smm_kernel_ndrange,
+            workgroupsize=atom_workgroupsize
         )
         
         # calculate dHd, the denominator of α
@@ -1153,7 +1176,8 @@ function charge_equilibration!(
                 eem.state.d,
                 eem.state.z,
                 β;
-                ndrange=n_atoms
+                ndrange=n_atoms,
+                workgroupsize=atom_workgroupsize
             )
         end
     end
@@ -1223,9 +1247,9 @@ end
 
 # run charge equilibration using EEM, and return EEM self energy in System energy units and float precision
 # charges are written into sys.atoms 
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, eem::EEM; neighbors, step_n::Integer=0, kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, eem::EEM; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
     backend = get_backend(sys.coords)
-    charge_equilibration!(eem, sys, neighbors, step_n, backend)
+    charge_equilibration!(eem, sys, neighbors, step_n, backend; n_threads=n_threads)
     write_charges!(sys, eem.state.q, backend)
 
     QT = typeof(eem.tolerance)
@@ -1244,7 +1268,7 @@ end
 # the EEM self energy does not contribute to the force if the parameters do not depend on geometry
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, eem::EEM; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
     backend = get_backend(sys.coords)
-    charge_equilibration!(eem, sys, neighbors, step_n, backend)
+    charge_equilibration!(eem, sys, neighbors, step_n, backend; n_threads=n_threads)
     write_charges!(sys, eem.state.q, backend)
 
     return fs
