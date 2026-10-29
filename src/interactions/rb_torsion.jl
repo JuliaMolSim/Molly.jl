@@ -72,7 +72,7 @@ end
 end
 
 @doc raw"""
-    RBTorsionλ(; c0, c1, c2, c3, c4, c5, λ_mixing=MinimumMixing(),
+    RBTorsionλ(; c0, c1, c2, c3, c4, c5, λ_mixing=Molly.MinimumMixing(),
                scheduler=Molly.DefaultLambdaScheduler())
 
 A Ryckaert-Bellemans torsion angle between four atoms in an alchemical system, the λ version

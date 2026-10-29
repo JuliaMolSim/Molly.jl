@@ -430,13 +430,14 @@ end
 
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds=nothing;
-                       solvent_dielectric=gb_solvent_dielectric,
-                       solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                       offset=obc_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
-                       sa_factor=gb_sa_factor, use_ACE=true, use_OBC2=false,
-                       element_to_radius=mbondi2_element_to_radius,
-                       element_to_screen=obc_element_to_screen, coulomb_const=coulomb_const,
-                       n_threads=Threads.nthreads())
+                       solvent_dielectric=Molly.gb_solvent_dielectric,
+                       solute_dielectric=Molly.gb_solute_dielectric, kappa=0.0u"nm^-1",
+                       offset=Molly.obc_offset, dist_cutoff=0.0u"nm",
+                       probe_radius=Molly.gb_probe_radius, sa_factor=Molly.gb_sa_factor,
+                       use_ACE=true, use_OBC2=false,
+                       element_to_radius=Molly.mbondi2_element_to_radius,
+                       element_to_screen=Molly.obc_element_to_screen,
+                       coulomb_const=Molly.coulomb_const, n_threads=Threads.nthreads())
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
@@ -669,13 +670,15 @@ function extract_parameters!(params_dic, inter::ImplicitSolventOBC, ff)
 end
 
 """
-    SetupImplicitSolventOBC(; use_OBC2=false, solvent_dielectric=gb_solvent_dielectric,
-                            solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                            offset=obc_offset, dist_cutoff=0.0u"nm",
-                            probe_radius=gb_probe_radius,
-                            sa_factor=gb_sa_factor, use_ACE=true,
-                            element_to_radius=mbondi2_element_to_radius,
-                            element_to_screen=obc_element_to_screen, coulomb_const=nothing)
+    SetupImplicitSolventOBC(; use_OBC2=false,
+                            solvent_dielectric=Molly.gb_solvent_dielectric,
+                            solute_dielectric=Molly.gb_solute_dielectric, kappa=0.0u"nm^-1",
+                            offset=Molly.obc_offset, dist_cutoff=0.0u"nm",
+                            probe_radius=Molly.gb_probe_radius,
+                            sa_factor=Molly.gb_sa_factor, use_ACE=true,
+                            element_to_radius=Molly.mbondi2_element_to_radius,
+                            element_to_screen=Molly.obc_element_to_screen,
+                            coulomb_const=nothing)
 
 Set up the Onufriev-Bashford-Case GBSA model.
 
@@ -723,17 +726,19 @@ end
 
 """
     ImplicitSolventGBN2(atoms, atoms_data, bonds=nothing;
-                        solvent_dielectric=gb_solvent_dielectric,
-                        solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                        offset=gbn2_offset, dist_cutoff=0.0u"nm", probe_radius=gb_probe_radius,
-                        sa_factor=gb_sa_factor, use_ACE=true, neck_scale=gbn2_neck_scale,
-                        neck_cut=gbn2_neck_cut, element_to_radius=mbondi2_element_to_radius,
-                        element_to_screen=gbn2_element_to_screen,
-                        element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
-                        atom_params=gbn2_atom_params,
-                        atom_params_nucleic=gbn2_atom_params_nucleic, data_d0=gbn2_data_d0,
-                        data_m0=gbn2_data_m0, coulomb_const=coulomb_const,
-                        n_threads=Threads.nthreads())
+                        solvent_dielectric=Molly.gb_solvent_dielectric,
+                        solute_dielectric=Molly.gb_solute_dielectric, kappa=0.0u"nm^-1",
+                        offset=Molly.gbn2_offset, dist_cutoff=0.0u"nm",
+                        probe_radius=Molly.gb_probe_radius, sa_factor=Molly.gb_sa_factor,
+                        use_ACE=true, neck_scale=Molly.gbn2_neck_scale,
+                        neck_cut=Molly.gbn2_neck_cut,
+                        element_to_radius=Molly.mbondi2_element_to_radius,
+                        element_to_screen=Molly.gbn2_element_to_screen,
+                        element_to_screen_nucleic=Molly.gbn2_element_to_screen_nucleic,
+                        atom_params=Molly.gbn2_atom_params,
+                        atom_params_nucleic=Molly.gbn2_atom_params_nucleic,
+                        data_d0=Molly.gbn2_data_d0, data_m0=Molly.gbn2_data_m0,
+                        coulomb_const=Molly.coulomb_const, n_threads=Threads.nthreads())
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
@@ -1019,18 +1024,18 @@ function extract_parameters!(params_dic, inter::ImplicitSolventGBN2, ff)
 end
 
 """
-    SetupImplicitSolventGBN2(; solvent_dielectric=gb_solvent_dielectric,
-                             solute_dielectric=gb_solute_dielectric, kappa=0.0u"nm^-1",
-                             offset=gbn2_offset, dist_cutoff=0.0u"nm",
-                             probe_radius=gb_probe_radius, sa_factor=gb_sa_factor,
-                             use_ACE=true, neck_scale=gbn2_neck_scale,
-                             neck_cut=gbn2_neck_cut,
-                             element_to_radius=mbondi2_element_to_radius,
-                             element_to_screen=gbn2_element_to_screen,
-                             element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
-                             atom_params=gbn2_atom_params,
-                             atom_params_nucleic=gbn2_atom_params_nucleic,
-                             data_d0=gbn2_data_d0, data_m0=gbn2_data_m0,
+    SetupImplicitSolventGBN2(; solvent_dielectric=Molly.gb_solvent_dielectric,
+                             solute_dielectric=Molly.gb_solute_dielectric,
+                             kappa=0.0u"nm^-1", offset=Molly.gbn2_offset,
+                             dist_cutoff=0.0u"nm", probe_radius=Molly.gb_probe_radius,
+                             sa_factor=Molly.gb_sa_factor, use_ACE=true,
+                             neck_scale=Molly.gbn2_neck_scale, neck_cut=Molly.gbn2_neck_cut,
+                             element_to_radius=Molly.mbondi2_element_to_radius,
+                             element_to_screen=Molly.gbn2_element_to_screen,
+                             element_to_screen_nucleic=Molly.gbn2_element_to_screen_nucleic,
+                             atom_params=Molly.gbn2_atom_params,
+                             atom_params_nucleic=Molly.gbn2_atom_params_nucleic,
+                             data_d0=Molly.gbn2_data_d0, data_m0=Molly.gbn2_data_m0,
                              coulomb_const=nothing)
 
 Set up the GBn2 solvation model.

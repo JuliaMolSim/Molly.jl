@@ -51,7 +51,8 @@ end
 end
 
 @doc raw"""
-    HarmonicTorsionλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+    HarmonicTorsionλ(; k, θ0, λ_mixing=Molly.MinimumMixing(),
+                     scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic torsion angle between four atoms in an alchemical system, the λ version of
 [`HarmonicTorsion`](@ref).

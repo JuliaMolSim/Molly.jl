@@ -53,7 +53,8 @@ end
 end
 
 @doc raw"""
-    HarmonicAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+    HarmonicAngleλ(; k, θ0, λ_mixing=Molly.MinimumMixing(),
+                   scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic bond angle between three atoms in an alchemical system, the λ version of
 [`HarmonicAngle`](@ref).

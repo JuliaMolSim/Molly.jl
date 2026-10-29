@@ -45,7 +45,8 @@ end
 end
 
 @doc raw"""
-    MorseBondλ(; D, a, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+    MorseBondλ(; D, a, r0, λ_mixing=Molly.MinimumMixing(),
+               scheduler=Molly.DefaultLambdaScheduler())
 
 A Morse potential bond between two atoms in an alchemical system, the λ version of
 [`MorseBond`](@ref).

@@ -13,8 +13,9 @@ export
     LennardJones14Scaled
 
 @doc raw"""
-    LennardJones(; cutoff=NoCutoff(), use_neighbors=true, shortcut=LJZeroShortcut(),
-                 σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(), weight_special=1)
+    LennardJones(; cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+                 σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.GeometricMixing(),
+                 weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms.
 
@@ -136,8 +137,8 @@ function pairwise_pe(::LennardJones, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LJDispersionCorrection(atoms, cutoff, σ_mixing=LorentzMixing(),
-                           ϵ_mixing=GeometricMixing())
+    LJDispersionCorrection(atoms, cutoff, σ_mixing=Molly.LorentzMixing(),
+                           ϵ_mixing=Molly.GeometricMixing())
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
 
@@ -640,10 +641,10 @@ end
 end
 
 @doc raw"""
-    LennardJonesScaled(; cutoff=NoCutoff(), use_neighbors=true, shortcut=LJZeroShortcut(),
-                       σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(),
-                       λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler(),
-                       weight_special=1)
+    LennardJonesScaled(; cutoff=NoCutoff(), use_neighbors=true,
+                       shortcut=Molly.LJZeroShortcut(), σ_mixing=Molly.LorentzMixing(),
+                       ϵ_mixing=Molly.GeometricMixing(), λ_mixing=Molly.MinimumMixing(),
+                       scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms scaled by λ without a soft core, the λ
 version of [`LennardJones`](@ref).
@@ -793,8 +794,10 @@ end
 
 @doc raw"""
     LennardJonesSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=true,
-                                shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
-                                ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                                shortcut=Molly.LJZeroShortcut(),
+                                σ_mixing=Molly.LorentzMixing(),
+                                ϵ_mixing=Molly.GeometricMixing(),
+                                λ_mixing=Molly.MinimumMixing(),
                                 scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core, used for
@@ -1028,8 +1031,10 @@ end
 
 @doc raw"""
     LennardJonesSoftCoreGapsys(; cutoff=NoCutoff(), α=0.85, use_neighbors=true,
-                               shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
-                               ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                               shortcut=Molly.LJZeroShortcut(),
+                               σ_mixing=Molly.LorentzMixing(),
+                               ϵ_mixing=Molly.GeometricMixing(),
+                               λ_mixing=Molly.MinimumMixing(),
                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core potential, used for
@@ -1273,9 +1278,9 @@ end
 end
 
 @doc raw"""
-    AshbaughHatch(; cutoff=NoCutoff(), use_neighbors=true, shortcut=LJZeroShortcut(),
-                  σ_mixing=LorentzMixing(), ϵ_mixing=LorentzMixing(),
-                  λ_mixing=LorentzMixing(), weight_special=1)
+    AshbaughHatch(; cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+                  σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.LorentzMixing(),
+                  λ_mixing=Molly.LorentzMixing(), weight_special=1)
 
 The Ashbaugh-Hatch potential (``V_{\text{AH}}``) is a modified Lennard-Jones
 (``V_{\text{LJ}}``) 6-12 interaction between two atoms.
@@ -1497,7 +1502,7 @@ end
 end
 
 @doc raw"""
-    LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing=MinimumMixing(),
+    LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing=Molly.MinimumMixing(),
                          scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms scaled by λ without a soft core, the λ
@@ -1593,7 +1598,7 @@ end
 
 @doc raw"""
     LennardJones14SoftCoreBeutler(; σ14_mixed, ϵ14_mixed, weight_14, α=0.5,
-                                  λ_mixing=MinimumMixing(),
+                                  λ_mixing=Molly.MinimumMixing(),
                                   scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Beutler soft core, the λ version of
@@ -1718,7 +1723,7 @@ end
 
 @doc raw"""
     LennardJones14SoftCoreGapsys(; σ14_mixed, ϵ14_mixed, weight_14, α=0.85,
-                                 λ_mixing=MinimumMixing(),
+                                 λ_mixing=Molly.MinimumMixing(),
                                  scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Gapsys soft core, the λ version of

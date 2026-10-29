@@ -70,7 +70,7 @@ end
 end
 
 @doc raw"""
-    UreyBradleyλ(; kangle, θ0, kbond, r0, λ_mixing=MinimumMixing(),
+    UreyBradleyλ(; kangle, θ0, kbond, r0, λ_mixing=Molly.MinimumMixing(),
                  scheduler=Molly.DefaultLambdaScheduler())
 
 An interaction between three atoms in an alchemical system consisting of a harmonic bond

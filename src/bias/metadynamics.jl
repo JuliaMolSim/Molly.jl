@@ -558,7 +558,7 @@ free_energy_scale(::NoTempering) = -1
 free_energy_scale(wt::WellTempered) = -wt.bias_factor / (wt.bias_factor - 1)
 
 @doc raw"""
-    Metadynamics(memory; n_steps=1, tempering=NoTempering(), logger=nothing)
+    Metadynamics(memory; n_steps=1, tempering=Molly.NoTempering(), logger=nothing)
 
 A history-dependent bias potential for Metadynamics: a sum of Gaussians deposited at
 previously visited collective variable (CV) values.

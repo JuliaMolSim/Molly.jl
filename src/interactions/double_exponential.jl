@@ -7,8 +7,8 @@ export
 
 @doc raw"""
     DoubleExponential(; cutoff=NoCutoff(), use_neighbors=true, α, β,
-                      shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
-                      ϵ_mixing=GeometricMixing(), weight_special=1)
+                      shortcut=Molly.LJZeroShortcut(), σ_mixing=Molly.LorentzMixing(),
+                      ϵ_mixing=Molly.GeometricMixing(), weight_special=1)
 
 The double exponential interaction between two atoms.
 
@@ -156,8 +156,10 @@ end
 
 @doc raw"""
     DoubleExponentialSoftCore(; cutoff=NoCutoff(), use_neighbors=true, α, β,
-                              shortcut=LJZeroShortcut(), σ_mixing=LorentzMixing(),
-                              ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+                              shortcut=Molly.LJZeroShortcut(),
+                              σ_mixing=Molly.LorentzMixing(),
+                              ϵ_mixing=Molly.GeometricMixing(),
+                              λ_mixing=Molly.MinimumMixing(),
                               scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The double exponential interaction between two atoms with a soft core, used for
@@ -362,8 +364,8 @@ end
 end
 
 @doc raw"""
-    DExpDispersionCorrection(atoms, cutoff, α, β, σ_mixing=LorentzMixing(),
-                             ϵ_mixing=GeometricMixing())
+    DExpDispersionCorrection(atoms, cutoff, α, β, σ_mixing=Molly.LorentzMixing(),
+                             ϵ_mixing=Molly.GeometricMixing())
 
 The long-range dispersion correction for the [`DoubleExponential`](@ref) interaction, the
 analogue of [`LJDispersionCorrection`](@ref).

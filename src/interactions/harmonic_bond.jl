@@ -40,7 +40,8 @@ end
 end
 
 @doc raw"""
-    HarmonicBondλ(; k, r0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+    HarmonicBondλ(; k, r0, λ_mixing=Molly.MinimumMixing(),
+                  scheduler=Molly.DefaultLambdaScheduler())
 
 A harmonic bond between two atoms in an alchemical system, the λ version of
 [`HarmonicBond`](@ref).

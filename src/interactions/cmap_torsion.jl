@@ -351,7 +351,7 @@ end
 end
 
 @doc raw"""
-    CMAPTorsionλ(; index, size, λ_mixing=MinimumMixing(),
+    CMAPTorsionλ(; index, size, λ_mixing=Molly.MinimumMixing(),
                  scheduler=Molly.DefaultLambdaScheduler())
 
 Torsional correction map (CMAP) for sets of five atoms in an alchemical system, the λ version

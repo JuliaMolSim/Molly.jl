@@ -25,7 +25,7 @@ const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
 @doc raw"""
     Coulomb(; cutoff=NoCutoff(), use_neighbors=true, weight_special=1,
-            coulomb_const=coulomb_const)
+            coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms.
 
@@ -118,7 +118,7 @@ function pairwise_pe(::Coulomb, r, (ke, qi, qj))
 end
 
 """
-    SetupCoulomb(; cutoff, coulomb_const=coulomb_const)
+    SetupCoulomb(; cutoff, coulomb_const=Molly.coulomb_const)
 
 Set up the [`Coulomb`](@ref) electrostatic interaction with the cutoff `cutoff`, for example
 [`DistanceCutoff`](@ref), and the Coulomb constant `coulomb_const`.
@@ -144,9 +144,9 @@ function setup_coulomb_pairwise(sc::SetupCoulomb, dist_cutoff, weight_special, u
 end
 
 @doc raw"""
-    CoulombScaled(; cutoff=NoCutoff(), use_neighbors=true, λ_mixing=MinimumMixing(),
+    CoulombScaled(; cutoff=NoCutoff(), use_neighbors=true, λ_mixing=Molly.MinimumMixing(),
                   scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                  coulomb_const=coulomb_const)
+                  coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms scaled by λ without a soft core,
 the λ version of [`Coulomb`](@ref).
@@ -335,10 +335,10 @@ end
 
 @doc raw"""
     CoulombSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=true,
-                           σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(),
-                           λ_mixing=MinimumMixing(),
+                           σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.GeometricMixing(),
+                           λ_mixing=Molly.MinimumMixing(),
                            scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                           coulomb_const=coulomb_const)
+                           coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
@@ -562,9 +562,9 @@ end
 
 @doc raw"""
     CoulombSoftCoreGapsys(; cutoff=NoCutoff(), α=0.3, σQ=1.0u"nm", use_neighbors=true,
-                          λ_mixing=MinimumMixing(),
+                          λ_mixing=Molly.MinimumMixing(),
                           scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                          coulomb_const=coulomb_const)
+                          coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
@@ -827,7 +827,8 @@ abstract type AbstractReactionField <: PairwiseInteraction end
 
 @doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric=78.3, solute_dielectric=1.0,
-                         use_neighbors=true, weight_special=1, coulomb_const=coulomb_const)
+                         use_neighbors=true, weight_special=1,
+                         coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
@@ -970,7 +971,7 @@ end
 
 """
     SetupCoulombReactionField(; solvent_dielectric=78.3, solute_dielectric=1.0,
-                              coulomb_const=coulomb_const, exclusion_correction=false)
+                              coulomb_const=Molly.coulomb_const, exclusion_correction=false)
 
 Set up the Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
@@ -1012,9 +1013,9 @@ end
 @doc raw"""
     CoulombReactionFieldScaled(; dist_cutoff, solvent_dielectric=78.3,
                                solute_dielectric=1.0, use_neighbors=true,
-                               λ_mixing=MinimumMixing(),
+                               λ_mixing=Molly.MinimumMixing(),
                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                               coulomb_const=coulomb_const)
+                               coulomb_const=Molly.coulomb_const)
 
 The reaction field Coulomb interaction between two atoms scaled by λ without a soft core,
 the λ version of [`CoulombReactionField`](@ref).
@@ -1174,11 +1175,11 @@ end
 @doc raw"""
     CoulombSoftCoreBeutlerReactionField(; dist_cutoff, solvent_dielectric=78.3,
                                         solute_dielectric=1.0, α=0.3, use_neighbors=true,
-                                        σ_mixing=LorentzMixing(),
-                                        ϵ_mixing=GeometricMixing(),
-                                        λ_mixing=MinimumMixing(),
+                                        σ_mixing=Molly.LorentzMixing(),
+                                        ϵ_mixing=Molly.GeometricMixing(),
+                                        λ_mixing=Molly.MinimumMixing(),
                                         scheduler=Molly.DefaultLambdaScheduler(),
-                                        weight_special=1, coulomb_const=coulomb_const)
+                                        weight_special=1, coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction with Beutler soft core and reaction field correction,
 used for the appearing and disappearing of atoms in alchemical simulations.
@@ -1418,9 +1419,9 @@ end
 @doc raw"""
     CoulombSoftCoreGapsysReactionField(; dist_cutoff, solvent_dielectric=78.3,
                                        solute_dielectric=1.0, α=0.3, σQ=1.0u"nm",
-                                       use_neighbors=true, λ_mixing=MinimumMixing(),
+                                       use_neighbors=true, λ_mixing=Molly.MinimumMixing(),
                                        scheduler=Molly.DefaultLambdaScheduler(),
-                                       weight_special=1, coulomb_const=coulomb_const)
+                                       weight_special=1, coulomb_const=Molly.coulomb_const)
 
 The Coulomb electrostatic interaction with Gapsys soft core and reaction field correction,
 used for the appearing and disappearing of atoms in alchemical simulations.
@@ -1684,7 +1685,8 @@ Base.:+(e1::CoulombReactionFieldExclusion, ::CoulombReactionFieldExclusion) = e1
 
 """
     CoulombReactionFieldExclusionData(; dist_cutoff, solvent_dielectric=78.3,
-                                      solute_dielectric=1.0, coulomb_const=coulomb_const,
+                                      solute_dielectric=1.0,
+                                      coulomb_const=Molly.coulomb_const,
                                       scheduler=Molly.DefaultLambdaScheduler())
     CoulombReactionFieldExclusionData(inter; scheduler)
 
@@ -1864,8 +1866,8 @@ end
 end
 
 @doc raw"""
-    CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true, weight_special=1,
-                 coulomb_const=coulomb_const, approximate_erfc=true)
+    CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true,
+                 weight_special=1, coulomb_const=Molly.coulomb_const, approximate_erfc=true)
 
 The short range Ewald electrostatic interaction between two atoms.
 
@@ -2000,8 +2002,9 @@ end
 
 @doc raw"""
     CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true,
-                       λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler(),
-                       weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
+                       λ_mixing=Molly.MinimumMixing(),
+                       scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
+                       coulomb_const=Molly.coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction between two atoms scaled by λ without a
 soft core, the λ version of [`CoulombEwald`](@ref).
@@ -2180,11 +2183,12 @@ end
 end
 
 @doc raw"""
-    CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                use_neighbors=true, σ_mixing=LorentzMixing(),
-                                ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
+    CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3, use_neighbors=true,
+                                σ_mixing=Molly.LorentzMixing(),
+                                ϵ_mixing=Molly.GeometricMixing(),
+                                λ_mixing=Molly.MinimumMixing(),
                                 scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                                coulomb_const=coulomb_const, approximate_erfc=true)
+                                coulomb_const=Molly.coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction between two atoms with the
 Beutler soft-core distance modification.
@@ -2383,9 +2387,9 @@ end
 
 @doc raw"""
     CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3, σQ=1.0u"nm",
-                               use_neighbors=true, λ_mixing=MinimumMixing(),
+                               use_neighbors=true, λ_mixing=Molly.MinimumMixing(),
                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
-                               coulomb_const=coulomb_const, approximate_erfc=true)
+                               coulomb_const=Molly.coulomb_const, approximate_erfc=true)
 
 The short-range Ewald electrostatic interaction between two atoms with the
 Gapsys soft-core polynomial near the origin.
@@ -2595,7 +2599,7 @@ end
 
 @doc raw"""
     Yukawa(; cutoff=NoCutoff(), use_neighbors=true, weight_special=1,
-           coulomb_const=coulomb_const, kappa=1.0u"nm^-1")
+           coulomb_const=Molly.coulomb_const, kappa=1.0u"nm^-1")
 
 The Yukawa electrostatic interaction between two atoms.
 

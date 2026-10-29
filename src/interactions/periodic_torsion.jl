@@ -130,7 +130,8 @@ end
 end
 
 @doc raw"""
-    PeriodicTorsionλ(; periodicities, phases, ks, proper=true, λ_mixing=MinimumMixing(),
+    PeriodicTorsionλ(; periodicities, phases, ks, proper=true,
+                     λ_mixing=Molly.MinimumMixing(),
                      scheduler=Molly.DefaultLambdaScheduler())
 
 A periodic torsion angle between four atoms in an alchemical system, the λ version of
