@@ -351,8 +351,6 @@ mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
     S_dE_dΔ::VT
     energy_components::VT
     reverse_nbrs::MI
-    h_id_list::VI
-    h_id_fill_pos::VI
     Δ_e_mod2::VT
     thread_atom_energies_1::VT
     thread_atom_energies_2::VT
@@ -415,8 +413,6 @@ function empty_state(
         VT(undef, 0),
         VT(undef, 0),
         MI(undef, 0, 0),
-        VI(undef, 0),
-        VI(undef, 0),
         VT(undef, 0),
         VT(undef, 0),
         VT(undef, 0),
@@ -434,7 +430,10 @@ end
 
 """
     ReaxFF(; force_field_file, version=ReaxFF2008(), float_type=Float64,
-            array_type=Array, smoothness_correction=false)
+            array_type=Array, smoothness_correction=false,
+            bond_dist_cutoff=0.5, hbond_dist_cutoff=0.75,
+            valence_cutoff=0.001, valence_prod_cutoff=0.00001,
+            hbond_bo_cutoff=0.01)
 
 Reactive force field (ReaxFF) implemented as an AtomsCalculators.jl calculator.
 
@@ -442,6 +441,16 @@ Reactive force field (ReaxFF) implemented as an AtomsCalculators.jl calculator.
 the functional form; currently only [`ReaxFF2008`](@ref) is supported.
 `float_type` sets the precision of the force-field parameters and internal ReaxFF calculations (Float64 strongly recommended).
 `array_type` sets CPU (`Array`) or GPU storage and the device to run on, e.g. `CuArray` after loading CUDA.jl.
+
+`bond_dist_cutoff` and `hbond_dist_cutoff` set the distance cutoffs for
+bond construction and hydrogen-bond interactions, respectively. They accept
+lengths with units; unitless values are interpreted as nanometers.
+
+`valence_cutoff` sets the bond-order threshold for angle and torsion terms.
+`valence_prod_cutoff` sets the bond-order product threshold for angle terms
+when `smoothness_correction=false`.
+`hbond_bo_cutoff` sets the donor–hydrogen bond-order threshold for hydrogen bonds.
+These three thresholds are dimensionless.
 
 `smoothness_correction=true` enables the Furman-Wales smoothness
 corrections to bond orders and energy terms ([Furman and Wales 2019](https://doi.org/10.1021/acs.jpclett.9b02810)).
@@ -731,7 +740,12 @@ end
 function _set_force_field_file_reaxff_params(
     file::AbstractString,
     ::Type{T},
-    ::Type{AT},
+    ::Type{AT};
+    bond_dist_cutoff,
+    hbond_dist_cutoff,
+    valence_cutoff,
+    valence_prod_cutoff,
+    hbond_bo_cutoff,
 ) where {T<:AbstractFloat, AT}
 
     open(file, "r") do f
@@ -1119,11 +1133,11 @@ function _set_force_field_file_reaxff_params(
         # Global cutoff parameters
         global_parameters = GlobalParameters(
             bo_cutoff = general_parameters.cutoff_bond_order * T(0.01),
-            bond_dist_cutoff = T(5.0),
-            valence_cutoff = T(0.001),
-            valence_prod_cutoff = T(0.00001),
-            hbond_bo_cutoff = T(0.01),
-            hbond_dist_cutoff = T(7.5),
+            bond_dist_cutoff = T(bond_dist_cutoff),
+            valence_cutoff = T(valence_cutoff),
+            valence_prod_cutoff = T(valence_prod_cutoff),
+            hbond_bo_cutoff = T(hbond_bo_cutoff),
+            hbond_dist_cutoff = T(hbond_dist_cutoff),
         )
 
         # Calculate taper correction terms
@@ -1175,9 +1189,21 @@ function ReaxFF(; version::V=ReaxFF2008(),
                   float_type::Type{T}=Float64,
                   array_type::Type{AT}=Array,
                   smoothness_correction::Bool=false,
+                  bond_dist_cutoff=0.5,
+                  hbond_dist_cutoff=0.75,
+                  valence_cutoff=0.001,
+                  valence_prod_cutoff=0.00001,
+                  hbond_bo_cutoff=0.01,
 ) where {V<:AbstractReaxFFVersion, T<:AbstractFloat, AT}
 
-    params, device_params = _set_force_field_file_reaxff_params(force_field_file, T, AT)
+    bond_dist_cutoff = T(unit(bond_dist_cutoff) == NoUnits ? 10 * bond_dist_cutoff : ustrip(u"Å", bond_dist_cutoff))
+    hbond_dist_cutoff = T(unit(hbond_dist_cutoff) == NoUnits ? 10 * hbond_dist_cutoff : ustrip(u"Å", hbond_dist_cutoff))
+    
+    params, device_params = _set_force_field_file_reaxff_params(
+        force_field_file, T, AT;
+        bond_dist_cutoff, hbond_dist_cutoff,
+        valence_cutoff, valence_prod_cutoff, hbond_bo_cutoff,
+    )
 
     state = empty_state(T, AT) 
 
@@ -1261,8 +1287,6 @@ function _init_reaxff_state!(
     energy_components = zeros(T, 13)
 
     reverse_nbrs = zeros(Int, near_nbrs_max_est, n_atoms)
-    h_id_list = zeros(Int, n_atoms)
-    h_id_fill_pos = [0]
 
     Δ_e_mod2 = zeros(T, n_atoms)
 
@@ -1317,8 +1341,6 @@ function _init_reaxff_state!(
         to_device(S_dE_dΔ, AT),
         to_device(energy_components, AT),
         to_device(reverse_nbrs, AT),
-        to_device(h_id_list, AT),
-        to_device(h_id_fill_pos, AT),
         to_device(Δ_e_mod2, AT),
         to_device(thread_atom_energies_1, AT),
         to_device(thread_atom_energies_2, AT),
@@ -1346,7 +1368,6 @@ function _clear_reaxff_state!(
     fill!(inter.state.S_dE_dΔ, zero(T))
     fill!(inter.state.energy_components, zero(T))
     
-    fill!(inter.state.h_id_fill_pos, 0)
     inter.state.energy = zero(T)
 end
 
@@ -1550,7 +1571,8 @@ end
 function resolve_forces!(
     inter::ReaxFF{ReaxFF2008},
     sys::System,
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 )
     fill_pos = inter.state.fill_pos
     nbrs = inter.state.nbrs
@@ -1588,7 +1610,8 @@ function resolve_forces!(
         S_dE_dΔ,
         inter.state.forces,
         derivatives,
-        ndrange=length(nbrs)
+        ndrange=length(nbrs),
+        workgroupsize=backend_workgroupsize(backend, length(nbrs), n_threads)
     )
 end
 
@@ -2037,9 +2060,6 @@ end
 
 @kernel function bond_correction_kernel(
     atid,
-    h_id,
-    h_id_fill_pos,
-    h_id_list,
     fill_pos,
     nbrs,
     reverse_nbrs,
@@ -2075,11 +2095,6 @@ end
     i = @index(Global, Linear)
 
     @inbounds begin
-        if atid[i] == h_id
-            hid_fp = Atomix.@atomic h_id_fill_pos[1] += 1
-            h_id_list[hid_fp] = i
-        end
-
         for idx_j in 1:fill_pos[i]
             j = nbrs[idx_j, i]
 
@@ -2188,7 +2203,8 @@ function bonds!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
     neighbors::Union{NeighborList, GPUCellListNeighborList},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     atmp = inter.device_params.atom_parameters
     bndp = inter.device_params.bond_parameters
@@ -2242,7 +2258,8 @@ function bonds!(
         odgp,
         bond_dist_cutoff_sq,
         inter.smoothness_correction;
-        ndrange=length(neighbors)
+        ndrange=length(neighbors),
+        workgroupsize=backend_workgroupsize(backend, length(neighbors), n_threads)
     )
 
     Δ′ = inter.state.Δ         # uncorrected overcoordination
@@ -2255,19 +2272,14 @@ function bonds!(
         atid,
         Δ′,
         Δ′_boc;
-        ndrange=length(coordn′)
+        ndrange=length(coordn′),
+        workgroupsize=backend_workgroupsize(backend, length(coordn′), n_threads)
     )
 
     coordn = inter.state.coordn
     fill!(coordn, zero(T))     # will now hold corrected coordinations
 
     n_atoms = inter.state.n_atoms
-
-    atom_map = inter.params.atom_map
-    h_id = get(atom_map, "H", -1)
-    h_id_list = inter.state.h_id_list
-
-    h_id_fill_pos = inter.state.h_id_fill_pos
 
     dBO_dBO′ = inter.state.dBO_dBO′
     dBO_dΔi′ = inter.state.dBO_dΔi′
@@ -2290,9 +2302,6 @@ function bonds!(
     bc_kernel = bond_correction_kernel(backend)
     bc_kernel(
         atid,
-        h_id,
-        h_id_fill_pos,
-        h_id_list,
         fill_pos,
         nbrs,
         reverse_nbrs,
@@ -2324,7 +2333,8 @@ function bonds!(
         Δ′,
         Δ′_boc,
         inter.smoothness_correction;
-        ndrange=n_atoms
+        ndrange=n_atoms,
+        workgroupsize=backend_workgroupsize(backend, n_atoms, n_threads)
     )
 
     Δ       = inter.state.Δ        
@@ -2341,7 +2351,8 @@ function bonds!(
         Δ_e,
         Δ_angle,
         Δ_boc;
-        ndrange=length(coordn)
+        ndrange=length(coordn),
+        workgroupsize=backend_workgroupsize(backend, length(coordn), n_threads)
     )
 
     E_bond = sum(pair_energies)
@@ -2423,7 +2434,8 @@ end
 
 function lone_pairs!(
     inter::ReaxFF{ReaxFF2008, T},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     genp = inter.device_params.general_parameters
     atmp = inter.device_params.atom_parameters
@@ -2455,7 +2467,8 @@ function lone_pairs!(
         fill_pos,
         S_dE_dΔ,
         atom_energies;
-        ndrange=n_atoms
+        ndrange=n_atoms,
+        workgroupsize=backend_workgroupsize(backend, n_atoms, n_threads)
     )
     synchronize(backend)
     E_lp = sum(atom_energies)
@@ -2604,7 +2617,8 @@ end
 
 function over_under_coordination!(
     inter::ReaxFF{ReaxFF2008, T},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     nbrs = inter.state.nbrs
     atid = inter.state.sys_atid 
@@ -2655,7 +2669,8 @@ function over_under_coordination!(
         S_dE_dΔ,
         overcoordination_energies,
         undercoordination_energies;
-        ndrange=n_atoms
+        ndrange=n_atoms,
+        workgroupsize=backend_workgroupsize(backend, n_atoms, n_threads)
     )
 
     E_overcoordination = sum(overcoordination_energies)
@@ -2730,7 +2745,8 @@ end
                 for idx_k in (idx_i + 1):fill_pos[j]
                     k = nbrs[idx_k, j]
 
-                    ang_info = angle_entries[atid[i], atid[j], atid[k]]
+                    type_i, type_k = minmax(atid[i], atid[k])
+                    ang_info = angle_entries[type_i, atid[j], type_k]
                     start_index = ang_info.index
                     end_index = start_index + ang_info.num_entries - 1
 
@@ -3080,7 +3096,8 @@ end
 function valence_angles!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     genp = inter.device_params.general_parameters
     atmp = inter.device_params.atom_parameters
@@ -3135,7 +3152,8 @@ function valence_angles!(
             angp,
             atid,
             inter.smoothness_correction;
-            ndrange=length(nbrs)
+            ndrange=length(nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(nbrs), n_threads)
         )
         synchronize(backend)
     end
@@ -3158,7 +3176,8 @@ function valence_angles!(
             angp,
             atid,
             inter.smoothness_correction;
-            ndrange=length(nbrs)
+            ndrange=length(nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(nbrs), n_threads)
         )
         synchronize(backend)
         n_valid_angles = scalar_getindex(inter.state.n_valid_angles, 1)
@@ -3201,7 +3220,8 @@ function valence_angles!(
             S_dE_dΔ,
             inter.state.forces,
             inter.smoothness_correction,
-            ndrange=n_valid_angles
+            ndrange=n_valid_angles,
+            workgroupsize=backend_workgroupsize(backend, n_valid_angles, n_threads)
         )
     end
 
@@ -3617,7 +3637,8 @@ end
 function torsions!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     nbrs = inter.state.nbrs
     fill_pos = inter.state.fill_pos
@@ -3659,7 +3680,8 @@ function torsions!(
             torp,
             atid,
             inter.smoothness_correction;
-            ndrange=length(nbrs)
+            ndrange=length(nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(nbrs), n_threads)
         )
         synchronize(backend)
     end
@@ -3681,7 +3703,8 @@ function torsions!(
             torp,
             atid,
             inter.smoothness_correction;
-            ndrange=length(nbrs)
+            ndrange=length(nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(nbrs), n_threads)
         )
         synchronize(backend)
         n_valid_torsions = scalar_getindex(inter.state.n_valid_torsions, 1)
@@ -3710,7 +3733,8 @@ function torsions!(
             S_dE_dBOπ,
             BO_π,
             inter.smoothness_correction;
-            ndrange=n_valid_torsions
+            ndrange=n_valid_torsions,
+            workgroupsize=backend_workgroupsize(backend, n_valid_torsions, n_threads)
         )
     end
     
@@ -3843,7 +3867,8 @@ end
 
 function corrections!(
     inter::ReaxFF{ReaxFF2008, T},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     atom_map = inter.params.atom_map
     C_id = get(atom_map, "C", -1)
@@ -3896,7 +3921,8 @@ function corrections!(
         c2_energies,
         trip_energies,
         inter.smoothness_correction;
-        ndrange=n_atoms
+        ndrange=n_atoms,
+        workgroupsize=backend_workgroupsize(backend, n_atoms, n_threads)
     )
 
     E_c2 = sum(c2_energies)
@@ -4134,7 +4160,8 @@ function hydrogen_bonds!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
     far_nbrs::Union{NeighborList, GPUCellListNeighborList},
-    backend,
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
     atom_map = inter.params.atom_map
     h_id = get(atom_map, "H", -1)
@@ -4182,7 +4209,8 @@ function hydrogen_bonds!(
             hbond_dist_cutoff,
             h_bond_donors,
             h_bond_acceptors;
-            ndrange=length(far_nbrs)
+            ndrange=length(far_nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(far_nbrs), n_threads)
         )
         synchronize(backend)
     end
@@ -4211,7 +4239,8 @@ function hydrogen_bonds!(
             hbond_dist_cutoff,
             h_bond_donors,
             h_bond_acceptors;
-            ndrange=length(far_nbrs)
+            ndrange=length(far_nbrs),
+            workgroupsize=backend_workgroupsize(backend, length(far_nbrs), n_threads)
         )
         synchronize(backend)
         n_valid_hbonds = scalar_getindex(inter.state.n_valid_hbonds, 1)
@@ -4236,6 +4265,7 @@ function hydrogen_bonds!(
             hbond_dist_cutoff,
             inter.smoothness_correction,
             ndrange=n_valid_hbonds,
+            workgroupsize=backend_workgroupsize(backend, n_valid_hbonds, n_threads)
         )
         synchronize(backend)
     end
@@ -4359,7 +4389,8 @@ function non_bonded!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
     far_nbrs::Union{NeighborList, GPUCellListNeighborList},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where T
 
     tp = inter.device_params.taper_parameters
@@ -4401,7 +4432,8 @@ function non_bonded!(
         vdW_energies,
         coulomb_energies,
         upper_taper_radius;
-        ndrange=length(far_nbrs)
+        ndrange=length(far_nbrs),
+        workgroupsize=backend_workgroupsize(backend, length(far_nbrs), n_threads)
     )
     synchronize(backend)
 
@@ -4565,19 +4597,20 @@ function compute_reaxff_energy_forces!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
     neighbors::Union{NeighborList, GPUCellListNeighborList},
-    backend
+    backend;
+    n_threads::Integer=Threads.nthreads(),
 ) where {T}
     
     _clear_reaxff_state!(inter)
-    bonds!(inter, sys, neighbors, backend)
-    lone_pairs!(inter, backend)
-    over_under_coordination!(inter, backend)
-    valence_angles!(inter, sys, backend)
-    torsions!(inter, sys, backend)
-    corrections!(inter, backend)
-    hydrogen_bonds!(inter, sys, neighbors, backend)
-    non_bonded!(inter, sys, neighbors, backend)
-    resolve_forces!(inter, sys, backend)
+    bonds!(inter, sys, neighbors, backend; n_threads=n_threads)
+    lone_pairs!(inter, backend; n_threads=n_threads)
+    over_under_coordination!(inter, backend; n_threads=n_threads)
+    valence_angles!(inter, sys, backend; n_threads=n_threads)
+    torsions!(inter, sys, backend; n_threads=n_threads)
+    corrections!(inter, backend; n_threads=n_threads)
+    hydrogen_bonds!(inter, sys, neighbors, backend; n_threads=n_threads)
+    non_bonded!(inter, sys, neighbors, backend; n_threads=n_threads)
+    resolve_forces!(inter, sys, backend; n_threads=n_threads)
 
     return inter.state.energy
 end
@@ -4603,7 +4636,7 @@ get_float_type(::ReaxFF{V, T}) where {V<:AbstractReaxFFVersion, T} = T
 end
 
 
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, inter::ReaxFF; neighbors, kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, inter::ReaxFF; neighbors, n_threads::Integer=Threads.nthreads(), kwargs...)
     if isnothing(inter.state) || length(sys.atoms) != inter.state.n_atoms
         inter.use_units = length_type(sys.boundary) <: Unitful.Quantity
         inter.sys_coord_unit = unit(eltype(eltype(sys.coords)))
@@ -4612,7 +4645,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
 
     backend = get_backend(sys.coords)
 
-    energy = compute_reaxff_energy_forces!(inter, sys, neighbors, backend)
+    energy = compute_reaxff_energy_forces!(inter, sys, neighbors, backend; n_threads=n_threads)
 
     if inter.use_units
         return energy*u"kcal * mol^-1"
@@ -4680,6 +4713,9 @@ function enzyme_forces_and_energy(sys, inter::ReaxFF, eem::EEM; neighbors)
     )
     synchronize(backend)
 
+    fill!(eem.state.q, sum(eem.state.q) / eem.n_atoms)
+    eem.state.history_count = 0
+
     energy = AtomsCalculators.potential_energy(sys, eem; neighbors)
     energy += AtomsCalculators.potential_energy(sys, inter; neighbors)
 
@@ -4703,7 +4739,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, 
 
     backend = get_backend(sys.coords)
 
-    compute_reaxff_energy_forces!(inter, sys, neighbors, backend)
+    compute_reaxff_energy_forces!(inter, sys, neighbors, backend; n_threads=n_threads)
 
     T = get_float_type(inter)
 
@@ -4720,7 +4756,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, 
         fs,
         inter.state.forces,
         unit_conv;
-        ndrange=inter.state.n_atoms
+        ndrange=inter.state.n_atoms,
+        workgroupsize=backend_workgroupsize(backend, inter.state.n_atoms, n_threads)
     )
 
     return fs

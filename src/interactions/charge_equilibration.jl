@@ -39,9 +39,6 @@ end
     row_counts::VI      # number of entries in each row in CSR matrix
     write_ptr::VI       # mutable cursor when modifying CSR arrays
     pair_ptr::VI        # pair_ptr[2*i] and pair_ptr[2*i - 1] locate the entries in colidx for pair i 
-    cached_neighbor_list::Any
-    active_n_pairs::Int
-    csr_valid::Bool
 
     H_diag::VQ
     H_diag_inv::VQ
@@ -213,9 +210,6 @@ function EEM(
         row_counts=row_counts,
         write_ptr=write_ptr,
         pair_ptr=pair_ptr,
-        cached_neighbor_list=nothing,
-        active_n_pairs=0,
-        csr_valid=false,
         H_diag=H_diag,
         H_diag_inv=H_diag_inv,
         r=r,
@@ -905,17 +899,8 @@ function charge_equilibration!(
         eem.state.H_nonzero = similar(eem.state.H_nonzero, num_csr_entries_buffered)
         eem.state.colidx = similar(eem.state.colidx, num_csr_entries_buffered)
         eem.state.pair_ptr = similar(eem.state.pair_ptr, num_csr_entries_buffered)
-        
-        eem.state.csr_valid = false
     end
 
-    # if neighbor list rebuilt: update row_counts, cumsum, rowptr, colidx, pair_ptr
-    # requires_rebuild = 
-    #     !eem.state.csr_valid ||
-    #     # @views eem.state.cached_neighbor_list[1:eem.state.cached_neighbor_list.n] !== neighbors.list[1:neighbors.n] ||    # works for DistanceNeighborFinder which allocates a new array, check for CellList
-    #     # eem.state.cached_neighbor_list !== neighbors.list ||    # works for DistanceNeighborFinder which allocates a new array, check for CellList
-    #     eem.state.active_n_pairs != n_pairs ||
-    #     @views eem.state.cached_neighbor_list != neighbors.list[1:n_pairs]
     requires_rebuild = true
 
     if requires_rebuild
@@ -964,9 +949,6 @@ function charge_equilibration!(
                 ndrange=n_pairs
             )
         end
-
-        eem.state.active_n_pairs = n_pairs
-        eem.state.csr_valid = true
     end
 
     # length conversion factor from System length units (coords) to General Interaction length units (parameter-compatible)

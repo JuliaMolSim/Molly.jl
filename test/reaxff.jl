@@ -1,17 +1,19 @@
 @testset "ReaxFF Tests" begin
     data_dir = normpath(@__DIR__, "..", "data")
 
-    reference_charge_data = readdlm(joinpath(data_dir, "ReaxFF", "data", "crambin_qeq_charges_1e-12.txt"), Float64)
-    reference_charges = vec(reference_charge_data)
-
     for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
         device = array_type === Array ? "CPU" : "GPU"
 
-        @testset "Crambin energy match reference $device" begin
+        @testset "Crambin reference match $device qeq_tolerance=$qeq_tolerance" for (qeq_tolerance, reference_file, charge_atol) in (
+                (1e-12, "crambin_qeq_charges_1e-12.txt", 1e-9),
+                (1e-6, "crambin_qeq_charges_1e-6.txt", 5e-5))
+                
+            reference_charge_data = readdlm(joinpath(data_dir, "ReaxFF", "data", reference_file), Float64)
+            reference_charges = vec(reference_charge_data)
+
             float_type = Float64
             units = true
             qeq_float_type = Float64
-            qeq_tolerance = 1e-12
 
             reaxff = ReaxFF(
                 force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Monti_2013_CHONSMgPNaCuCl.ff"),
@@ -40,28 +42,30 @@
             charges = Molly.from_device(charge.(sys.atoms))
 
             @test length(charges) == length(reference_charges) == length(sys)
-            @test all(isapprox.(charges, reference_charges, rtol=0, atol=1e-9))
+            @test all(isapprox.(charges, reference_charges, rtol=0, atol=charge_atol))
             @test isapprox(sum(charges), 0.0, rtol=0, atol=1e-10)
 
-            (E_bond, E_atom, E_lone_pair, E_valence_angle, E_pen, E_coa,
-            E_hbond, E_torsion, E_conjugation, E_vdW, E_coulomb,
-            E_reaxff ) = Molly.compute_energy_components(sys, reaxff)
-            E_qeq = ustrip(u"kcal/mol", units ? E_system : E_system * u"kJ/mol") - E_reaxff
+            if qeq_tolerance == 1e-12
+                (E_bond, E_atom, E_lone_pair, E_valence_angle, E_pen, E_coa,
+                E_hbond, E_torsion, E_conjugation, E_vdW, E_coulomb,
+                E_reaxff ) = Molly.compute_energy_components(sys, reaxff)
+                E_qeq = ustrip(u"kcal/mol", units ? E_system : E_system * u"kJ/mol") - E_reaxff
 
-            @test isapprox(E_bond, -1209510.63727572584, rtol=1e-12)
-            @test isapprox(E_atom, -33989.3515242986, rtol=1e-12)
-            @test isapprox(E_lone_pair, 50.8217514257422, rtol=1e-12)
-            @test isapprox(E_valence_angle, 18271.4006496192, rtol=1e-12)
-            @test isapprox(E_pen, 3.45965246824416, rtol=1e-12)
-            @test isapprox(E_coa, -28.0561319269628, rtol=1e-12)
-            @test isapprox(E_hbond, -15100.8081104149, rtol=1e-12)
-            @test isapprox(E_torsion, 1708.78260186225, rtol=1e-12)
-            @test isapprox(E_conjugation, -573.007274217245, rtol=1e-12)
-            @test isapprox(E_vdW, 269108.308246941, rtol=1e-12)
-            @test isapprox(E_coulomb, -521656.2647313786, rtol=1e-12)
+                @test isapprox(E_bond, -1209510.63727572584, rtol=1e-12)
+                @test isapprox(E_atom, -33989.3515242986, rtol=1e-12)
+                @test isapprox(E_lone_pair, 50.8217514257422, rtol=1e-12)
+                @test isapprox(E_valence_angle, 18271.4006496192, rtol=1e-12)
+                @test isapprox(E_pen, 3.45965246824416, rtol=1e-12)
+                @test isapprox(E_coa, -28.0561319269628, rtol=1e-12)
+                @test isapprox(E_hbond, -15100.8081104149, rtol=1e-12)
+                @test isapprox(E_torsion, 1708.78260186225, rtol=1e-12)
+                @test isapprox(E_conjugation, -573.007274217245, rtol=1e-12)
+                @test isapprox(E_vdW, 269108.308246941, rtol=1e-12)
+                @test isapprox(E_coulomb, -521656.2647313786, rtol=1e-12)
 
-            # rescale self energy from its legacy factor 23.02 to the Coulomb/QEq ratio
-            @test isapprox(E_qeq, 349642.65907966491 * (332.06371 / 14.4) / 23.02, rtol=1e-12)
+                # rescale self energy from its legacy factor 23.02 to the Coulomb/QEq ratio
+                @test isapprox(E_qeq, 349642.65907966491 * (332.06371 / 14.4) / 23.02, rtol=1e-12)
+            end
         end
     end
 
