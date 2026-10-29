@@ -24,6 +24,7 @@ export
     dipole_moment
 
 @public AbstractBoundary,
+    length_type,
     has_infinite_boundary,
     box_sides,
     box_center,
@@ -312,12 +313,22 @@ AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
 AtomsBase.n_dimensions(::Union{System{D}, ReplicaSystem{D}}) where {D} = D
 
 float_type(::AbstractBoundary{<:Any, T}) where {T} = T
-length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
+
+"""
+    length_type(sys)
+    length_type(boundary)
+
+The length type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses,
+such as `typeof(1.0f0u"nm")`.
+"""
+length_type(::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
+length_type(sys::Union{System, ReplicaSystem}) = length_type(sys.boundary)
 
 Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
+
 function Unitful.ustrip(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
     return TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors); approx_images=A)
 end
