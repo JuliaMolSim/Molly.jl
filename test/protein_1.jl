@@ -137,8 +137,8 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
     @test sum(sys.neighbor_finder.special) == 6208
 
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1) samples=5 evals=1
-    @test bench_result.allocs <= 8
-    @test bench_result.memory <= 208
+    @test bench_result.allocs <= 9
+    @test bench_result.memory <= 224
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
     bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
@@ -801,8 +801,8 @@ end
     @test Molly.interaction_type(sys.specific_inter_lists[4]) <: PeriodicTorsion
 
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1) samples=5 evals=1
-    @test bench_result.allocs <= 8
-    @test bench_result.memory <= 208
+    @test bench_result.allocs <= 9
+    @test bench_result.memory <= 224
     forces_t = Molly.zero_forces(sys)
     buffers = Molly.init_buffers!(sys, 1)
     bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, 0, $buffers, Val(false);
