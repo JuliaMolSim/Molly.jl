@@ -27,7 +27,7 @@ Implemented features include:
 - Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
-- Periodic, triclinic and infinite boundary conditions.
+- Periodic, triclinic and infinite boundary conditions. Simulate in 2D or 3D.
 - Constraints with SHAKE and RATTLE.
 - Virtual sites.
 - Flexible loggers to track arbitrary properties throughout simulations.
@@ -79,7 +79,7 @@ atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-pairwise_inters = (LennardJones(),)
+pairwise_inters = (LennardJones(use_neighbors=false),)
 
 simulator = VelocityVerlet(
     dt=0.002u"ps",

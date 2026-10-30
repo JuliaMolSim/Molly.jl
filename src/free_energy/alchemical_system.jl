@@ -18,6 +18,22 @@ function check_env_alignment(sysA, sysB, env_A, env_B)
     return nothing
 end
 
+# The hybrid takes the reaction field exclusions of system A, so B must have the same ones
+function check_reaction_field_exclusions(sysA, sysB)
+    function rf_exclusions(sys)
+        return [(il.data.dist_cutoff, il.data.solvent_dielectric, il.data.solute_dielectric,
+                 il.data.coulomb_const, has_self_exclusions(il))
+                for il in sys.specific_inter_lists
+                if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData]
+    end
+    if rf_exclusions(sysA) != rf_exclusions(sysB)
+        throw(ArgumentError("the reaction field exclusion corrections of the two systems " *
+                            "differ; use the same exclusion_correction and reaction field " *
+                            "parameters for both"))
+    end
+    return nothing
+end
+
 # Env-Uniq bonds -> should be Core-Uniq
 function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_lists)
     unique_set = Set(unique_inds)
@@ -48,11 +64,11 @@ function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_list
 end
 
 ### Neighborfinder functions ###
-neighbor_exclusions(nf::NoNeighborFinder) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
+neighbor_exclusions(::Nothing) = (Tuple{Int32, Int32}[], Tuple{Int32, Int32}[])
 neighbor_exclusions(nf) = dense_masks_to_pair_lists(from_device(nf.eligible), from_device(nf.special))
 # The output modes other than :molly_pairs ignore the exclusions and store none
 neighbor_exclusions(nf::GPUCellListNeighborFinder) = (isnothing(nf.eligible) ?
-                neighbor_exclusions(NoNeighborFinder()) :
+                neighbor_exclusions(nothing) :
                 dense_masks_to_pair_lists(nf.eligible, nf.special))
 
 ### Constraints ###
@@ -255,19 +271,26 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
         if inter isa PME && two_grid
             push!(inters, PME_λ(inter.dist_cutoff, to_device(atoms, AT), boundary;
                                 grad_safe=inter.grad_safe, error_tol=inter.error_tol,
-                                order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
+                                order=inter.order, ϵr=inter.ϵr,
+                                coulomb_const=inter.coulomb_const, mesh_dims=inter.mesh_dims,
                                 fixed_charges=false, scheduler=scheduler, λ=FT(global_λ)))
         elseif inter isa PME
             push!(inters, PME(inter.dist_cutoff, to_device(atoms, AT), boundary;
                               grad_safe=inter.grad_safe, error_tol=inter.error_tol,
-                              order=inter.order, ϵr=inter.ϵr, mesh_dims=inter.mesh_dims,
+                              order=inter.order, ϵr=inter.ϵr,
+                              coulomb_const=inter.coulomb_const, mesh_dims=inter.mesh_dims,
                               fixed_charges=false, scheduler=scheduler))
         elseif inter isa Ewald
-            push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, scheduler=scheduler))
+            push!(inters, Ewald(inter.dist_cutoff; error_tol=inter.error_tol, ϵr=inter.ϵr,
+                                coulomb_const=inter.coulomb_const, scheduler=scheduler))
         elseif inter isa LJDispersionCorrection
-            push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.dist_cutoff,
+            push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff,
                                                   MinimumMixing(), inter.σ_mix, inter.ϵ_mix;
                                                   scheduler=scheduler))
+        elseif inter isa DExpDispersionCorrection
+            push!(inters, DExpDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff, inter.α,
+                                                    inter.β, MinimumMixing(), inter.σ_mix,
+                                                    inter.ϵ_mix; scheduler=scheduler))
         else
             @warn "$(typeof(inter).name.name) has no alchemical version yet and is left out of " *
                   "the system, so its contribution is missing at every λ, the end states included"
@@ -283,7 +306,8 @@ Set the global λ of an alchemical system, as set up by [`AbsoluteFESystem`](@re
 [`RelativeFESystem`](@ref), in place without rebuilding it.
 
 Only the λ of the alchemical atoms, the mesh weight of [`Molly.PME_λ`](@ref) and the
-precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
+precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) and
+[`Molly.DExpDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
 lists, the topology, the constraints and the virtual sites do not, which is what makes this much
 cheaper than building the system again. Environment atoms keep λ = 1.
 
@@ -307,8 +331,11 @@ function set_lambda!(sys::System, λ)
         if inter isa PME_λ
             pme_lambda_reweight(inter, λ)
         elseif inter isa LJDispersionCorrectionλ
-            LJDispersionCorrectionλ(sys.atoms, inter.dist_cutoff, MinimumMixing(), inter.σ_mix,
+            LJDispersionCorrectionλ(sys.atoms, inter.cutoff, MinimumMixing(), inter.σ_mix,
                                     inter.ϵ_mix; scheduler=inter.scheduler)
+        elseif inter isa DExpDispersionCorrectionλ
+            DExpDispersionCorrectionλ(sys.atoms, inter.cutoff, inter.α, inter.β, MinimumMixing(),
+                                      inter.σ_mix, inter.ϵ_mix; scheduler=inter.scheduler)
         else
             inter
         end
@@ -433,7 +460,14 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
             push!(SpecificInteraction, InteractionList2Atoms(
                 inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
                 EwaldExclusionData(d.dist_cutoff; error_tol=d.error_tol, ϵr=d.ϵr,
-                                   scheduler=scheduler, λ_mix=d.λ_mixing),
+                                   coulomb_const=d.coulomb_const, scheduler=scheduler,
+                                   λ_mix=d.λ_mixing),
+            ))
+        elseif inter_list isa InteractionList2Atoms &&
+                    inter_list.data isa CoulombReactionFieldExclusionData
+            push!(SpecificInteraction, InteractionList2Atoms(
+                inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
+                replace_fields(inter_list.data, (scheduler=scheduler,)),
             ))
         else
             push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, LJsoftcore_params))
@@ -466,6 +500,9 @@ unique A, is taken from `sysA`. The atoms of the returned system are ordered as 
 unique B and environment. In dual topology each core atom is added twice, with the parameters
 of A and as a massless copy with the parameters of B. Interactions are replaced by their
 λ-dependent versions and random velocities are generated at `temp`.
+The pairs between the A and B sides are excluded, and the exclusions and special pairs of both
+end states are kept, through a neighbor finder of the type used by `sysA`. An error is
+thrown if `sysA` has no neighbor finder and there are such pairs.
 
 # Arguments
 - `sysA`: the [`System`](@ref) of state A, which also provides the environment.
@@ -514,10 +551,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                             "use a scheduler with dual=true or intraLJ=false"))
     end
 
+    check_reaction_field_exclusions(sysA, sysB)
+
     atomsA, coordsA = from_device(sysA.atoms), from_device(sysA.coords)
     atomsB, coordsB = from_device(sysB.atoms), from_device(sysB.coords)
     host_lists(sys) = [to_device(il, Array) for il in sys.specific_inter_lists
-                       if !(eltype(il.inters) <: EwaldExclusion)]
+                       if !(eltype(il.inters) <: Union{EwaldExclusion,
+                                                       CoulombReactionFieldExclusion})]
 
     # Check/add mappings by including mapping between environment A and environment B
     mapping, core_mapAB = deepcopy(mapping), copy(core_mapAB)
@@ -907,6 +947,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
+    excluded_ends = copy(excluded_hybrid)
+
     # The unique alchemical groups are excluded from interating
     for i in unique_groups["sysA"], j in unique_groups["sysB"]
         push!(excluded_hybrid, (i, j))
@@ -917,10 +959,17 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     special  = SparsePairMatrix(n_atoms, special_hybrid; listed=true)
 
     # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
-    #   `isa`, since the finders are parametric and `NoNeighborFinder` has no fields
+    #   `isa`, since the finders are parametric
     nf_A = sysA.neighbor_finder
-    if nf_A isa NoNeighborFinder
-        nf = NoNeighborFinder()
+    if isnothing(nf_A)
+        # Without a neighbor finder every pair interacts, including the A and B sides
+        if !isempty(excluded_hybrid) || !isempty(special_hybrid)
+            throw(ArgumentError("sysA has no neighbor finder, but the hybrid system has pairs " *
+                    "to exclude or scale, such as those between the A and B sides of the " *
+                    "transformation, and only a neighbor finder can do this; give the end " *
+                    "states a neighbor finder"))
+        end
+        nf = nothing
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
         nf = GPUNeighborFinder(eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
                                n_steps=nf_A.n_steps, array_type=AT)
@@ -956,7 +1005,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         if inter isa AbstractEwald
             excluded_pairs = find_excluded_pairs(eligible, special)
             exclusion_data = EwaldExclusionData(FT(inter.dist_cutoff); error_tol=FT(inter.error_tol),
-                                    ϵr=(inter isa PME ? FT(inter.ϵr) : one(FT)), scheduler=scheduler)
+                                    ϵr=FT(inter.ϵr), coulomb_const=inter.coulomb_const,
+                                    scheduler=scheduler)
             ewald_exclusions = InteractionList2Atoms(
                 to_device([ep[1] for ep in excluded_pairs], AT),
                 to_device([ep[2] for ep in excluded_pairs], AT),
@@ -965,6 +1015,18 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 exclusion_data,
             )
             push!(Interactions, ewald_exclusions)
+        end
+    end
+
+    # The reaction field exclusions follow the exclusions of the end states, with self terms for
+    #   all atoms if system A has them. Unlike Ewald, the pairs between the unique groups are
+    #   left out, since the neighbor list already removes their reaction field.
+    for il in sysA.specific_inter_lists
+        if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData
+            eligible_ends = SparsePairMatrix(n_atoms, excluded_ends; listed=false)
+            push!(Interactions, reaction_field_exclusions(
+                replace_fields(il.data, (scheduler=scheduler,)), n_atoms,
+                find_excluded_pairs(eligible_ends, special), has_self_exclusions(il), AT))
         end
     end
 

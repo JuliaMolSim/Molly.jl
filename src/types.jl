@@ -8,9 +8,9 @@ export
     InteractionList4Atoms,
     InteractionList5Atoms,
     Atom,
-    mass,
     charge,
     lambda,
+    mass,
     AtomData,
     MolecularTopology,
     NeighborList,
@@ -25,7 +25,13 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    EnsembleSystem,
+    read_frame!
+
+@public pairwise_uses_velocity,
+    from_device,
+    to_device
 
 # Base type for Molly interaction types
 abstract type AbstractInteraction end
@@ -48,7 +54,36 @@ const PairwiseInteraction = NBodyInteraction{2}
 # Whether a general interaction is evaluated before pairwise and specific interactions
 evaluate_before_pairwise(inter) = false
 
-# Whether a pairwise interaction uses velocities in its force/potential energy calculation
+"""
+    from_device(arr)
+
+Copy an array to the CPU, or return it if it is already on the CPU.
+"""
+from_device(x::Array) = x # Avoid unnecessary Array calls on CPU
+from_device(x::BitArray) = x
+from_device(x) = Array(x)
+from_device(x::StructArray) = replace_storage(Array, x)
+from_device(t::Tuple) = map(from_device, t)
+
+"""
+    to_device(arr, arr_type)
+
+Copy an array to the GPU, e.g. `to_device(arr, CuArray)`, or return it
+if it is already on the GPU.
+"""
+to_device(x::Nothing, ::Type{AT}) where AT = nothing
+to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
+to_device(x, ::Type{AT}) where AT = AT(x)
+to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
+
+"""
+    pairwise_uses_velocity(inter)
+
+Whether a pairwise interaction uses velocities in its force or potential energy calculation.
+
+`false` by default.
+Custom pairwise interaction should implement this function if they use velocities.
+"""
 pairwise_uses_velocity(inter) = false
 
 @inline any_uses_velocity(::Union{Tuple{}, @NamedTuple{}}) = false
@@ -776,86 +811,6 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
 end
 
 """
-    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
-
-The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
-containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
-and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
-entries of `list` are valid.
-
-Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
-the per-atom matrix rather than reading the fields, since the layout is not part of
-the interface. `state` holds the device buffers behind the other fields and is
-internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
-`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
-holding on to a list.
-"""
-struct GPUCellListNeighborList{C,R,L,S}
-    ragged_counts::C
-    ragged_neighbors::R
-    n::Int
-    list::L
-    state::S
-
-    function GPUCellListNeighborList(
-        ragged_counts::C,
-        ragged_neighbors::R,
-        n::Integer,
-        list::L,
-        state::S,
-    ) where {C,R,L,S}
-        # Both are nothing when the per-atom matrix is not stored
-        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
-                !(size(ragged_neighbors, 2) == length(ragged_counts))
-            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
-                                "the number of atoms"))
-        end
-
-        n_int = Int(n)
-
-        if isnothing(list)
-            iszero(n_int) || throw(
-                ArgumentError("n must be zero when list is nothing"),
-            )
-        else
-            0 <= n_int <= length(list) || throw(
-                ArgumentError(
-                    "n must be between zero and the pair-list capacity",
-                ),
-            )
-        end
-
-        return new{C,R,L,S}(
-            ragged_counts,
-            ragged_neighbors,
-            n_int,
-            list,
-            state,
-        )
-    end
-end
-
-# Zero for ragged output, which has no pair list, so that generic code that asks how
-#   many pairs there are works on every output mode
-Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
-
-function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
-    if isnothing(neighbors.list)
-        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
-                            "ragged_neighbors or output=:molly_pairs"))
-    end
-    return neighbors.list[i]
-end
-
-Base.firstindex(::GPUCellListNeighborList) = 1
-
-Base.lastindex(neighbors::GPUCellListNeighborList) =
-    length(neighbors)
-
-Base.eachindex(neighbors::GPUCellListNeighborList) =
-    Base.OneTo(length(neighbors))
-
-"""
     NeighborList(n, list)
     NeighborList()
 
@@ -951,6 +906,82 @@ end
 Base.firstindex(::NoNeighborList) = 1
 Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
+
+"""
+    GPUCellListNeighborList(ragged_counts, ragged_neighbors, n, list, state)
+
+The result of [`find_neighbors`](@ref) with a [`GPUCellListNeighborFinder`](@ref),
+containing a padded per-atom neighbor matrix, unless the finder uses `ragged=false`,
+and, unless the finder uses `output=:ragged`, a flat half-pair list whose first `n`
+entries of `list` are valid.
+
+Use [`neighbor_pairs`](@ref) to get the pairs and [`ragged_neighbors`](@ref) to get
+the per-atom matrix rather than reading the fields, since the layout is not part of
+the interface. `state` holds the device buffers behind the other fields and is
+internal; they are reused if this list is passed back to [`find_neighbors`](@ref) as
+`current_neighbors`, see [`GPUCellListNeighborFinder`](@ref) for what that means for
+holding on to a list.
+"""
+struct GPUCellListNeighborList{C,R,L,S}
+    ragged_counts::C
+    ragged_neighbors::R
+    n::Int
+    list::L
+    state::S
+
+    function GPUCellListNeighborList(
+        ragged_counts::C,
+        ragged_neighbors::R,
+        n::Integer,
+        list::L,
+        state::S,
+    ) where {C,R,L,S}
+        # Both are nothing when the per-atom matrix is not stored
+        if !(isnothing(ragged_neighbors) && isnothing(ragged_counts)) &&
+                !(size(ragged_neighbors, 2) == length(ragged_counts))
+            throw(ArgumentError("the second dimension of ragged_neighbors must equal " *
+                                "the number of atoms"))
+        end
+
+        n_int = Int(n)
+
+        if isnothing(list)
+            iszero(n_int) || throw(
+                ArgumentError("n must be zero when list is nothing"),
+            )
+        else
+            0 <= n_int <= length(list) || throw(
+                ArgumentError(
+                    "n must be between zero and the pair-list capacity",
+                ),
+            )
+        end
+
+        return new{C,R,L,S}(
+            ragged_counts,
+            ragged_neighbors,
+            n_int,
+            list,
+            state,
+        )
+    end
+end
+
+# Zero for ragged output, which has no pair list, so that generic code that asks how
+#   many pairs there are works on every output mode
+Base.length(neighbors::GPUCellListNeighborList) = neighbors.n
+
+function Base.getindex(neighbors::GPUCellListNeighborList, i::Integer)
+    if isnothing(neighbors.list)
+        throw(ArgumentError("ragged GPU cell-list output has no flat pair list, use " *
+                            "ragged_neighbors or output=:molly_pairs"))
+    end
+    return neighbors.list[i]
+end
+
+Base.firstindex(::GPUCellListNeighborList) = 1
+Base.lastindex(neighbors::GPUCellListNeighborList) = length(neighbors)
+Base.eachindex(neighbors::GPUCellListNeighborList) = Base.OneTo(length(neighbors))
 
 # CUDA launch configuration
 const CUDA_LAUNCH_UNSET = 0
@@ -1077,7 +1108,7 @@ end
 
 function check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary,
                                on_gpu, strictness)
-    neighbor_finder isa NoNeighborFinder && return nothing
+    isnothing(neighbor_finder) && return nothing
 
     if neighbor_finder isa GPUCellListNeighborFinder
         if neighbor_finder.output == :ragged && any(use_neighbors, values(pairwise_inters))
@@ -1222,8 +1253,11 @@ minimum box side, are reported according to `strictness`.
     Should be a `Tuple` or `NamedTuple`.
 - `virtual_sites::VS=[]`: the virtual sites present in the system; these are
     mass-less particles determined by the positions of other atoms.
-- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation.
+- `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
+    save on computation. `nothing` means that no neighbor finder is used and all pairs
+    of atoms are considered, in which case [`use_neighbors`](@ref) should return `false`
+    for the pairwise interactions, e.g. by giving `use_neighbors=false` to the
+    built-in pairwise interactions.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
@@ -1284,7 +1318,7 @@ function System(;
                 general_inters=(),
                 constraints=(),
                 virtual_sites=[],
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -1404,17 +1438,20 @@ function System(;
                             "found types $(typeof.(specific_inter_lists))"))
     end
 
-    if neighbor_finder isa NoNeighborFinder && any(use_neighbors, values(pairwise_inters))
-        throw(ArgumentError("neighbor_finder is NoNeighborFinder but one of pairwise_inters " *
-                            "uses the neighbor list"))
+    if isnothing(neighbor_finder) && any(use_neighbors, values(pairwise_inters))
+        throw(ArgumentError("neighbor_finder is nothing but one of pairwise_inters " *
+                            "uses the neighbor list, which is the default for pairwise " *
+                            "interactions, so give a neighbor finder or give " *
+                            "use_neighbors=false to the pairwise interactions"))
     end
-    if !(neighbor_finder isa NoNeighborFinder) && !all(use_neighbors, values(pairwise_inters))
+    if !isnothing(neighbor_finder) && !all(use_neighbors, values(pairwise_inters))
         err_str = "A neighbor finder is used but one of pairwise_inters does not use the " *
                   "neighbor finder, this may not be intended"
         report_issue(err_str, strictness)
     end
 
     check_specific_inter_lists(specific_inter_lists, n_atoms, on_gpu)
+    check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
     check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary, on_gpu, strictness)
     max_sqdist = max_zero_beyond(pairwise_inters)
     if !isnothing(max_sqdist) && !iszero(max_sqdist)
@@ -1570,7 +1607,7 @@ function System(crystal::Crystal{D};
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -1738,11 +1775,9 @@ function ThermoState(sys::System{<:Any, <:Any, <:Any, TH}, integrator;
     p_val = nothing
     if !isnothing(press_source)
         # Handle scalar pressure or tensor (matrix) pressure representations
-        p_raw = press_source isa AbstractArray ? (1/3 * tr(press_source)) : press_source
-        
-        l_unit = unit(sys.boundary.side_lengths[1])
-        v_unit = l_unit^3
-        p_unit = sys.energy_units / v_unit
+        p_raw = press_source isa AbstractArray ? tr(press_source) / size(press_source, 1) :
+                                                 press_source
+        p_unit = sys.energy_units / unit(volume(sys.boundary))
 
         # Convert macroscopic pressure (e.g., bar) to internal molar pressure
         p_molar = p_raw * Unitful.Na
@@ -1767,6 +1802,9 @@ an `AlchemicalPartition` from the provided [`ThermoState`](@ref) vector. This is
 topological and interactive components (e.g., bulk solvent) from state-specific perturbations. 
 During an exchange attempt, cross-energies are evaluated efficiently by querying only the 
 necessary subset of perturbed interactions, completely avoiding redundant evaluations of the shared system.
+The pairs are split between the shared and the state-specific parts by the neighbor finder, so the
+systems need a neighbor finder if the states share pairwise interactions, for example in temperature
+REMD, and an error is thrown otherwise.
 
 Furthermore, upon a successful exchange, coordinates and velocities are not physically swapped in memory; 
 the system simply updates internal pointers mapping the physical replica to its new thermodynamic state.
@@ -1938,18 +1976,6 @@ function ReplicaSystem(sys::ReplicaSystem{D, <:Any, T, TH};
         sys.state_indices, sys.exchange_logger, sys.current_step, sys.initial_log_pending, sys.data,
     )
 end
-
-# Avoid unnecessary Array calls on CPU
-from_device(x::Array) = x
-from_device(x::BitArray) = x
-from_device(x) = Array(x)
-from_device(x::StructArray) = replace_storage(Array, x)
-from_device(t::Tuple) = map(from_device, t)
-
-to_device(x::Nothing, ::Type{AT}) where AT = nothing
-to_device(x::AT, ::Type{AT}) where {AT <: AbstractArray} = x
-to_device(x, ::Type{AT}) where AT = AT(x)
-to_device(t::Tuple, ::Type{AT}) where {AT <: AbstractArray} = map(x -> to_device(x, AT), t)
 
 # `deepcopy(x)` dispatches once, then recurses through `deepcopy_internal` all the way down, so
 # a custom `Base.deepcopy(::T)` is invisible to `deepcopy(sys)` — the interaction tuples would be
@@ -2247,7 +2273,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                neighbor_finder=NoNeighborFinder(),
+                neighbor_finder=nothing,
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -2353,6 +2379,9 @@ calculation functions to save on computation when the neighbors are the same
 for multiple calls.
 In a similar way, `n_threads` can be given to determine the number of threads
 to use when running the calculation function.
+`visit_state=true` lets history-dependent general interactions such as
+[`Metadynamics`](@ref) update (see [`forces`](@ref)); pass the current `step_n` with it
+so they follow the step schedule.
 Note that this calculator is designed for using Molly in other contexts; if you
 want to use another calculator in Molly it can be given as `general_inters` when
 creating a [`System`](@ref).
@@ -2370,8 +2399,10 @@ Not compatible with using atom properties such as `σ` and `ϵ`.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
     implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
-- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation.
+- `neighbor_finder::NF=nothing`: the neighbor finder used to find close atoms and
+    save on computation. `nothing` means that no neighbor finder is used and all pairs
+    of atoms are considered, in which case [`use_neighbors`](@ref) should return `false`
+    for the pairwise interactions.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
@@ -2394,7 +2425,7 @@ function MollyCalculator(;
         pairwise_inters=(),
         specific_inter_lists=(),
         general_inters=(),
-        neighbor_finder=NoNeighborFinder(),
+        neighbor_finder=nothing,
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
         k=default_k(energy_units),
@@ -2423,6 +2454,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         neighbors=nothing,
         step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
+        visit_state::Bool=false,
         kwargs...,
     )
     sys_nointers = System(abstract_sys; force_units=calc.force_units,
@@ -2436,7 +2468,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return forces(sys, nbs, step_n; n_threads=n_threads)
+    return forces(sys, nbs, step_n; n_threads=n_threads, visit_state=visit_state)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
@@ -2445,6 +2477,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         neighbors=nothing,
         step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
+        visit_state::Bool=false,
         kwargs...,
     )
     sys_nointers = System(abstract_sys; force_units=calc.force_units,
@@ -2458,7 +2491,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n, nothing; n_threads=n_threads,
+                            visit_state=visit_state)
 end
 
 """
@@ -2551,10 +2585,73 @@ function check_strictness(strictness)
     end
 end
 
-function report_issue(err_str, strictness; error_type=ErrorException, maxlog=nothing)
+# An optional id gives the warning its own maxlog count, separate from other callers
+function report_issue(err_str, strictness; error_type=ErrorException, maxlog=nothing,
+                      id=nothing)
     if strictness == :warn
-        @warn err_str maxlog=maxlog
+        if isnothing(id)
+            @warn err_str maxlog=maxlog
+        else
+            @warn err_str maxlog=maxlog _id=id
+        end
     elseif strictness == :error
         throw(error_type(err_str))
     end
+end
+
+"""
+    EnsembleSystem(coordinate_file, trajectory_file, force_field; <keyword arguments>)
+    EnsembleSystem(system, trajectory_file)
+
+An object allowing data to be read from a trajectory or ensemble
+associated with a [`System`](@ref).
+
+The keyword arguments are the same as [`System`](@ref) setup from a file.
+In the case of passing a [`System`](@ref) directly, a copy of the system is made.
+
+Energies calculated from the frames are affected by the precision of the coordinates in the
+trajectory file, which is reduced in many formats such as PDB, XTC and DCD.
+"""
+struct EnsembleSystem{S, TR}
+    sys::S
+    trajectory::TR
+end
+
+function EnsembleSystem(coord_file::AbstractString, traj_file::AbstractString,
+                        force_field; kwargs...)
+    sys = System(coord_file, force_field; kwargs...)
+    traj = Chemfiles.Trajectory(traj_file)
+    return EnsembleSystem(sys, traj)
+end
+
+function EnsembleSystem(sys::System, traj_file::AbstractString; kwargs...)
+    sys_cp = System(deepcopy(sys); kwargs...)
+    traj = Chemfiles.Trajectory(traj_file)
+    return EnsembleSystem(sys_cp, traj)
+end
+
+"""
+    read_frame!(ens_sys::EnsembleSystem, frame_idx::Integer)
+
+Read a frame from an [`EnsembleSystem`](@ref) and return a [`System`](@ref)
+representing the frame.
+"""
+function read_frame!(ens_sys::EnsembleSystem{<:System{D, AT, T}},
+                     frame_idx::Integer) where {D, AT, T}
+    sys = ens_sys.sys
+    frame = Chemfiles.read_step(ens_sys.trajectory, frame_idx - 1) # Zero-based indexing
+    coord_unit = unit(length_type(sys.boundary))
+    sys.boundary = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, coord_unit)
+
+    coords_arr_Å = T.(Chemfiles.positions(frame)) * u"Å"
+    if coord_unit == NoUnits
+        coords_arr = ustrip.(u"nm", coords_arr_Å) # Assume nm
+    else
+        coords_arr = uconvert.(coord_unit, coords_arr_Å)
+    end
+    coords = SVector{3}.(eachcol(coords_arr))
+    coords .= wrap_coords.(coords, (sys.boundary,))
+
+    sys.coords .= to_device(coords, AT) # Overwrite coordinates
+    return sys
 end

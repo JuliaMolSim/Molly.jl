@@ -117,11 +117,6 @@ end
 # The smooth cosine cutoff f_C ([ANI-1] Eq. 2) is defined once in core Molly as
 # `cosine_cutoff` (imported via `using Molly`) and shared by the CPU and GPU AEV paths.
 
-# Replace the d-th component of SVector sv with value x.
-@inline function setcomp(sv::SVector{D,T}, d::Int, x::T) where {D,T}
-    SVector{D,T}(ntuple(k -> k == d ? x : sv[k], Val(D)))
-end
-
 # Radial AEV — radial symmetry function G^R, [ANI-1] Eq. (3):
 #   G^R_{η,R_s} = Σ_{j≠i} exp(−η·(R_ij − R_s)²) · f_C(R_ij)
 # One element per (η_R, r_s_R) pair, computed separately per neighbour species (the

@@ -46,6 +46,7 @@ accumulated statistical weights, free energy estimates, and target distribution 
     energies for adjacent λ windows. Generally improves performance.
 
 Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
+History-dependent general interactions such as [`Metadynamics`](@ref) are not supported.
 """
 mutable struct AWHState{T, ES, AS}
     state_space::ES
@@ -138,6 +139,7 @@ function AWHState(thermo_states::AbstractArray{<:ThermoState};
                   ρ::Union{Nothing, AbstractArray} = nothing,
                   reuse_neighbors::Bool = true)
 
+    check_thermo_states_history_inters(thermo_states, "AWH")
     state_space = ExtendedStateSpace(thermo_states; reuse_neighbors=reuse_neighbors)
     active_state = ActiveThermoState(state_space, first_state)
     n_λ = n_states(state_space)
@@ -222,8 +224,8 @@ function awh_target_beta_pressure(sys, ::Type{T}, target_temp, target_pressure) 
 
     target_press = nothing
     if !isnothing(target_pressure)
-        l_unit = unit(sys.boundary.side_lengths[1])
-        p_unit = e_unit / l_unit^3
+        # The volume is an area in 2D, so 2D pressures have units of force per length
+        p_unit = e_unit / unit(volume(sys.boundary))
         e_val = one(T) * e_unit
         p_val_scaled = target_pressure * (e_val / energy_remove_mol(e_val))
         target_press = T(ustrip(uconvert(p_unit, p_val_scaled)))
@@ -345,7 +347,7 @@ umbrella potential). It is typically not required for standard alchemical transf
 
 # Arguments
 - `awh_state::AWHState{T}`: The [`AWHState`](@ref) containing the λ windows and accumulators.
-- `num_md_steps::Int=10`: Number of MD integration steps to perform between AWH coordinate 
+- `n_md_steps::Int=10`: Number of MD integration steps to perform between AWH coordinate 
     sampling and reweighting.
 - `update_freq::Int=1`: Number of samples to collect before applying an update to the AWH bias.
 - `well_tempered_factor::Real=10.0`: If finite, the AWH target distribution (ρ) is dynamically 
@@ -377,7 +379,7 @@ end
 
 function AWHSimulation(
     awh_state::AWHState{T};
-    num_md_steps::Int = 10,
+    n_md_steps::Int = 10,
     update_freq::Int = 1,
     well_tempered_factor::Real = 10.0,
     coverage_threshold::Real = 1.0,
@@ -403,7 +405,7 @@ function AWHSimulation(
 
     return AWHSimulation(n_win,
                          copy(awh_state.N_bias),
-                         num_md_steps,
+                         n_md_steps,
                          update_freq,
                          T(well_tempered_factor),
                          T(coverage_threshold),

@@ -264,6 +264,52 @@
         @test wrap_coords(coord, b_skewed) ≈ expected
     end
 
+    # Negative off-diagonal components, for which wrapped coordinates can be negative
+    #   e.g. a truncated octahedron, given as basis vectors and as basis vector angles
+    d_to = 5.0
+    b_to = TriclinicBoundary(
+        SVector(d_to, 0.0, 0.0),
+        SVector(d_to / 3, 2 * sqrt(2) * d_to / 3, 0.0),
+        SVector(-d_to / 3, sqrt(2) * d_to / 3, sqrt(6) * d_to / 3),
+    )
+    θ_to = acos(-1 / 3)
+    b_to_angles = TriclinicBoundary(SVector(d_to, d_to, d_to), SVector(θ_to, θ_to, θ_to))
+    @test b_to_angles.basis_vectors[3][2] < 0
+    rng_to = Xoshiro(10)
+    for b_neg in (b_to, b_to_angles)
+        H_neg = Molly.box_matrix(b_neg)
+        @test all(1:1_000) do _
+            coord = (rand(rng_to, SVector{3, Float64}) .- 0.5) .* 30
+            wrapped = wrap_coords(coord, b_neg)
+            fractional = H_neg \ wrapped
+            shift = H_neg \ (coord - wrapped)
+            return all(f -> 0 <= f < 1, fractional) && isapprox(shift, round.(shift); atol=1e-8)
+        end
+    end
+    @test Molly.cubic_bounding_box_min(b_to) ≈ SVector(-d_to / 3, 0.0, 0.0)
+    @test Molly.cubic_bounding_box(b_to) ≈ SVector(4 * d_to / 3, sqrt(2) * d_to, sqrt(6) * d_to / 3)
+    lims_to = Molly.axis_limits(Molly.cubic_bounding_box(b_to), CoordinatesLogger(1), 1,
+                                Molly.cubic_bounding_box_min(b_to))
+    @test lims_to[1] ≈ -d_to / 3
+    @test lims_to[2] ≈ 4 * d_to / 3
+
+    # The box given to Chemfiles, which is used to write trajectories, has the same lengths
+    #   and angles and gives back the same basis vectors
+    for b_cf in (b, b_to_angles) # Units of nm, and no units which are taken as nm
+        cell_cf = Chemfiles.UnitCell(b_cf)
+        lengths_nm = [norm(ustrip.(bv)) for bv in b_cf.basis_vectors]
+        @test Chemfiles.lengths(cell_cf) ≈ 10 .* lengths_nm
+        @test Chemfiles.angles(cell_cf) ≈ rad2deg.([b_cf.α, b_cf.β, b_cf.γ])
+    end
+    b_cf_back = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(b))
+    @test all(isapprox.(b_cf_back.basis_vectors, b.basis_vectors; atol=1e-6u"nm"))
+
+    # The minimum image setting is kept when the box is changed
+    b_exact_images = TriclinicBoundary(H_skewed; approx_images=false)
+    @test typeof(scale_boundary(b_exact_images, 1.1)) == typeof(b_exact_images)
+    @test typeof(Molly.rebuild_boundary(b_exact_images, 1.1 * H_skewed)) == typeof(b_exact_images)
+    @test typeof(ustrip(b_exact_images)) == typeof(b_exact_images)
+
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
     @test isapprox(Molly.box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
@@ -406,7 +452,8 @@
             atoms=[Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary_sc; min_dist=0.3u"nm"),
             boundary=boundary_sc,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm"),
+                                          use_neighbors=false),),
         )
         μ_ok = SMatrix{3, 3}(Diagonal(fill(0.99, 3))) # 3.96 nm sides, cutoff still fits
         μ_small = SMatrix{3, 3}(Diagonal(fill(0.7, 3))) # 2.8 nm sides, less than 2 * 1.5 nm
@@ -479,6 +526,47 @@ end
     @test tw.filepath == tw_path
     # No warning and no error when the file does not exist
     @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
+
+    # Writing structures requires atoms_data, and no file is left behind without it
+    sys_no_data = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                         boundary=CubicBoundary(2.0u"nm"))
+    for ext in ("pdb", "dcd")
+        fp = tempname() * ".$ext"
+        @test_throws ArgumentError write_structure(fp, sys_no_data)
+        @test !isfile(fp)
+    end
+end
+
+@testset "Time correlation logger" begin
+    n_steps, n_corr = 501, 20
+    xs_a = randn(Xoshiro(1), n_steps)
+    xs_b = 0.5 .* xs_a .+ randn(Xoshiro(2), n_steps)
+    xs_a[1] = 20.0 # An outlying first sample should be weighted like the others
+    vs = [rand(Xoshiro(i), SVector{3, Float64}, 5) for i in 1:n_steps]
+    vs_store = zero(first(vs))
+    obs_a(sys, neighbors, step_n, buffers; kwargs...) = xs_a[step_n + 1]
+    obs_b(sys, neighbors, step_n, buffers; kwargs...) = xs_b[step_n + 1]
+    # Returns the same array each step, as an observable returning sys.velocities does
+    obs_v(sys, neighbors, step_n, buffers; kwargs...) = (vs_store .= vs[step_n + 1])
+    sys = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                 boundary=CubicBoundary(2.0u"nm"))
+
+    for n_threads in n_threads_list
+        auto = AutoCorrelationLogger(obs_a, Float64, 1, n_corr)
+        cross = TimeCorrelationLogger(obs_a, obs_b, Float64, Float64, 1, n_corr)
+        auto_v = AutoCorrelationLogger(obs_v, SVector{3, Float64}, 5, n_corr)
+        for step_n in 0:(n_steps - 1), logger in (auto, cross, auto_v)
+            Molly.log_property!(logger, sys, nothing, step_n; n_threads=n_threads)
+        end
+        for (logger, as, bs) in ((auto, xs_a, xs_a), (cross, xs_a, xs_b), (auto_v, vs, vs))
+            # Each pair of samples less than n_corr steps apart is counted once
+            C_ref = [sum(dot.(as[(1 + k):end], bs[1:(end - k)])) / (n_steps - k)
+                     for k in 0:(n_corr - 1)]
+            C_ref .-= dot(mean(as), mean(bs))
+            C_ref ./= sqrt(sum(a -> dot(a, a), as) * sum(b -> dot(b, b), bs)) / n_steps
+            @test values(logger) ≈ C_ref
+        end
+    end
 end
 
 @testset "Structure file formats" begin
@@ -537,12 +625,12 @@ end
     # Scaling the box moves molecules rigidly, keeping the fractional coordinates of their
     #   centers, as barostats require
     μ = SMatrix{3, 3}([1.05 0.02 0.0; 0.0 0.97 0.0; 0.0 0.0 1.03])
-    frac_centers(s) = [ustrip.(Molly.boxmatrix(s.boundary)) \
+    frac_centers(s) = [ustrip.(Molly.box_matrix(s.boundary)) \
                        ustrip.(sum(Molly.unwrap_molecules(s)[i:(i + 2)]) / 3) for i in 1:3:9]
     for rotate in (true, false)
         sys_scale = deepcopy(sys)
         scale_coords!(sys_scale, μ; rotate=rotate)
-        @test Molly.boxmatrix(sys_scale.boundary) ≈ μ * Molly.boxmatrix(sys.boundary)
+        @test Molly.box_matrix(sys_scale.boundary) ≈ μ * Molly.box_matrix(sys.boundary)
         @test frac_centers(sys_scale) ≈ frac_centers(sys)
         @test all(((i, j),) -> norm(vector(sys_scale.coords[i], sys_scale.coords[j],
                     sys_scale.boundary)) ≈ norm(coords_whole[j] - coords_whole[i]), bonds)
@@ -627,13 +715,24 @@ end
     @test ff_garnet.dispersion_correction == false
     @test ff_garnet.custom_nonbonded == true
     @test ff_garnet.global_params == [12.159626, 4.326311]
-    @test_throws ArgumentError System(
+    # The double exponential gets its own dispersion correction rather than the Lennard-Jones
+    #   one
+    sys_garnet_dc = System(
         joinpath(data_dir, "ethanol_garnet.pdb"),
-        ff_garnet;
+        MolecularForceField(
+            joinpath(ff_dir, "ethanol_garnet.xml");
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=false,
+        );
         units=false,
         dispersion_correction=true,
         strictness=:nowarn,
     )
+    dc_garnet = only(gi for gi in sys_garnet_dc.general_inters
+                     if gi isa DExpDispersionCorrection)
+    @test (dc_garnet.α, dc_garnet.β) == (12.159626, 4.326311)
+    @test !any(gi -> gi isa LJDispersionCorrection, sys_garnet_dc.general_inters)
+    @test potential_energy(sys_garnet_dc; pairwise_inters=(), specific_inter_lists=()) < 0
 
     ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
     @test ff_tip3p.custom_nonbonded == false
@@ -787,6 +886,36 @@ end
         end
     end
     @test neighbors_dist == sort_nbs(neighbors.list)
+
+    # Boxes less than twice the cutoff, where CellListMap.jl can give a pair once for each
+    #   image within the cutoff, should still list each pair once
+    for boundary_small in (
+                CubicBoundary(1.5u"nm"),
+                TriclinicBoundary(
+                    SVector( 1.5,  0.0, 0.0)u"nm",
+                    SVector(-0.4,  1.5, 0.0)u"nm",
+                    SVector( 0.3, -0.5, 1.5)u"nm",
+                ),
+            )
+        n_atoms_small = 200
+        coords_small = place_atoms(n_atoms_small, boundary_small; min_dist=0.05u"nm")
+        dist_cutoff_small = 1.0u"nm"
+        nf_small = CellListMapNeighborFinder(n_atoms=n_atoms_small,
+                                             dist_cutoff=dist_cutoff_small,
+                                             boundary=boundary_small)
+        sys_small = System(atoms=fill(Atom(), n_atoms_small), coords=coords_small,
+                           boundary=boundary_small, neighbor_finder=nf_small)
+        neighbors_small_dist = Tuple{Int32, Int32, Bool}[]
+        for i in 1:n_atoms_small, j in (i + 1):n_atoms_small
+            if norm(vector(coords_small[i], coords_small[j], boundary_small)) <= dist_cutoff_small
+                push!(neighbors_small_dist, (Int32(i), Int32(j), false))
+            end
+        end
+        for n_threads in (1, Threads.nthreads())
+            neighbors_small = find_neighbors(sys_small; n_threads=n_threads)
+            @test sort_nbs(neighbors_small.list[1:neighbors_small.n]) == neighbors_small_dist
+        end
+    end
 
     # Test all neighbor finders agree for a larger system
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
@@ -1790,7 +1919,7 @@ end
                         SVector{3,Float32}(2.0, 1.0, 1.0),
                     ], AT),
                     boundary=CubicBoundary(10.0f0),
-                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    pairwise_inters=(LennardJones(),),
                     neighbor_finder=automatic_finder,
                     force_units=NoUnits,
                     energy_units=NoUnits,
@@ -2026,7 +2155,7 @@ end
 
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    pairwise_inters = (LennardJones(use_neighbors=true),)
+    pairwise_inters = (LennardJones(),)
     n_replicas = 4
 
     eligible = trues(n_atoms, n_atoms)
@@ -2217,19 +2346,19 @@ end
     nf_wrong_size = DistanceNeighborFinder(eligible=trues(n_atoms + 1, n_atoms + 1),
                                            dist_cutoff=1.0u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    pairwise_inters=(LennardJones(),),
                     neighbor_finder=nf_wrong_size)
 
     # A neighbor finder cutoff smaller than the interaction cutoff misses pairs
     nf_small = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.5u"nm")
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                                  use_neighbors=true),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                     neighbor_finder=nf_small, strictness=:error)
 
     # An interaction cutoff more than half the box breaks the minimum image convention
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm")),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm"),
+                                                  use_neighbors=false),),
                     strictness=:error)
 
     # Specific interaction lists should refer to atoms in the system
@@ -2240,8 +2369,7 @@ end
 
     # A valid system with all of the above set correctly
     sys = System(atoms=atoms, coords=coords, boundary=boundary,
-                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                               use_neighbors=true),),
+                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                  neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),
                                                         dist_cutoff=1.2u"nm"),
                  specific_inter_lists=(InteractionList2Atoms([1], [2], [bond]),),
@@ -2361,6 +2489,21 @@ end
     fp = write_ff("no_nb.xml", types_block)
     @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
+    # 1-4 scaling factors given in different files have to agree to within a tolerance,
+    #   and the first one read is used
+    fp_scale_1 = write_ff("scale_1.xml", types_block * """
+     <NonbondedForce coulomb14scale="0.8333333333333334" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>""")
+    fp_scale_2 = write_ff("scale_2.xml", """
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+     </NonbondedForce>""")
+    fp_scale_3 = write_ff("scale_3.xml", """
+     <NonbondedForce coulomb14scale="0.5" lj14scale="0.5">
+     </NonbondedForce>""")
+    @test MolecularForceField(fp_scale_1, fp_scale_2).weight_14_coulomb == 0.8333333333333334
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp_scale_1, fp_scale_3)
+
     # A residue template with a higher override level replaces one with a lower level
     fp = write_ff("override.xml", """
      <AtomTypes>
@@ -2399,6 +2542,15 @@ end
     @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       neighbor_finder_type=Int)
 
+    # Nothing, rather than the default nothing, gives a system with no neighbor finder
+    sys_nonf = System(water_fp, ff; dist_cutoff=0.5u"nm", neighbor_finder_type=Nothing,
+                      strictness=:nowarn)
+    @test isnothing(sys_nonf.neighbor_finder)
+    @test isnothing(find_neighbors(sys_nonf))
+    @test !any(use_neighbors, sys_nonf.pairwise_inters)
+    @test_throws ErrorException System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                       neighbor_finder_type=Nothing, strictness=:error)
+
     # Residues that do not match a template give a diagnostic message
     missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
     open(missing_h_fp, "w") do out
@@ -2407,6 +2559,16 @@ end
         end
     end
     @test_throws Molly.MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+
+    # Constraint topologies that the constraint algorithms do not support
+    protein_fp = joinpath(data_dir, "6mrr_nowater.pdb")
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:hangles)
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:allbonds,
+                                      constraint_algorithm=SetupSHAKE_RATTLE())
+    sys = System(water_fp, ff; dist_cutoff=0.5u"nm", constraints=:hangles)
+    @test length(sys.constraints) == 1
 end
 
 @testset "AtomsBase conversion" begin
@@ -2432,7 +2594,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", use_neighbors=false)
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     # Suppress origin warning
@@ -2490,7 +2652,7 @@ end
                 TwoParticleAverageSite(12, 10, 9, 0.7, 0.3, 0.0 / LU),
                 OneParticleSite(13, 1, 0.0 / LU),
             ], AT)
-            pis = (LennardJones(use_neighbors=true),)
+            pis = (LennardJones(),)
             eligible = trues(length(atoms), length(atoms))
             eligible[1, 13] = false # Exclude OneParticleSite interaction
             eligible[13, 1] = false
@@ -2614,9 +2776,8 @@ end
                               SVector(1.21, 1.34, 1.16), SVector(0.0, 0.0, 0.0),
                               SVector(1.8, 1.5, 1.35)] * LU, AT),
             boundary=CubicBoundary(5.0 * LU),
-            pairwise_inters=(LennardJones(use_neighbors=true),
-                             Coulomb(use_neighbors=true,
-                                     coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
+            pairwise_inters=(LennardJones(),
+                             Coulomb(coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
             virtual_sites=to_device(
                 [LocalCoordinatesSite(4, 1, 2, 3, wo_s, wx_s, wy_s, p * LU)], AT),
             neighbor_finder=DistanceNeighborFinder(eligible=to_device(eligible, AT),
@@ -2686,5 +2847,24 @@ end
 
         accels = Molly.calc_accels.(fs, atom_masses)
         @test maximum(norm, from_device(accels) .- from_device(accels_true)) < (1e-10 * AU)
+    end
+end
+
+@testset "Virtual site 1-4 pairs" begin
+    # A virtual site shares the exclusions and the 1-4 pairs of its first atom
+    ff = MolecularForceField(joinpath(ff_dir, "gaff.xml"), joinpath(ff_dir, "ethanol_vsite.xml"))
+    for AT in array_list
+        sys = System(joinpath(data_dir, "ethanol_vsite.pdb"), ff; array_type=AT,
+                     float_type=Float64, nonbonded_method=NoCutoff(), strictness=:nowarn)
+        if AT == Array
+            special, eligible = sys.neighbor_finder.special, sys.neighbor_finder.eligible
+            @test [j for j in 1:9 if special[10, j]] == [4, 5, 6]
+            @test [j for j in 1:9 if eligible[10, j]] == [4, 5, 6]
+        end
+        # Match to OpenMM
+        @test isapprox(potential_energy(sys), -1.198394851713553u"kJ * mol^-1";
+                       atol=1e-8u"kJ * mol^-1")
+        @test isapprox(potential_energy(sys; specific_inter_lists=()),
+                       -9.680706225998881u"kJ * mol^-1"; atol=1e-8u"kJ * mol^-1")
     end
 end

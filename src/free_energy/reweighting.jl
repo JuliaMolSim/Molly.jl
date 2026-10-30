@@ -249,7 +249,7 @@ end
     pmf(acc::OnlinePMFAccumulator; zero=:min, kBT=nothing)
 
 Extract the current PMF estimate from a [`PMFDeconvolution`](@ref) or an online PMF
-accumulator as a `PMF` result, with the same fields as returned by
+accumulator as a [`Molly.PMF`](@ref) result, with the same fields as returned by
 [`Molly.pmf_with_uncertainty`](@ref) though the uncertainties may be `nothing`.
 
 PMF values are reported in reduced units, shifted according to `zero`, which can be `:min`,
@@ -300,10 +300,4 @@ function pmf(acc::OnlinePMFAccumulator{N, T}; zero::Symbol = :min, kBT = nothing
     F_energy = isnothing(kBT) ? nothing : F .* kBT
 
     return PMF(centers, widths, edges, F, F_energy, nothing, nothing, probability, nothing)
-end
-
-function target_coords_for_system(coords, sys::System)
-    target_array_type = array_type(sys)
-    array_type(coords) == target_array_type && return coords
-    return to_device(from_device(coords), target_array_type)
 end

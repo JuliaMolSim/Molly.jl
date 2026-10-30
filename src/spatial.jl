@@ -24,9 +24,12 @@ export
     dipole_moment
 
 @public AbstractBoundary,
+    has_infinite_boundary,
+    box_sides,
     box_center,
     vector_1D,
-    wrap_coord_1D
+    wrap_coord_1D,
+    unwrap_molecules
 
 """
 Base type for boundary types.
@@ -63,7 +66,7 @@ CubicBoundary(x::Number; kwargs...) = CubicBoundary(SVector{3}(x, x, x); kwargs.
 CubicBoundary(m::SMatrix{3,3}; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
 CubicBoundary(m::Matrix; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
 
-function boxmatrix(b::CubicBoundary)
+function box_matrix(b::CubicBoundary)
     return SMatrix{3, 3}(
         ustrip(b.side_lengths[1]), 0, 0,
         0, ustrip(b.side_lengths[2]), 0,
@@ -117,7 +120,7 @@ RectangularBoundary(x, y; kwargs...) = RectangularBoundary(SVector{2}(x, y); kwa
 RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x); kwargs...)
 RectangularBoundary(m::SMatrix{3,3}; kwargs...) = RectangularBoundary(SVector{2}(m[1,1], m[2,2]); kwargs...)
 
-function boxmatrix(b::RectangularBoundary)
+function box_matrix(b::RectangularBoundary)
     return SMatrix{3,3}(
         b.side_lengths[1], 0, 0,
         0, b.side_lengths[2], 0,
@@ -201,11 +204,13 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     γ = NT(ustrip(bond_angle(bv[1], bv[2])))
 
     # Cotangent of the angle between b_yz and c_yz.
+    # This is negative when c has a negative y component, and the sign is needed to wrap
+    #   coordinates in that case. cross_yz is positive due to the checks above.
     by, bz = bv[2][2], bv[2][3]
     cy, cz = bv[3][2], bv[3][3]
     cross_yz = ustrip(by * cz - bz * cy)
     dot_yz = ustrip(by * cy + bz * cz)
-    cot_bprojyz_cprojyz = NT(abs(dot_yz / cross_yz))
+    cot_bprojyz_cprojyz = NT(dot_yz / cross_yz)
 
     # Direct ratios used to project along c into the xy plane.
     cx, cy2, cz2 = bv[3][1], bv[3][2], bv[3][3]
@@ -260,17 +265,20 @@ end
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
 TriclinicBoundary(arr; kwargs...)        = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
-boxmatrix(b::TriclinicBoundary) = SMatrix{3, 3}(hcat(b.basis_vectors...))
+box_matrix(b::TriclinicBoundary) = SMatrix{3, 3}(hcat(b.basis_vectors...))
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
 
+# Chemfiles.jl passes the matrix memory to the row-major C library, which takes the
+#   columns there as the basis vectors, so the basis vectors are the rows here
 function Chemfiles.UnitCell(b::TriclinicBoundary)
+    bv_rows = permutedims(hcat(b.basis_vectors...))
     if unit(eltype(eltype(b.basis_vectors))) == NoUnits
-        Chemfiles.UnitCell(Float64.(Array(hcat(b.basis_vectors...))) .* 10) # Assume nm
+        Chemfiles.UnitCell(Float64.(Array(bv_rows)) .* 10) # Assume nm
     else
-        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", hcat(b.basis_vectors...)))))
+        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", bv_rows))))
     end
 end
 
@@ -310,9 +318,13 @@ Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
-Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
-Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
-                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
+function Unitful.ustrip(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors); approx_images=A)
+end
+
+function Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(u, bv), b.basis_vectors); approx_images=A)
+end
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)
@@ -360,14 +372,24 @@ function invert_box_vectors(boundary::TriclinicBoundary)
     return recip_box ./ volume(boundary)
 end
 
+"""
+    has_infinite_boundary(sys)
+    has_infinite_boundary(boundary)
+
+Whether a boundary has one or more infinite (non-periodic) dimensions.
+"""
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false # Not currently supported
 has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
 
-n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
-n_infinite_dims(b::TriclinicBoundary) = 0
-n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
+"""
+    box_sides(boundary)
+    box_sides(boundary, i)
 
+The side lengths of a bounding box, or the side length in dimension `i`.
+
+For a [`TriclinicBoundary`](@ref) the diagonal components of the basis vectors are returned.
+"""
 @inline box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 @inline box_sides(b::Union{CubicBoundary, RectangularBoundary}, i) = b.side_lengths[i]
 @inline box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
@@ -431,13 +453,24 @@ For a 3D bounding box the volume scales as the cube of the scaling factor.
 scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
 scale_boundary(b::RectangularBoundary, scale) = RectangularBoundary(b.side_lengths .* scale)
 
-function scale_boundary(b::TriclinicBoundary, scale)
-    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale)
+function scale_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, scale) where A
+    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale; approx_images=A)
 end
 
-# The minimum cubic box surrounding the bounding box, used for visualization
+# The upper and lower corners of the minimum cubic box surrounding the bounding box, used
+#   for visualization
+# The lower corner is below the origin for a triclinic box with negative off-diagonal
+#   components, which has coordinates below zero
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-cubic_bounding_box(b::TriclinicBoundary) = sum(b.basis_vectors)
+cubic_bounding_box(b::TriclinicBoundary) = max.(triclinic_box_corners(b)...)
+
+cubic_bounding_box_min(b::Union{CubicBoundary, RectangularBoundary}) = zero(b.side_lengths)
+cubic_bounding_box_min(b::TriclinicBoundary) = min.(triclinic_box_corners(b)...)
+
+function triclinic_box_corners(b::TriclinicBoundary)
+    v1, v2, v3 = b.basis_vectors
+    return (zero(v1), v1, v2, v3, v1 + v2, v1 + v3, v2 + v3, v1 + v2 + v3)
+end
 
 # Coordinates for visualizing bounding box
 function bounding_box_lines(boundary::CubicBoundary, dist_unit)
@@ -613,10 +646,16 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-# Unwrap coordinates so that molecules are not split over the boundary
-# Ensures that the center of geometry of bonded clusters of atoms
-# (we assume those are molecules!) falls always inside the simulation box.
-# Returns coordinates on CPU
+"""
+    unwrap_molecules(sys)
+    unwrap_molecules(coords, boundary, topology)
+
+Unwrap coordinates so that molecules are not split over the boundary.
+
+Returns coordinates on CPU.
+Ensures that the center of geometry of bonded clusters of atoms is
+always inside the simulation box.
+"""
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
 function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
@@ -992,6 +1031,8 @@ The pressure is defined as
 ```
 where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
 and ``\bf{W}`` is the virial tensor.
+For systems with units the default pressure is in bar in 3D and in bar nm, which
+has dimensions of force per length, in 2D.
 
 To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
@@ -1007,8 +1048,13 @@ function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                     n_threads=n_threads, kwargs...)
 end
 
+# The pressure units of a system with units, bar in 3 dimensions and bar * nm, which has
+#   dimensions of force per length, in 2 dimensions
+pressure_units(sys::System{D}) where {D} = (sys.energy_units == NoUnits ? NoUnits :
+                                            (D == 2 ? u"bar * nm" : u"bar"))
+
 function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
-    if sys.energy_units == NoUnits || D != 3
+    if sys.energy_units == NoUnits
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
@@ -1020,12 +1066,12 @@ function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial,
             end
         end
     else
-        # Sensible unit to return by default for 3 dimensions
+        P_units = pressure_units(sys)
         @inbounds for col in 1:D
             for row in 1:D
                 K = energy_remove_mol(kin_tensor[row, col])
                 W = energy_remove_mol(virial[row, col])
-                pres_tensor[row, col] = uconvert(u"bar", (2 * K + W) / vol) # Σ r⊗f
+                pres_tensor[row, col] = uconvert(P_units, (2 * K + W) / vol) # Σ r⊗f
             end
         end
     end
@@ -1077,7 +1123,7 @@ end
 
 Calculate the pressure of the system as a scalar.
 
-This is the trace of the [`pressure`](@ref) tensor.
+This is the trace of the [`pressure`](@ref) tensor divided by the number of dimensions.
 For constrained systems, the same deterministic preview convention as
 [`pressure`](@ref) applies.
 """
@@ -1109,7 +1155,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     # Build frac<->cart transforms
     if is_triclinic
-        B = boxmatrix(boundary)
+        B = box_matrix(boundary)
         to_frac = (r::SVector{3}) -> B \ r
         to_cart = (f::SVector{3}) -> B * f
     else
@@ -1216,7 +1262,10 @@ end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
-rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
+
+function rebuild_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, box) where A
+    return TriclinicBoundary(box; approx_images=A)
+end
 
 # Check that the interaction cutoff still fits in the box after the boundary is changed,
 #   for example by a barostat
@@ -1267,7 +1316,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
 
     if ignore_molecules || isnothing(sys.topology)
         # box
-        B  = SMatrix{D,D}(ustrip.(boxmatrix(sys.boundary)))
+        B  = SMatrix{D,D}(ustrip.(box_matrix(sys.boundary)))
         Bu = unit(eltype(eltype(sys.coords)))
         B′ = μ * B
         sys.boundary = rebuild_boundary(sys.boundary, B′ .* Bu)
@@ -1287,7 +1336,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
         b_old   = ustrip(coord_u, b_old_u)
 
         # cell matrices
-        B  = SMatrix{D,D}(ustrip.(boxmatrix(b_old_u)))
+        B  = SMatrix{D,D}(ustrip.(box_matrix(b_old_u)))
         B′ = μ * B
 
         # topology

@@ -35,12 +35,15 @@ function potential_energy(lb::LinearBias, cv_sim; kwargs...)
 end
 
 """
-    bias_gradient(bias_type, cv_sim)
+    bias_gradient(bias_type, cv_sim; kwargs...)
 
 Calculate the gradient of a bias potential with respect to the value of a
 collective variable.
 
 Custom bias types should implement this function along with [`potential_energy`](@ref).
+Both are given the keyword arguments of the force or energy call, such as `step_n`,
+`visit_state` and `strictness`, so a bias type that changes with the simulation history
+can update when `visit_state` is `true`.
 
 # Arguments
 - `bias_type`: a struct that defines the type of bias to be used, such as
@@ -48,7 +51,7 @@ Custom bias types should implement this function along with [`potential_energy`]
 - `cv_sim`: the value of a measured collective variable given the coordinates
     of a simulation.
 """
-function bias_gradient(lb::LinearBias, cv_sim)
+function bias_gradient(lb::LinearBias, cv_sim; kwargs...)
     d = cv_sim - lb.cv_target
     iszero(d) && return zero(lb.k)
     return lb.k * d / abs(d)
@@ -79,7 +82,7 @@ function potential_energy(sb::SquareBias, cv_sim; kwargs...)
     return (sb.k / 2) * (cv_sim - sb.cv_target)^2
 end
 
-function bias_gradient(sb::SquareBias, cv_sim)
+function bias_gradient(sb::SquareBias, cv_sim; kwargs...)
     return sb.k * (cv_sim - sb.cv_target)
 end
 
@@ -135,7 +138,7 @@ function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     return (fb.k / 2) * (d_abs - fb.r_fb)^2 * H
 end
 
-function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
+function bias_gradient(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
     d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
@@ -183,12 +186,17 @@ struct PeriodicFlatBottomBias{K, R, T}
     end
 end
 
+# Displacement d wrapped into [-period/2, period/2); a zero period means a non-periodic CV
+function periodic_displacement(d, period)
+    iszero(period) && return d
+    half_period = period / 2
+    return mod(d + half_period, period) - half_period
+end
+
  function periodic_flat_bottom_displacement(cv_sim, cv_target)
     d = cv_sim - cv_target
     FT = typeof(float(ustrip(d)))
-    twopi = FT(2π) * oneunit(d)
-    half_period = twopi / FT(2)
-    return mod(d + half_period, twopi) - half_period
+    return periodic_displacement(d, FT(2π) * oneunit(d))
 end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
@@ -205,7 +213,7 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     end
 end
 
-function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
+function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
@@ -247,7 +255,11 @@ struct BiasPotential{C, B}
     bias_type::B
 end
 
+# A bias type that changes with the simulation history makes the whole bias potential do so
+is_history_dependent(bias::BiasPotential) = is_history_dependent(bias.bias_type)
+
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
+bias_all_finite(values::Tuple) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
 
  function bias_max_abs_ustrip(values::AbstractArray)
@@ -257,11 +269,14 @@ end
 
 bias_max_abs_ustrip(value) = abs(ustrip(value))
 
- function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
-                            cv_sim=nothing, max_abs_component=nothing)
+bias_description(bias::BiasPotential) =
+    "BiasPotential with CV $(typeof(bias.cv_type)) and bias $(typeof(bias.bias_type))"
+
+# Errors on non-finite values of a bias, which must never be applied as forces
+function check_bias_finite(value, label::AbstractString, bias;
+                           cv_sim=nothing, max_abs_component=nothing)
     bias_all_finite(value) && return value
-    msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
-          "$(typeof(bias.bias_type)) produced non-finite $(label)"
+    msg = "$(bias_description(bias)) produced non-finite $(label)"
     if !isnothing(cv_sim)
         msg *= ", cv_sim=$(cv_sim)"
     end
@@ -315,8 +330,8 @@ function AtomsCalculators.forces!(
     check_bias_finite(cv_sim, "collective variable", bias)
     check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
-    # Gradient of bias function with respect to CV
-    d_bias = bias_gradient(bias.bias_type, cv_sim)
+    # Gradient of bias function with respect to CV, given the keyword arguments of the force call
+    d_bias = bias_gradient(bias.bias_type, cv_sim; kwargs...)
     check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
     fs_svec = d_bias .* d_coords

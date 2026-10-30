@@ -76,7 +76,7 @@ end
     # The analytic force should be the negative gradient of the potential energy
     function test_force_is_energy_grad(name, coords, atoms, boundary; pairwise_inters=(),
                                        specific_inter_lists=(), general_inters=(),
-                                       neighbor_finder=NoNeighborFinder(), tol=1e-10)
+                                       neighbor_finder=nothing, tol=1e-10)
         sys = System(
             atoms=atoms,
             coords=coords,
@@ -112,42 +112,30 @@ end
     end
 
     pairwise_inters = [
-        ("LennardJones NoCutoff"    , LennardJones(use_neighbors=true)),
-        ("LennardJones Distance"    , LennardJones(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones ShiftedPot"  , LennardJones(cutoff=ShiftedPotentialCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones ShiftedForce", LennardJones(cutoff=ShiftedForceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones CubicSpline" , LennardJones(cutoff=CubicSplineCutoff(T(0.8), nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones Polynomial"  , LennardJones(cutoff=PolynomialCutoff(T(0.8), nb_cutoff),
-                                                    use_neighbors=true)),
-        ("SoftSphere"               , SoftSphere(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("Mie"                      , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+        ("LennardJones NoCutoff"    , LennardJones()),
+        ("LennardJones Distance"    , LennardJones(cutoff=DistanceCutoff(nb_cutoff))),
+        ("LennardJones ShiftedPot"  , LennardJones(cutoff=ShiftedPotentialCutoff(nb_cutoff))),
+        ("LennardJones ShiftedForce", LennardJones(cutoff=ShiftedForceCutoff(nb_cutoff))),
+        ("LennardJones CubicSpline" , LennardJones(cutoff=CubicSplineCutoff(T(0.8), nb_cutoff))),
+        ("LennardJones Polynomial"  , LennardJones(cutoff=PolynomialCutoff(T(0.8), nb_cutoff))),
+        ("SoftSphere"               , SoftSphere(cutoff=DistanceCutoff(nb_cutoff))),
+        ("Mie"                      , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff))),
         ("DoubleExponential"        , DoubleExponential(α=T(16.766), β=T(4.427),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
-        ("AshbaughHatch"            , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
+        ("AshbaughHatch"            , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff))),
         ("LennardJonesSCBeutler"    , LennardJonesSoftCoreBeutler(α=T(0.5),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
         ("LennardJonesSCGapsys"     , LennardJonesSoftCoreGapsys(α=T(0.85),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
         ("Coulomb"                  , Coulomb(cutoff=DistanceCutoff(nb_cutoff),
-                                                use_neighbors=true, coulomb_const=cc)),
+                                                coulomb_const=cc)),
         ("CoulombReactionField"     , CoulombReactionField(dist_cutoff=nb_cutoff,
-                                            use_neighbors=true, coulomb_const=cc)),
-        ("CoulombSCBeutler"         , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true, coulomb_const=cc)),
-        ("CoulombSCGapsys"          , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                            σQ=T(1.0), use_neighbors=true,
                                             coulomb_const=cc)),
-        ("Gravity"                  , Gravity(G=T(1.0), use_neighbors=true)),
+        ("CoulombSCBeutler"         , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
+                                            coulomb_const=cc)),
+        ("CoulombSCGapsys"          , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
+                                            σQ=T(1.0), coulomb_const=cc)),
+        ("Gravity"                  , Gravity(G=T(1.0))),
     ]
     for (name, inter) in pairwise_inters
         test_force_is_energy_grad(name, coords, atoms, boundary; pairwise_inters=(inter,),
@@ -155,7 +143,7 @@ end
     end
 
     # Interactions that do not use the neighbor list take a different code path
-    lj_nonl = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
+    lj_nonl = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=false)
     test_force_is_energy_grad("LennardJones no neighbors", coords, atoms, boundary;
                                 pairwise_inters=(lj_nonl,))
 
@@ -191,7 +179,7 @@ end
                                     specific_inter_lists=(inter_list,))
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
     test_force_is_energy_grad("LJDispersionCorrection", coords, atoms, boundary;
                                 pairwise_inters=(lj,), neighbor_finder=nf,
                                 general_inters=(LJDispersionCorrection(atoms, nb_cutoff),))
@@ -215,7 +203,7 @@ end
     atoms_bd = atoms[1:n_bd]
     nf_bd = DistanceNeighborFinder(eligible=trues(n_bd, n_bd), n_steps=1,
                                     dist_cutoff=T(1.5))
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
 
     boundary_trc = TriclinicBoundary(
         SVector(T(4.0), T(0.0), T(0.0)),
@@ -235,8 +223,8 @@ end
                                     pairwise_inters=(lj,), neighbor_finder=nf_bd)
     end
 
-    crf = CoulombReactionField(dist_cutoff=nb_cutoff, use_neighbors=true, coulomb_const=cc)
-    lj  = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    crf = CoulombReactionField(dist_cutoff=nb_cutoff, coulomb_const=cc)
+    lj  = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
 
     function pe_atoms(atoms, coords, boundary, pairwise_inters, neighbor_finder, neighbors)
         sys = System(
@@ -293,6 +281,106 @@ end
         @test abs(grad_fd) > eps(T) # Guard against a trivially zero gradient
         @test frac_diff < 1e-8
     end
+end
+
+@testset "Reaction field exclusion gradients" begin
+    T = Float64
+    cc = T(ustrip(Molly.coulomb_const))
+    boundary = CubicBoundary(T(3.0))
+    coords = [SVector(T(1.0), T(1.0), T(1.0)), SVector(T(1.3), T(1.2), T(1.1)),
+              SVector(T(1.6), T(1.0), T(0.8)), SVector(T(2.9), T(2.8), T(2.9)),
+              SVector(T(0.1), T(0.2), T(0.15))]
+    charges = T[0.8, -0.8, 0.5, -0.7, 0.4]
+    n_atoms = length(coords)
+    eligible = trues(n_atoms, n_atoms)
+    for (i, j) in ((1, 2), (2, 3), (1, 3), (4, 5))
+        eligible[i, j] = eligible[j, i] = false
+    end
+    nf = DistanceNeighborFinder(eligible=eligible, n_steps=1, dist_cutoff=T(1.5))
+    crf = CoulombReactionField(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
+                               solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc)
+    excl = Molly.reaction_field_exclusions(crf, eligible)
+
+    function pe_rf(coords, atoms, boundary, pairwise_inters, specific_inter_lists,
+                   neighbor_finder, neighbors)
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            pairwise_inters=pairwise_inters,
+            specific_inter_lists=specific_inter_lists,
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        return potential_energy(sys, neighbors; n_threads=1)
+    end
+
+    atoms = [Atom(index=i, mass=T(10.0), charge=charges[i], σ=T(0.0), ϵ=T(0.0))
+             for i in 1:n_atoms]
+    sys = System(atoms=atoms, coords=coords, boundary=boundary, pairwise_inters=(crf,),
+                 specific_inter_lists=(excl,), neighbor_finder=nf, force_units=NoUnits,
+                 energy_units=NoUnits)
+    neighbors = find_neighbors(sys; n_threads=1)
+    fs = forces(sys, neighbors; n_threads=1)
+
+    d_coords = zero(coords)
+    d_atoms = zero.(atoms)
+    autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_rf),
+        Active,
+        Duplicated(copy(coords), d_coords),
+        Duplicated(copy(atoms), d_atoms),
+        Const(boundary),
+        Const((crf,)),
+        Const((excl,)),
+        Const(nf),
+        Const(neighbors),
+    )
+    @test maximum(maximum(abs, d + f) for (d, f) in zip(d_coords, fs)) /
+            maximum(maximum(abs, f) for f in fs) < 1e-10
+
+    for atom_i in 1:n_atoms
+        grad_fd = central_fdm(6, 1)(charges[atom_i]) do q
+            atoms_mod = copy(atoms)
+            atoms_mod[atom_i] = Atom(index=atom_i, mass=T(10.0), charge=q, σ=T(0.0), ϵ=T(0.0))
+            pe_rf(coords, atoms_mod, boundary, (crf,), (excl,), nf, neighbors)
+        end
+        @test abs(grad_fd) > eps(T) # Guard against a trivially zero gradient
+        @test abs(charge(d_atoms[atom_i]) - grad_fd) / abs(grad_fd) < 1e-8
+    end
+
+    # dU/dλ with the bonded pair 1-2 inserted, as needed for thermodynamic integration
+    crf_scaled = Molly.CoulombReactionFieldScaled(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
+                                    solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc,
+                                    scheduler=Molly.LinearLambdaScheduler())
+    excl_scaled = Molly.reaction_field_exclusions(crf_scaled, eligible)
+
+    function pe_λ(λ, coords, boundary, pairwise_inters, specific_inter_lists, neighbor_finder,
+                  neighbors, charges)
+        atoms = [Atom(i, 1, T(10.0), charges[i], T(0.0), T(0.0), (i <= 2 ? λ : one(λ)),
+                      (i <= 2 ? Molly.InsertRole : Molly.EnvRole)) for i in eachindex(charges)]
+        return pe_rf(coords, atoms, boundary, pairwise_inters, specific_inter_lists,
+                     neighbor_finder, neighbors)
+    end
+
+    # The inserted atoms only have excluded atoms within the cutoff, so dU/dλ comes from the
+    #   exclusion and self terms
+    λ0 = T(0.6)
+    grad_enzyme = autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_λ),
+        Active,
+        Active(λ0),
+        Const(coords), Const(boundary), Const((crf_scaled,)), Const((excl_scaled,)),
+        Const(nf), Const(neighbors), Const(charges),
+    )[1][1]
+    grad_fd = central_fdm(6, 1)(λ0) do λ
+        pe_λ(λ, coords, boundary, (crf_scaled,), (excl_scaled,), nf, neighbors, charges)
+    end
+    @test abs(grad_fd) > eps(T)
+    @test abs(grad_enzyme - grad_fd) / abs(grad_fd) < 1e-8
 end
 
 @testset "Differentiable PME" begin
@@ -429,8 +517,8 @@ end
     #   force, so the energy gradient and the force only agree to the accuracy of the fit
     for (name, approximate_erfc, tol) in (("approximate erfc", true , 1e-5),
                                           ("exact erfc"      , false, 1e-10))
-        coul_ewald = CoulombEwald(dist_cutoff=dist_cutoff, use_neighbors=true,
-                                  coulomb_const=cc, approximate_erfc=approximate_erfc)
+        coul_ewald = CoulombEwald(dist_cutoff=dist_cutoff, coulomb_const=cc,
+                                  approximate_erfc=approximate_erfc)
         for (inter_name, general_inter) in (
                 ("Ewald", Ewald(dist_cutoff)),
                 ("PME"  , PME(dist_cutoff, atoms, boundary; grad_safe=true, n_threads=1)),

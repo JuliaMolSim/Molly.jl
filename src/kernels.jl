@@ -1,5 +1,7 @@
 # KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
+@public required_atom_fields
+
 kernel_maybe_velocity(velocities, i) = velocities[i]
 kernel_maybe_velocity(::Nothing, i) = nothing
 
@@ -61,12 +63,16 @@ end
     return pe
 end
 
-# Atom fields read by a pairwise interaction in its force/energy calculation,
-# as a tuple of field name Symbols. Returning `nothing` (the default) conservatively
-# shuffles all Atom fields in the tiled GPU pairwise kernel. Narrowing this to the
-# fields actually used cuts warp-shuffle traffic (the dominant cost of that kernel),
-# but must list every field read or forces/energies will be silently wrong, so the
-# default is safe.
+"""
+    required_atom_fields(inter)
+
+Atom fields read by a pairwise interaction in its force or potential energy calculation,
+as a tuple of field name `Symbol`s.
+
+The default `nothing` conservatively shuffles all atom fields in the tiled GPU pairwise kernel.
+Narrowing this to the fields actually used cuts warp-shuffle traffic (the dominant cost of
+that kernel), but must list every field read or forces/energies will be silently wrong.
+"""
 required_atom_fields(inter) = nothing
 
 @inline merge_atom_fields(::Nothing, _) = nothing
@@ -147,8 +153,10 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
                     step_n) where {D, needs_vir}
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
-              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
     if length(nbs) > 0
@@ -431,8 +439,10 @@ end
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
                                pairwise_inters, neighbors, step_n)
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU " *
-              "you should use GPUCellListNeighborFinder or DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
     if length(nbs) > 0
@@ -626,18 +636,21 @@ end
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
         scaled_coord = floor.(Int32, coords[i] ./ w)
-        morton_seq[i] = generalized_morton_code(scaled_coord, bits, D)
+        morton_seq[i] = generalized_morton_code(scaled_coord, bits, Val(D))
     end
 end
 
 # See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
 # and https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN for
 # the bit-interleaving pattern used in the specialized 2D/3D fast paths.
-function generalized_morton_code(indices, bits::Integer, D::Integer)
+# The indices are negative for coordinates below zero, which wrapped coordinates in a
+#   triclinic box with negative off-diagonal components can be. `% UInt32` keeps the bits
+#   rather than erroring like `UInt32`, so the masks below take them modulo the grid size.
+function generalized_morton_code(indices, bits::Integer, ::Val{D}) where D
     if D == 3 && bits <= 10
-        x = UInt32(indices[1]) & 0x000003ff
-        y = UInt32(indices[2]) & 0x000003ff
-        z = UInt32(indices[3]) & 0x000003ff
+        x = (indices[1] % UInt32) & 0x000003ff
+        y = (indices[2] % UInt32) & 0x000003ff
+        z = (indices[3] % UInt32) & 0x000003ff
         
         x = (x | (x << 16)) & 0x030000ff
         x = (x | (x << 8))  & 0x0300f00f
@@ -656,8 +669,8 @@ function generalized_morton_code(indices, bits::Integer, D::Integer)
 
         return Int32(x | (y << 1) | (z << 2))
     elseif D == 2 && bits <= 15
-        x = UInt32(indices[1]) & 0x00007fff
-        y = UInt32(indices[2]) & 0x00007fff
+        x = (indices[1] % UInt32) & 0x00007fff
+        y = (indices[2] % UInt32) & 0x00007fff
 
         x = (x | (x << 8)) & 0x00ff00ff
         x = (x | (x << 4)) & 0x0f0f0f0f

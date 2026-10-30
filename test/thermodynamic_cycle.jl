@@ -17,7 +17,7 @@ function make_cycle_thermo_states(; temps=fill(298.0u"K", 4), names=nothing, n_a
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1",
                       λ=lambda, alch_role=Molly.InsertRole) for _ in 1:n_atoms]
         sys = System(atoms=atoms, coords=coords, boundary=boundary,
-                     pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
+                     pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3,
                                       scheduler=Molly.LinearLambdaScheduler(dual=true)),),
                      neighbor_finder=neighbor_finder)
         intg = Langevin(dt=0.005u"ps", temperature=temp, friction=0.1u"ps^-1")

@@ -62,7 +62,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     σ::S = 3.0
     r_c::R = 1.0
     dt::D = 0.01
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     key::UInt64 = rand(UInt64)
 end
 

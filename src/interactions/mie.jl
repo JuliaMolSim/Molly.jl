@@ -31,7 +31,7 @@ function Mie(;
              m,
              n,
              cutoff=NoCutoff(),
-             use_neighbors=false,
+             use_neighbors=true,
              shortcut=LJZeroShortcut(),
              σ_mixing=LorentzMixing(),
              ϵ_mixing=GeometricMixing(),

@@ -221,7 +221,7 @@ One must take into account that the simulations will start from an initial (idea
 # pulling.jl
 
 tu      = unit(Δt)                   # Time units used for timestep
-max_t   = uconvert(u, FT(0.5)u"ns")  # Simulation time in appropriate time units
+max_t   = uconvert(tu, FT(0.5)u"ns") # Simulation time in appropriate time units
 N_STEPS = Int(floor(max_t / Δt))     # Number of simulation steps
 ```
 
@@ -246,6 +246,7 @@ sys_0 = System(
     nonbonded_method=SetupCoulombReactionField(),
 )
 
+simulate!(sys_0, SteepestDescentMinimizer()) # Relax the structure for these settings first
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
 ```
 
@@ -377,7 +378,7 @@ l = 7
 eq_θ = FT(-0.48948112328583804) # We get this from the equilibrium structure
 
 tu         = unit(Δt)                 # Time units used for timestep
-max_t      = uconvert(u, FT(50)u"ns") # Simulation time in appropriate time units
+max_t      = uconvert(tu, FT(50)u"ns") # Simulation time in appropriate time units
 N_STEPS    = Int(floor(max_t / Δt))   # Number of simulation steps
 
 τ_T        = FT(1)u"ps"               # Thermostat coupling constant
@@ -527,7 +528,7 @@ Threads.@threads for nt in 1:N_TRJ
         boundary = current_sys.boundary
 
         # Measure the CV at the current frame
-        ϕ = _dihedral_geom(coords[i], coords[j], coords[k], coords[l], boundary)
+        ϕ, = _dihedral_geom(coords[i], coords[j], coords[k], coords[l], boundary)
 
         push!(u, pe)
         push!(c, coords)
@@ -536,12 +537,12 @@ Threads.@threads for nt in 1:N_TRJ
     end
 
     # Estimate the decorrelation time from the timeseries of the potential energy
-    ineff = Molly.statistical_inefficiency(u; maxlag=n_frames-1)
+    ineff = Molly.StatisticalInefficiency(u; maxlag=n_frames-1)
 
     # Subsample arrays based on statistical inefficiency
-    sub_coords = Molly.subsample(c,  ineff.stride; first=1)
-    sub_bounds = Molly.subsample(b,  ineff.stride; first=1)
-    sub_CV     = Molly.subsample(cv, ineff.stride; first=1)
+    sub_coords =  c[1:ineff.stride:end]
+    sub_bounds =  b[1:ineff.stride:end]
+    sub_CV     = cv[1:ineff.stride:end]
 
     C[nt]  = sub_coords
     B[nt]  = sub_bounds
@@ -555,14 +556,14 @@ Next, we define a vector of thermodynamic states to represent each Hamiltonian u
 # MBAR.jl
 
 # Assemble the thermodynamic systems for each umbrella window
-energy_units = TRJ_SYSTEMS[1].system.energy_units
+energy_units = TRJ_SYSTEMS[1].sys.energy_units
 kBT          = uconvert(energy_units, Unitful.R * temp)
-βi           = Float64(ustrip(1.0 / kBT))
 
-states = ThermoState[ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)
-                     for i in eachindex(TRJ_SYSTEMS)]
+# No integrator is needed to evaluate energies, so nothing is given
+states = ThermoState[ThermoState(TRJ_SYSTEMS[i].sys, nothing; temperature=temp,
+                                 pressure=pres, name="win_$i") for i in eachindex(TRJ_SYSTEMS)]
 
-target_state = ThermoState("target", βi, pres, sys_nobias)
+target_state = ThermoState(sys_nobias, nothing; temperature=temp, pressure=pres, name="target")
 ```
 
 We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the [`Molly.assemble_mbar_inputs`](@ref) method:
@@ -573,7 +574,6 @@ We are finally in possession of everything needed to solve the MBAR equations an
 mbar_gen = Molly.assemble_mbar_inputs(
     C, B, states; # Coordinates, boundaries and thermodynamic states
     target_state=target_state, # The target state, in our case the unbiased system
-    energy_units=energy_units,
 )
 
 u        = mbar_gen.u        # Reduced energy matrix, K states by N sampled conformations
@@ -807,6 +807,8 @@ The schedulers scale the sterics and electrostatics of each role differently (se
 
 An alchemical system keeps the parameter keys of the system it was built from (see [`extract_parameters`](@ref)), so force field parameters can be differentiated through an [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) like through the original system. Single topology systems, which store two values per parameter, are not supported by the parameter functions.
 
+The reaction field correction of excluded pairs and self terms, [`CoulombReactionFieldExclusion`](@ref), takes the charges of alchemical atoms from the scheduler in the same way as [`EwaldExclusion`](@ref) and has no soft core. With [`Molly.GROMACSLambdaABFEScheduler`](@ref) and [`Molly.GROMACSLambdaRBFEScheduler`](@ref) the charge products of the two end states are mixed linearly in $\lambda$. [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) keep these terms if the input system has them.
+
 ### Matching OpenFE default settings
 
 Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
@@ -922,6 +924,7 @@ sys_vac = AbsoluteFESystem(sysb_vac, global_λ, mapping;
 ```
 
 These systems can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
+[`Molly.set_lambda!`](@ref) changes the global λ of such a system in place, which is much cheaper than setting up the system again.
 
 ### Example set up for RBFE
 Here we demonstrate how to set up a hybrid system to interpolate between two ligands for TYK2 (ejm31 and ejm50) using the OpenFE settings. See below how OpenFE settings were matched using Molly settings.
@@ -980,7 +983,7 @@ core_mapAB = Dict()
 for (i,a) in enumerate(sysA.atoms_data)
     if i in mapping["core"]
         for (j,b) in enumerate(sysB.atoms_data)
-            if a.atom_name == b.atom_name && a.atom_name == b.atom_name
+            if a.atom_name == b.atom_name
                 core_mapAB[i] = j
             end
         end
@@ -1114,7 +1117,7 @@ pmf_deconv = PMFDeconvolution(
 
     Do not use the automatic path if:
 
-    * The state contains extra `BiasPotential`s that are not PMF windows.
+    * The state contains extra [`BiasPotential`](@ref)s that are not PMF windows.
     * The bias order does not match the PMF grid axes.
     * More than one bias contributes to one PMF dimension.
     * The coordinate used for the plotted PMF is transformed differently from the coordinate seen by the bias.
@@ -1162,7 +1165,7 @@ TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 awh_sim = AWHSimulation(
     awh_state;
-    num_md_steps = N_MD_STEPS,
+    n_md_steps = N_MD_STEPS,
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,
@@ -1172,11 +1175,11 @@ awh_sim = AWHSimulation(
 simulate!(awh_sim, TOTAL_STEPS)
 ```
 
-`AWHSimulation` stores its absolute MD step, so couplers and loggers retain their cadence
-across AWH iterations and repeated `simulate!` calls. Pass `initial_step` when resuming from
+[`AWHSimulation`](@ref) stores its absolute MD step, so couplers and loggers retain their cadence
+across AWH iterations and repeated [`simulate!`](@ref) calls. Pass `initial_step` when resuming from
 a checkpoint whose coordinates and velocities already correspond to a nonzero step.
 
-After the run, `Molly.pmf(awh_sim.pmf)` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
+After the run, calling [`Molly.pmf`](@ref) on `awh_sim.pmf` returns the deconvolved PMF in units of $k_B T$ by default. Infinite bins are converted to `NaN` before plotting so GLMakie can render regions with low statistical support in a separate color. The script plots the deconvolved PMF as a heatmap and adds a colorbar for the free energy scale.
 
 ```julia
 pmf_result = Molly.pmf(awh_sim.pmf)
@@ -1258,7 +1261,7 @@ save("awh_dipeptide_convergence.png", fig_df)
 
 ![AWH dipeptide convergence](images/awh_dipeptide_convergence.png)
 
-The script also saves a normalized histogram of the visited AWH thermodynamic states. This is a simple diagnostic for how the sampler moved over the 400 biased $\phi/\psi$ windows.
+The script also saves a normalized histogram of the visited AWH thermodynamic states, using the helper functions `save_state_histogram` and `awh_visited_states` defined in the script. This is a simple diagnostic for how the sampler moved over the 400 biased $\phi/\psi$ windows.
 
 ```julia
 state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
@@ -1385,7 +1388,7 @@ For an alchemical ladder, no PMF deconvolution is needed: the state coordinate a
     awh_state = AWHState(thermo_states; reuse_neighbors = true)
     awh_sim = AWHSimulation(
         awh_state;
-        num_md_steps = N_MD_STEPS,
+        n_md_steps = N_MD_STEPS,
         update_freq = 1,
         well_tempered_factor = FT(Inf),
         log_freq = 10,
@@ -1578,7 +1581,7 @@ Molly's TSS implementation uses local estimators on graph windows; a graph defin
 
 The reference distribution over rungs is called $\gamma$. It sets the asymptotic density used by the free energy estimator. With `adaptive_gamma = :covdet`, Molly updates $\gamma$ from a covariance-determinant estimate of local thermodynamic state density. This gives a larger target density to regions where the local state geometry indicates that more resolution is useful.
 
-TSS can also forget early history. With `TSSHistoryForgetting(alpha, n_epochs)`, estimator history before approximately $\alpha \cdot t$ is dropped at TSS iteration $t$. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.
+TSS can also forget early history. With [`Molly.TSSHistoryForgetting`](@ref) and its `alpha` and `n_epochs` keyword arguments, estimator history before approximately $\alpha \cdot t$ is dropped at TSS iteration $t$. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.
 
 ### Alanine dipeptide PMF
 
@@ -1714,7 +1717,7 @@ simulate!(
 )
 ```
 
-`TSSSimulation` likewise stores one absolute MD step shared by its physical replicas.
+[`TSSSimulation`](@ref) likewise stores one absolute MD step shared by its physical replicas.
 Each MD block receives that step, and repeated calls resume from `tss_sim.current_step`.
 Use the `initial_step` constructor keyword when restoring an existing simulation state.
 
@@ -1798,7 +1801,7 @@ save("tss_dipeptide_convergence.png", fig_df)
 
 ![TSS dipeptide convergence](images/tss_dipeptide_convergence.png)
 
-The script also saves a normalized histogram of the visited TSS thermodynamic states. With multiple replicas, the histogram combines the state histories from all replicas.
+The script also saves a normalized histogram of the visited TSS thermodynamic states, using the helper functions `save_state_histogram` and `tss_visited_states` defined in the script. With multiple replicas, the histogram combines the state histories from all replicas.
 
 ```julia
 state_bins = 0.5:1:(N_PHI_STATES * N_PSI_STATES + 0.5)
@@ -2183,7 +2186,7 @@ simulate!(tss_sim)
 values(sample_logger)
 ```
 
-The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement `Molly.log_tss_sample!(logger, sample)` and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
+The arrays in a sample, and the system, are reused by the simulation, so a logger must copy what it keeps. Custom loggers implement [`Molly.log_tss_sample!`](@ref), called as `log_tss_sample!(logger, sample)`, and choose which samples to record, for example from `sample.step`. With `replica_parallel = :threads`, each replica calls its own loggers from its own task.
 
 ## Free energies with REMD
 
@@ -2629,3 +2632,160 @@ Lowest pair acceptance in solvent:   0.149
 ```
 
 The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 ([Kashefolgheta et al. 2020](https://pubs.acs.org/jctcce/article/16/12/7556/617259/Evaluating-Classical-Force-Fields-against)), 0.50 kJ mol^-1 above this result, which is within the scatter of a single run. Repeated runs of this length give between -3.6 and -4.4 kJ mol^-1, so a single run is worth about $\pm 0.5$ kJ mol^-1, while the vacuum leg reproduces to 0.01 kJ mol^-1 between runs, so the scatter comes from the solvated leg alone. Its ladder mixes slowly where the cavity forms, the dip around states 3 and 4 in the acceptance plot above. Adding $\lambda$ states in that region, so that neighbouring states overlap more, and running for longer both reduce the scatter.
+
+## Free energies with Metadynamics
+
+### Method overview
+
+[Metadynamics](https://doi.org/10.1073/pnas.202427399) is a history-dependent biasing method for enhanced sampling and free energy estimation. Rather than pre-defining a fixed set of thermodynamic states as MBAR, AWH and TSS do, it runs a single simulation and periodically deposits small Gaussian "hills" of bias potential at the current value of one or more collective variables (CVs). Over time these hills accumulate and fill in the free energy wells the system would otherwise stay trapped in, pushing it to explore new regions of CV space:
+
+```math
+V_{bias}(\boldsymbol{s}, t) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
+```
+
+Once the bias has grown to compensate the underlying free energy landscape, $V_{bias}(\boldsymbol{s})$ estimates the (negative) free energy surface along $\boldsymbol{s}$, up to an additive constant: $F(\boldsymbol{s}) \approx -V_{bias}(\boldsymbol{s}) + C$.
+
+In Molly this is implemented by [`Metadynamics`](@ref), usable directly as a `general_inters` entry. Hills on periodic CVs such as [`CalcTorsion`](@ref) wrap around automatically; custom CV types opt in by defining [`Molly.cv_period`](@ref). The CVs and the resulting force or potential are evaluated each step and the rate at which new gaussians are added is controlled via `n_steps`. Two aspects are controlled by Julia type dispatch:
+
+- **Hill memory**, a [`Molly.AbstractMetadynamicsMemory`](@ref): 
+    - [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills), no knowledge of CV range needed)
+    - [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
+- **Hill height scaling**, a [`Molly.AbstractTempering`](@ref):
+    - the default [`Molly.NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
+    - [`WellTempered`](@ref) instead [shrinks each new hill](https://doi.org/10.1103/PhysRevLett.100.020603) according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
+
+Standard metadynamics is prone to over-filling: if the total deposited height grows much larger than $k_B T$, the bias floods the well and the system random-walks broadly for the rest of the run, widening the reconstructed profile well beyond the true surface. Well-tempered metadynamics avoids this at the cost of one extra parameter, `bias_factor`.
+
+### A simple example: recovering a bond potential
+
+As a minimal, easily-checked example, we bias the distance $r$ between two particles connected by a [`HarmonicBond`](@ref) and check whether the resulting bias reconstructs the known free energy along $r$. Since $r$ is a distance in 3D, this isn't the bond potential $U(r)$ alone: integrating out the two angles of the bond vector gives a factor $r^2$ in the probability, $P(r) \propto r^2 \exp(-U(r)/k_B T)$, so
+```math
+F(r) = -k_B T \ln P(r) = U(r) - 2 k_B T \ln r + C
+```
+
+```julia
+using Molly
+using Unitful
+
+mass, r0, k_bond, temp = 10.0, 1.0, 500.0, 298.0 # u, nm, kJ * mol^-1 * nm^-2, K
+boundary = CubicBoundary(10.0) # nm
+
+atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2), Atom(mass=mass, σ=0.3, ϵ=0.2)] # σ in nm, ϵ in kJ * mol^-1
+coords = [SVector(4.5, 5.0, 5.0), SVector(4.5 + r0, 5.0, 5.0)] # nm
+velocities = [random_velocity(mass, temp) for i in 1:2] # nm * ps^-1
+
+bond = HarmonicBond(k=k_bond, r0=r0) # k in kJ * mol^-1 * nm^-2, r0 in nm
+specific_inter_lists = (InteractionList2Atoms([1], [2], [bond]),)
+```
+
+Next we define the collective variable to bias -- the 1-2 distance -- and the bias itself, using [`GridHills`](@ref) for O(1) evaluation and [`WellTempered`](@ref) so the bias converges instead of growing without bound:
+
+```julia
+calc_dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
+
+kB = ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k) # Same convention System uses internally
+kT = kB * temp # kJ * mol^-1, for the analysis below
+
+grid_min, grid_max, n_points = 0.3, 1.7, 701 # nm, nm, dimensionless
+memory = GridHills((calc_dist,), 0.2, 0.02, grid_min, grid_max, n_points) # CVs, height (kJ * mol^-1), sigma (nm), grid_min (nm), grid_max (nm), n_points
+tempering = WellTempered(10.0, temp)                                      # bias_factor (dimensionless), temperature (K)
+
+bias = Metadynamics(memory; n_steps=100, tempering=tempering,
+                    logger=MetadynamicsLogger(filepath="metadynamics.txt", overwrite=true))
+```
+
+`n_steps=100` deposits a hill every 100 steps, starting at step 0 (or step 1 for integrators such as `Langevin`), when the simulator visits a state; forces computed by loggers, couplers or direct calls don't deposit, and a run split over several `simulate!` calls deposits as one continuous run. The well-tempered kT uses the Boltzmann constant of the System. The CV should stay within `[grid_min, grid_max]`: outside the grid the bias exerts no force along that CV and deposits no hills. By default leaving the grid warns once per grid and CV, following Molly's strictness; `GridHills(...; out_of_grid=:error)` throws instead. No external logger is needed to deposit hills, since `bias` deposits them in the simulator's force calculation; we just add it to `general_inters` and simulate as normal:
+
+```julia
+# dt in ps, coupling const in ps. With only 2 atoms, removing the centre of mass velocity
+# after each Andersen collision would cool the bond to about 2/3 of temp, so it is disabled.
+simulator = VelocityVerlet(dt=0.002, coupling=AndersenThermostat(temp, 0.1), remove_CM_motion=false)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=(bias,),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, 500_000)
+flush(bias.logger) # Writes the last batch of records to metadynamics.txt
+```
+
+After the run, [`Molly.free_energy`](@ref) estimates the free energy from the bias. The prefactor comes from the tempering (`-γ/(γ-1)` for well-tempered, `-1` without), so we can compare it against the analytical free energy $F(r)$:
+
+```julia
+grid_s = range(grid_min, grid_max; length=n_points) # Matches the GridHills grid above
+F_estimate = Molly.free_energy.(bias, grid_s)
+
+bond_pe(r) = potential_energy(bond, SVector(0.0, 0.0, 0.0), SVector(r, 0.0, 0.0), boundary)
+F_analytical = @. bond_pe(grid_s) - 2kT * log(grid_s) # r^2 Jacobian of a 3D distance
+
+# Restrict the comparison to where the walker actually sampled, a few thermal widths
+# around r0 -- grid points far from r0 never received a hill and stay at the flat baseline
+σ_thermal = sqrt(kT / k_bond)
+in_window = @. r0 - 3σ_thermal <= grid_s <= r0 + 3σ_thermal
+
+# Both are only known up to an additive constant, so shift each to zero mean over the window
+F_estimate = F_estimate .- sum(F_estimate[in_window]) / count(in_window)
+F_analytical = F_analytical .- sum(F_analytical[in_window]) / count(in_window)
+```
+
+`F_estimate` should track `F_analytical` over the window, within a fraction of $k_B T$.
+
+```julia
+using Plots
+
+fig = Plots.plot(grid_s[in_window], F_analytical[in_window], label="analytical", xlabel="r (nm)", ylabel="F(r) (kJ mol^-1)", size=(400,300))
+Plots.plot!(grid_s[in_window], F_estimate[in_window], label="estimate")
+
+savefig(fig,"./docs/src/images/MetaDynamicsPotential.png")
+
+# Equilibrium distributions P(r) ∝ exp(-F(r) / kT), normalised over the window
+pdf(F) = (p = exp.(-F[in_window] ./ kT); p ./ (sum(p) * step(grid_s)))
+fig2 = Plots.plot(grid_s[in_window], pdf(F_analytical), label="analytical", xlabel="r (nm)", ylabel="P(r)", size=(400,300))
+Plots.plot!(grid_s[in_window], pdf(F_estimate), label="estimate")
+
+savefig(fig2,"./docs/src/images/MetaDynamicsHistogram.png")
+```
+
+![Recovered vs. analytical free energy](images/MetaDynamicsPotential.png)
+![Recovered vs. analytical equilibrium distribution](images/MetaDynamicsHistogram.png)
+
+### Reweighting
+
+Since the bias changes during the run, samples can't simply be reweighted by the final bias. A [`MetadynamicsLogger`](@ref) records, at each deposit, the CV value $s$, the bias $V(s, t)$ it was sampled under and the [offset](https://doi.org/10.1021/jp504920s) $c(t)$. The frames then get the weights $w \propto \exp\left((V(s, t) - c(t)) / k_B T\right)$, which reweight any observable of those frames to the unbiased ensemble.
+
+The records can be used in two equivalent ways. Either use the live logger of the bias straight after the run:
+
+```julia
+logger = bias.logger
+```
+
+or, since the example passed a `filepath`, read the records back from `metadynamics.txt`, e.g. in a later session, with [`Molly.read_metadynamics_logger`](@ref):
+
+```julia
+logger = Molly.read_metadynamics_logger("metadynamics.txt")
+```
+
+Both give the same weights:
+
+```julia
+w = Molly.metadynamics_weights(logger)
+r_s = values(logger)
+mean_r = sum(w .* r_s) # Unbiased average distance
+```
+
+The file has the columns step, CV values, bias, offset, hill height and log weight, and is written in batches, so call `flush(bias.logger)` after the run to write the last one. The frames are the deposit steps, so a smaller `n_steps` gives more of them. [`Molly.metadynamics_log_weights`](@ref) gives the unnormalised log weights. The memory must be a [`GridHills`](@ref), or `cv_points` (a uniform grid of CV values) must be passed to integrate $c(t)$ over.
+
+```@docs
+Base.flush(::MetadynamicsLogger)
+```
+
+Metadynamics with [`ReplicaExchangeMD`](@ref) or [`MetropolisMonteCarlo`](@ref) isn't supported yet.
+
+For full worked examples with plots -- comparing tempered against untempered sampling, and the histogram of the well-tempered run reweighted with these weights against the analytical equilibrium distribution -- see `scripts/metadynamics_bond_recovery_plots.jl`.

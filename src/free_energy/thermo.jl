@@ -24,6 +24,7 @@ mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     # State cache for master energy to prevent redundant calculations
     # across multiple single-state queries
     cached_coords::Any
+    cached_boundary::Any
     cached_master_pe::T
 end
 
@@ -47,13 +48,13 @@ end
 
 keep_master_general_inter(inter, λ_atoms) = !(inter isa AbstractEwald && effective_charges_vary(inter, λ_atoms))
 
-function ewald_exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
-    inter_list.data isa EwaldExclusionData || return false
+function exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
+    inter_list.data isa Union{EwaldExclusionData, CoulombReactionFieldExclusionData} || return false
 
     inds = unique!(vcat(Int.(from_device(inter_list.is)), Int.(from_device(inter_list.js))))
     isempty(inds) && return false
 
-    T = typeof(inter_list.data.error_tol)
+    T = float(typeof(ustrip(inter_list.data.dist_cutoff)))
     scheduler = inter_list.data.scheduler
     ref_atoms = from_device(first(λ_atoms))
     ref_charges = [effective_charge(scheduler, ref_atoms[i], Val(T)) for i in inds]
@@ -68,7 +69,7 @@ end
 
 keep_master_specific_inter(inter_list, λ_atoms) = true
 keep_master_specific_inter(inter_list::InteractionList2Atoms, λ_atoms) =
-    !ewald_exclusion_charges_vary(inter_list, λ_atoms)
+    !exclusion_charges_vary(inter_list, λ_atoms)
 
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
@@ -152,6 +153,16 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     master_gils    = intersect(all_gils...)
     master_pils    = intersect(all_pils...)
 
+    # The shared pairwise interactions are split between the master system and the λ systems by
+    #   the eligible matrices, which need a neighbor finder; without one every system sees every
+    #   pair, and the shared pairwise energy would be counted twice
+    if isnothing(ref_nfinder) && !isempty(master_pils)
+        throw(ArgumentError("the thermodynamic states share pairwise interactions but have no " *
+                "neighbor finder, which is needed to split the pairs between the energy shared " *
+                "by all states and the energy of each state; without one the shared pairwise " *
+                "energy would be counted twice, so give the systems a neighbor finder"))
+    end
+
     filter!(inter -> keep_master_specific_inter(inter, λ_atoms), master_sils_2a)
     filter!(inter -> keep_master_general_inter(inter, λ_atoms), master_gils)
 
@@ -220,6 +231,7 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         λ_atoms,
         hamiltonians,
         nothing,
+        nothing,
         initial_pe
     )
 end
@@ -283,8 +295,8 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             n_steps = 1,
             strictness = :nowarn,
         )
-    elseif ref_nfinder isa NoNeighborFinder
-        return NoNeighborFinder()
+    elseif isnothing(ref_nfinder)
+        return nothing
     else
         throw(ArgumentError("Unknown NeighborFinder type $(typeof(ref_nfinder))"))
     end
@@ -293,7 +305,8 @@ end
 function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
                                force_recompute::Bool=false,
                                n_threads::Integer=Threads.nthreads())
-    if force_recompute || isnothing(partition.cached_coords) || partition.cached_coords != coords
+    if force_recompute || isnothing(partition.cached_coords) ||
+            partition.cached_boundary != boundary || partition.cached_coords != coords
         partition.master_sys.coords = coords
         partition.master_sys.boundary = boundary
         partition.cached_master_pe = potential_energy(partition.master_sys;
@@ -301,6 +314,7 @@ function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
         # Forced multi-state calls already know they need a fresh master energy. Only the
         # single-state cached path keeps a coordinate snapshot for repeated same-frame queries.
         partition.cached_coords = force_recompute ? nothing : copy(coords)
+        partition.cached_boundary = boundary
     end
     return partition.cached_master_pe
 end
@@ -317,8 +331,8 @@ end
 #                  force_recompute::Bool=false)
 #
 # Calculates the total potential energy for a specific thermodynamic state.
-# Caches the `master_sys` energy. If `coords` is identical to `cached_coords`,
-# the `master_sys` energy is not recomputed unless `force_recompute` is true.
+# Caches the `master_sys` energy. If `coords` and `boundary` are equal to the cached
+# values, the `master_sys` energy is not recomputed unless `force_recompute` is true.
 function evaluate_energy!(partition::AlchemicalPartition, coords, boundary, state_index::Int;
                           force_recompute::Bool=false,
                           n_threads::Integer=Threads.nthreads())

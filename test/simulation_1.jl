@@ -36,7 +36,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
             atoms=to_device(atoms, AT),
             coords=to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
@@ -56,6 +56,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
         )
 
         show(devnull, sys)
+        @test unit(scalar_pressure(sys)) == u"bar * nm"
 
         simulate!(sys, simulator, n_steps; n_threads=1)
 
@@ -102,7 +103,7 @@ end
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
                                  chain_id="B", element="Ar")
                         for i in 1:n_atoms],
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -262,7 +263,7 @@ end
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
                                  chain_id="B", element="Ar")
                         for i in 1:n_atoms],
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -313,7 +314,7 @@ end
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -376,7 +377,7 @@ end
             atoms=to_device(atoms, AT),
             coords=to_device(coords, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             loggers=(coords=CoordinatesLogger(100),),
         )
@@ -391,7 +392,7 @@ end
             atoms=to_device(atoms, AT),
             coords=to_device(coords_nan, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             strictness=:nowarn,
         )
@@ -399,7 +400,7 @@ end
             atoms=to_device(atoms, AT),
             coords=to_device(coords_nan, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             strictness=:error,
         )
@@ -460,7 +461,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
 
     # The narrowed list of atom fields read by the interactions on the CUDA path is only
     #   used when every entry is a field of the atom type, otherwise every field is used
-    inters_test = (LennardJones(use_neighbors=true), Coulomb(use_neighbors=true))
+    inters_test = (LennardJones(), Coulomb())
     fields_test = Molly.combine_atom_fields(inters_test)
     @test Molly.resolve_atom_fields(fields_test, typeof(make_ref_atom(1))) ==
           (:σ, :ϵ, :λ, :charge)
@@ -492,8 +493,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
             coords=to_device(copy(coords_start), AT),
             boundary=boundary,
             velocities=to_device(copy(vels_start), AT),
-            pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),
-                             Coulomb(cutoff=cutoff, use_neighbors=true)),
+            pairwise_inters=(LennardJones(cutoff=cutoff), Coulomb(cutoff=cutoff)),
             specific_inter_lists=(InteractionList2Atoms(
                 to_device(Int32.(collect(1:2:n_atoms)), AT),
                 to_device(Int32.(collect(2:2:n_atoms)), AT),
@@ -589,7 +589,7 @@ end
         coords=coords,
         velocities=velocities,
         boundary=boundary,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -609,7 +609,7 @@ end
             coords=CuArray(coords),
             velocities=CuArray(velocities),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
@@ -647,18 +647,18 @@ end
     G = 10.0u"kJ * mol * nm * g^-2"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true), LennardJones(use_neighbors=false),
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
-        SoftSphere(use_neighbors=true), SoftSphere(use_neighbors=false),
-        Mie(m=5, n=10, use_neighbors=true), Mie(m=5, n=10, use_neighbors=false),
-        Coulomb(use_neighbors=true), Coulomb(use_neighbors=false),
-        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
+        LennardJones(), LennardJones(use_neighbors=false),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
+        SoftSphere(), SoftSphere(use_neighbors=false),
+        Mie(m=5, n=10), Mie(m=5, n=10, use_neighbors=false),
+        Coulomb(), Coulomb(use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm"),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=false),
-        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true, solvent_dielectric=Inf),
-        Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm", solvent_dielectric=Inf),
+        Gravity(G=G), Gravity(G=G, use_neighbors=false),
     )
 
     for inter in pairwise_inter_types
@@ -666,7 +666,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         sys = System(
@@ -695,12 +695,12 @@ end
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps")
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true),
+        LennardJones(),
         LennardJones(use_neighbors=false),
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
     )
 
     for inter in pairwise_inter_types
@@ -708,7 +708,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.2u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         if run_cuda_tests
@@ -719,7 +719,7 @@ end
                     array_type=CuArray,
                 )
             else
-                neighbor_finder_gpu = NoNeighborFinder()
+                neighbor_finder_gpu = nothing
             end
         end
 
@@ -804,7 +804,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -824,7 +824,7 @@ end
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -882,7 +882,7 @@ end
             coords=to_device(copy(starting_coords), AT),
             boundary=boundary,
             atoms_data=atoms_data,
-            pairwise_inters=(LennardJones(),),
+            pairwise_inters=(LennardJones(use_neighbors=false),),
             loggers=(coords=CoordinatesLogger(100),),
         )
 
@@ -911,7 +911,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -948,7 +948,7 @@ end
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", temp; rng=Xoshiro(2024 + i))
                     for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),),
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -999,7 +999,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(),),
+        pairwise_inters=(LennardJones(use_neighbors=false),),
         loggers=(temp=TemperatureLogger(1),),
     )
 

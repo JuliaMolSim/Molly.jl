@@ -1,4 +1,18 @@
-@public LambdaScheduler,
+@public EnvRole,
+    CoreRole,
+    CoreIRole,
+    CoreDRole,
+    InsertRole,
+    DeleteRole,
+    DefaultSchedule,
+    LinearSchedule,
+    GROMACSABFESchedule,
+    GROMACSRBFESchedule,
+    OpenFESchedule,
+    NAMDSchedule,
+    QuartersSchedule,
+    EleScaledSchedule,
+    LambdaScheduler,
     DefaultLambdaScheduler,
     LinearLambdaScheduler,
     GROMACSLambdaABFEScheduler,
@@ -11,11 +25,40 @@
 # Alchemical Roles
 const AlchemicalRole = Int32
 
-const EnvRole::AlchemicalRole    = Int32(0)
-const CoreRole::AlchemicalRole   = Int32(1)
-const CoreIRole::AlchemicalRole  = Int32(2)
-const CoreDRole::AlchemicalRole  = Int32(3)
+"""
+Alchemical role of an atom that is not alchemical, e.g. solvent, protein or ions. Its interactions
+are never scaled. The default of [`Atom`](@ref).
+"""
+const EnvRole::AlchemicalRole = Int32(0)
+
+"""
+Alchemical role, in single topology, of a core atom present in both end states. Its parameters are
+interpolated between the A and B values.
+"""
+const CoreRole::AlchemicalRole = Int32(1)
+
+"""
+Alchemical role, in dual topology, of the copy of a core atom with the parameters of state B. Its
+interactions are scaled by `global_λ`.
+"""
+const CoreIRole::AlchemicalRole = Int32(2)
+
+"""
+Alchemical role, in dual topology, of the copy of a core atom with the parameters of state A. Its
+interactions are scaled by `1 - global_λ`.
+"""
+const CoreDRole::AlchemicalRole = Int32(3)
+
+"""
+Alchemical role of an atom only present in state B. It is coupled from `global_λ = 0` to `1`,
+following the scheduler.
+"""
 const InsertRole::AlchemicalRole = Int32(4)
+
+"""
+Alchemical role of an atom only present in state A, including the decoupled atoms of an absolute
+transformation. It is decoupled from `global_λ = 0` to `1`, following the scheduler.
+"""
 const DeleteRole::AlchemicalRole = Int32(5)
 
 # λ versions of bonded interactions, see `virial_lambda_factor`
@@ -30,17 +73,65 @@ struct ScaledSoftCore end
 # Lambda Schedulers
 # The schedule of a `LambdaScheduler` is one of these empty types, which the scaling functions
 #   dispatch on through the aliases below
+
+"""
+    DefaultSchedule()
+
+Schedule of a [`Molly.DefaultLambdaScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct DefaultSchedule end
+
+"""
+    LinearSchedule()
+
+Schedule of a [`Molly.LinearLambdaScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct LinearSchedule end
+
+"""
+    GROMACSABFESchedule()
+
+Schedule of a [`Molly.GROMACSLambdaABFEScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct GROMACSABFESchedule end
+
+"""
+    GROMACSRBFESchedule()
+
+Schedule of a [`Molly.GROMACSLambdaRBFEScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct GROMACSRBFESchedule end
+
+"""
+    OpenFESchedule()
+
+Schedule of a [`Molly.OpenFEScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct OpenFESchedule end
+
+"""
+    NAMDSchedule()
+
+Schedule of a [`Molly.NAMDLambdaScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct NAMDSchedule end
+
+"""
+    QuartersSchedule()
+
+Schedule of a [`Molly.QuartersLambdaScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct QuartersSchedule end
+
+"""
+    EleScaledSchedule()
+
+Schedule of a [`Molly.EleScaledLambdaScheduler`](@ref), passed to [`Molly.LambdaScheduler`](@ref).
+"""
 struct EleScaledSchedule end
 
 """
-    LambdaScheduler(schedule=DefaultSchedule(); dual=true, LJindividual=false,
+    LambdaScheduler(schedule=Molly.DefaultSchedule(); dual=true, LJindividual=false,
                     LJspecial=false, Cindividual=false, Cspecial=false, intraLJ=false,
                     Tscaled=true)
 
@@ -324,8 +415,8 @@ end
 # interpolates their parameters but only ever with a linear bonded λ, and OpenFE supports neither.
 function no_single_topology(inter)
     throw(ArgumentError("$(typeof(inter).name.name) has no single topology version, so its " *
-                        "parameters cannot be interpolated between the end states; use a scheduler " *
-                        "with dual=true for this system"))
+                        "parameters cannot be interpolated between the end states; use a " *
+                        "scheduler with dual=true for this system"))
 end
 
 to_lambda_function_single(interA, interB; kwargs...) =

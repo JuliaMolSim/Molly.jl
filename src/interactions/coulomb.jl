@@ -1,9 +1,11 @@
 export
     Coulomb,
+    SetupCoulomb,
     CoulombSoftCoreBeutler,
     CoulombSoftCoreGapsys,
     CoulombReactionField,
     SetupCoulombReactionField,
+    CoulombReactionFieldExclusion,
     CoulombSoftCoreBeutlerReactionField,
     CoulombSoftCoreGapsysReactionField,
     CoulombEwald,
@@ -11,10 +13,14 @@ export
     CoulombSoftCoreGapsysEwald,
     Yukawa
 
-@public CoulombScaled,
+@public coulomb_const,
+    CoulombScaled,
     CoulombReactionFieldScaled,
+    CoulombReactionFieldExclusionData,
+    reaction_field_exclusions,
     CoulombEwaldScaled
 
+"The Coulomb constant, 1 / 4πϵ0, where ϵ0 is the vacuum permittivity."
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
 @doc raw"""
@@ -31,7 +37,7 @@ The interaction between special pairs is scaled by `weight_special`.
 """
 @kwdef struct Coulomb{C, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     weight_special::W = 1
     coulomb_const::T = coulomb_const
 end
@@ -110,6 +116,32 @@ function pairwise_pe(::Coulomb, r, (ke, qi, qj))
     return (ke * qi * qj) * inv(r)
 end
 
+"""
+    SetupCoulomb(; cutoff, coulomb_const=coulomb_const)
+
+Set up the [`Coulomb`](@ref) electrostatic interaction with the cutoff `cutoff`, for example
+[`DistanceCutoff`](@ref), and the Coulomb constant `coulomb_const`.
+
+Passed to the [`System`](@ref) constructor from files, where it creates a
+[`Coulomb`](@ref) pairwise interaction.
+Passing a cutoff as the non-bonded method is the same as passing `SetupCoulomb` with that
+cutoff and the default Coulomb constant.
+"""
+@kwdef struct SetupCoulomb{CU, C}
+    cutoff::CU
+    coulomb_const::C = coulomb_const
+end
+
+function setup_coulomb_pairwise(sc::SetupCoulomb, dist_cutoff, weight_special, use_neighbors,
+                                units, T)
+    return Coulomb(
+        cutoff=sc.cutoff,
+        use_neighbors=use_neighbors,
+        weight_special=weight_special,
+        coulomb_const=convert_setup_quantity(sc.coulomb_const, units, T),
+    )
+end
+
 @doc raw"""
     CoulombScaled(; cutoff, use_neighbors, λ_mixing, scheduler, weight_special,
                   coulomb_const)
@@ -130,7 +162,7 @@ In single topology the charges are interpolated between the end states.
 """
 @kwdef struct CoulombScaled{C, LM, SCH, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
     weight_special::W = 1
@@ -141,7 +173,7 @@ use_neighbors(inter::CoulombScaled) = inter.use_neighbors
 
 required_atom_fields(::CoulombScaled) = (:charge, :λ, :alch_role)
 
-function Base.zero(coul::CoulombScaled{C, SCH, W, T}) where {C, SCH, W, T}
+function Base.zero(coul::CoulombScaled{C, LM, SCH, W, T}) where {C, LM, SCH, W, T}
     return CoulombScaled(
         coul.cutoff,
         coul.use_neighbors,
@@ -341,7 +373,7 @@ struct CoulombSoftCoreBeutler{C, A, S, E, LM, SCH, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=false,
+function CoulombSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=true,
                                     σ_mixing=LorentzMixing(), ϵ_mixing=GeometricMixing(), 
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
@@ -570,7 +602,7 @@ struct CoulombSoftCoreGapsys{C, A, S, LM, SCH, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-function CoulombSoftCoreGapsys(; cutoff=NoCutoff(), α=0.3, σQ=1.0u"nm", use_neighbors=false,
+function CoulombSoftCoreGapsys(; cutoff=NoCutoff(), α=0.3, σQ=1.0u"nm", use_neighbors=true,
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
                                     coulomb_const=coulomb_const)
@@ -784,6 +816,8 @@ end
     return krf, crf
 end
 
+abstract type AbstractReactionField <: PairwiseInteraction end
+
 @doc raw"""
     CoulombReactionField(; dist_cutoff, solvent_dielectric, solute_dielectric, use_neighbors,
                          weight_special, coulomb_const)
@@ -817,7 +851,7 @@ Special (1-4) pairs use the plain Coulomb interaction without the reaction field
 [`SetupCoulombReactionField`](@ref) provides reaction field parameters when setting up a
 system from a file.
 """
-struct CoulombReactionField{D, S, E, W, T} <: PairwiseInteraction
+struct CoulombReactionField{D, S, E, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S
     solute_dielectric::E
@@ -829,7 +863,7 @@ end
 function CoulombReactionField(; dist_cutoff,
                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                               solute_dielectric=one(solvent_dielectric),
-                              use_neighbors=false, weight_special=1, coulomb_const=coulomb_const)
+                              use_neighbors=true, weight_special=1, coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
     return CoulombReactionField(dist_cutoff, solvent_dielectric, solute_dielectric,
                                 use_neighbors, weight_special, coulomb_const)
@@ -928,25 +962,32 @@ end
 end
 
 """
-    SetupCoulombReactionField(; solvent_dielectric, solute_dielectric, coulomb_const)
+    SetupCoulombReactionField(; solvent_dielectric, solute_dielectric, coulomb_const,
+                              exclusion_correction=false)
 
 Set up the Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
 
 Passed to the [`System`](@ref) constructor from files, where it creates a
 [`CoulombReactionField`](@ref) pairwise interaction.
+If `exclusion_correction` is `true`, the reaction field is also applied to the excluded and
+special pairs and to each atom with itself, using the [`CoulombReactionFieldExclusion`](@ref)
+specific interaction, which requires a neighbor finder.
 """
 struct SetupCoulombReactionField{T, E, C}
     solvent_dielectric::T
     solute_dielectric::E
     coulomb_const::C
+    exclusion_correction::Bool
 end
 
 function SetupCoulombReactionField(; solvent_dielectric=crf_solvent_dielectric,
                                    solute_dielectric=one(crf_solvent_dielectric),
-                                   coulomb_const=coulomb_const)
+                                   coulomb_const=coulomb_const,
+                                   exclusion_correction::Bool=false)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
-    return SetupCoulombReactionField(solvent_dielectric, solute_dielectric, coulomb_const)
+    return SetupCoulombReactionField(solvent_dielectric, solute_dielectric, coulomb_const,
+                                     exclusion_correction)
 end
 
 function setup_coulomb_pairwise(scrf::SetupCoulombReactionField, dist_cutoff,
@@ -977,7 +1018,7 @@ the electrostatic coupling of the pair, which `scheduler`, a
 and their alchemical roles.
 In single topology the charges are interpolated between the end states.
 """
-struct CoulombReactionFieldScaled{D, S, E, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombReactionFieldScaled{D, S, E, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S
     solute_dielectric::E
@@ -991,7 +1032,7 @@ end
 function CoulombReactionFieldScaled(; dist_cutoff,
                                     solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                     solute_dielectric=one(solvent_dielectric),
-                                    use_neighbors=false, λ_mixing=MinimumMixing(),
+                                    use_neighbors=true, λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(), weight_special=1,
                                     coulomb_const=coulomb_const)
     check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
@@ -1138,7 +1179,7 @@ At ``\lambda = 0`` the interaction is zero.
 Special (1-4) pairs disable the reaction field correction and use plain soft-core Coulomb
 scaled by `weight_special` and divided by `solute_dielectric`.
 """
-struct CoulombSoftCoreBeutlerReactionField{D, S, E, A, SM, EM, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombSoftCoreBeutlerReactionField{D, S, E, A, SM, EM, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S 
     solute_dielectric::E
@@ -1155,7 +1196,7 @@ end
 function CoulombSoftCoreBeutlerReactionField(; dist_cutoff,
                                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
-                                              α=0.3, use_neighbors=false, σ_mixing=LorentzMixing(),
+                                              α=0.3, use_neighbors=true, σ_mixing=LorentzMixing(),
                                               ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                               scheduler=DefaultLambdaScheduler(), weight_special=1,
                                               coulomb_const=coulomb_const)
@@ -1378,7 +1419,7 @@ At ``\lambda = 0`` the interaction is zero.
 Special (1-4) pairs disable the reaction field correction and use the standard Gapsys
 polynomial scaled by `weight_special` and divided by `solute_dielectric`.
 """
-struct CoulombSoftCoreGapsysReactionField{D, S, E, A, SQ, LM, SCH, W, T} <: PairwiseInteraction
+struct CoulombSoftCoreGapsysReactionField{D, S, E, A, SQ, LM, SCH, W, T} <: AbstractReactionField
     dist_cutoff::D
     solvent_dielectric::S 
     solute_dielectric::E
@@ -1394,7 +1435,7 @@ end
 function CoulombSoftCoreGapsysReactionField(; dist_cutoff,
                                               solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
                                               solute_dielectric=one(solvent_dielectric),
-                                              α=0.3, σQ=1.0u"nm", use_neighbors=false,
+                                              α=0.3, σQ=1.0u"nm", use_neighbors=true,
                                               λ_mixing=MinimumMixing(),
                                               scheduler=DefaultLambdaScheduler(), weight_special=1,
                                               coulomb_const=coulomb_const)
@@ -1592,7 +1633,222 @@ end
 end
 
 @doc raw"""
-    CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false, weight_special=1,
+    CoulombReactionFieldExclusion(; self=false)
+
+The reaction field correction for an excluded atom pair, or for an atom with itself if
+`self` is `true`.
+
+The dielectric continuum beyond the cutoff responds to all charges within the cutoff,
+including those of excluded pairs, so the reaction field is applied to excluded pairs and to
+each atom with itself, without the direct Coulomb term.
+For an excluded pair within the cutoff the potential energy is
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 \varepsilon_\mathrm{r}} \left( k_\mathrm{rf} r_{ij}^2 - c_\mathrm{rf} \right)
+```
+and for each atom it is
+```math
+V_\mathrm{self} = -\frac{q_i^2}{4 \pi \varepsilon_0 \varepsilon_\mathrm{r}} \frac{c_\mathrm{rf}}{2}
+```
+which gives no force.
+``k_\mathrm{rf}`` and ``c_\mathrm{rf}`` are as for [`CoulombReactionField`](@ref).
+Excluded pairs beyond the cutoff contribute nothing, so the energy of an excluded pair jumps
+by ``q_i q_j / (4 \pi \varepsilon_0 \varepsilon_\mathrm{r} r_\mathrm{c})`` at the cutoff.
+This matches GROMACS, whereas OpenMM does not apply the correction.
+
+Since the properties of the interaction are the same for all pairs, they are stored once
+in the `data` field of the [`InteractionList2Atoms`](@ref) with
+[`Molly.CoulombReactionFieldExclusionData`](@ref).
+[`Molly.reaction_field_exclusions`](@ref) sets up the list of excluded pairs and atoms.
+"""
+@kwdef struct CoulombReactionFieldExclusion
+    self::Bool = false
+end
+
+Base.zero(e::CoulombReactionFieldExclusion) = e
+Base.:+(e1::CoulombReactionFieldExclusion, ::CoulombReactionFieldExclusion) = e1
+
+"""
+    CoulombReactionFieldExclusionData(; dist_cutoff, solvent_dielectric, solute_dielectric,
+                                      coulomb_const, scheduler)
+    CoulombReactionFieldExclusionData(inter; scheduler)
+
+The parameters of the [`CoulombReactionFieldExclusion`](@ref) interactions, stored in the
+`data` field of their [`InteractionList2Atoms`](@ref).
+
+The parameters should match the reaction field pairwise interaction, `inter`, from which they
+can be taken.
+`scheduler`, a [`Molly.LambdaScheduler`](@ref), gives the charges of alchemical atoms as for
+[`EwaldExclusion`](@ref) and defaults to that of `inter`, if any.
+"""
+struct CoulombReactionFieldExclusionData{D, S, E, C, SCH}
+    dist_cutoff::D
+    solvent_dielectric::S
+    solute_dielectric::E
+    coulomb_const::C
+    scheduler::SCH
+end
+
+function CoulombReactionFieldExclusionData(; dist_cutoff,
+                                           solvent_dielectric=float(typeof(ustrip(dist_cutoff)))(crf_solvent_dielectric),
+                                           solute_dielectric=one(solvent_dielectric),
+                                           coulomb_const=coulomb_const,
+                                           scheduler=DefaultLambdaScheduler())
+    check_reaction_field_dielectrics(solvent_dielectric, solute_dielectric)
+    return CoulombReactionFieldExclusionData(dist_cutoff, solvent_dielectric, solute_dielectric,
+                                             coulomb_const, scheduler)
+end
+
+function CoulombReactionFieldExclusionData(inter::AbstractReactionField;
+                                           scheduler=(hasproperty(inter, :scheduler) ?
+                                                inter.scheduler : DefaultLambdaScheduler()))
+    return CoulombReactionFieldExclusionData(
+        dist_cutoff=inter.dist_cutoff,
+        solvent_dielectric=inter.solvent_dielectric,
+        solute_dielectric=inter.solute_dielectric,
+        coulomb_const=inter.coulomb_const,
+        scheduler=scheduler,
+    )
+end
+
+function Base.zero(d::CoulombReactionFieldExclusionData{D, S, E, C}) where {D, S, E, C}
+    return CoulombReactionFieldExclusionData(zero(D), zero(S), zero(E), zero(C), d.scheduler)
+end
+
+function Base.:+(d1::CoulombReactionFieldExclusionData, d2::CoulombReactionFieldExclusionData)
+    return CoulombReactionFieldExclusionData(
+        d1.dist_cutoff + d2.dist_cutoff,
+        d1.solvent_dielectric + d2.solvent_dielectric,
+        d1.solute_dielectric + d2.solute_dielectric,
+        d1.coulomb_const + d2.coulomb_const,
+        d1.scheduler,
+    )
+end
+
+to_device(x::CoulombReactionFieldExclusionData, ::Type{AT}) where AT = x
+
+# The same charge product as the Ewald exclusions
+@inline function reaction_field_exclusion_qq(data, atom_i, atom_j)
+    T = float(typeof(ustrip(data.dist_cutoff)))
+    return ewald_pair_qq(data.scheduler, atom_i, atom_j, Val(T))
+end
+
+@inline function force(inter::CoulombReactionFieldExclusion, coord_i, coord_j, boundary,
+                       atom_i, atom_j, force_units, velocities_i, velocities_j, step_n,
+                       data::CoulombReactionFieldExclusionData)
+    vec_ij = vector(coord_i, coord_j, boundary)
+    ke = data.coulomb_const / data.solute_dielectric
+    if inter.self
+        F0 = zero(vec_ij) * (ke / data.dist_cutoff^3)
+        return SpecificForce2Atoms(F0, F0)
+    end
+    r2 = sum(abs2, vec_ij)
+    krf, _ = reaction_field_constants(data.dist_cutoff, data.solvent_dielectric,
+                                      data.solute_dielectric)
+    qq = reaction_field_exclusion_qq(data, atom_i, atom_j)
+    F = 2 * ke * qq * krf * (r2 <= data.dist_cutoff^2) * vec_ij
+    return SpecificForce2Atoms(F, -F)
+end
+
+@inline function potential_energy(inter::CoulombReactionFieldExclusion, coord_i, coord_j,
+                                  boundary, atom_i, atom_j, energy_units, velocities_i,
+                                  velocities_j, step_n, data::CoulombReactionFieldExclusionData)
+    vec_ij = vector(coord_i, coord_j, boundary)
+    r2 = sum(abs2, vec_ij)
+    ke = data.coulomb_const / data.solute_dielectric
+    krf, crf = reaction_field_constants(data.dist_cutoff, data.solvent_dielectric,
+                                        data.solute_dielectric)
+    qq = reaction_field_exclusion_qq(data, atom_i, atom_j)
+    pe = ke * qq * (krf * r2 - crf) * (r2 <= data.dist_cutoff^2)
+    return inter.self ? pe / 2 : pe
+end
+
+"""
+    reaction_field_exclusions(inter, eligible, special=nothing; self=true, scheduler,
+                              array_type=Array)
+    reaction_field_exclusions(inter, n_atoms, excluded_pairs; self=true, scheduler,
+                              array_type=Array)
+
+Set up an [`InteractionList2Atoms`](@ref) of [`CoulombReactionFieldExclusion`](@ref)
+interactions that applies the reaction field correction to excluded pairs and,
+if `self` is `true`, to each atom with itself.
+
+`inter` is the reaction field pairwise interaction of the system, from which the parameters
+are taken with [`Molly.CoulombReactionFieldExclusionData`](@ref).
+It must have `use_neighbors=true`, since otherwise the excluded pairs are not removed from
+the pairwise interaction.
+The excluded pairs are either given as `excluded_pairs`, a list of atom index pairs, or are
+the pairs that are not `eligible` or are `special`, the matrices given to the neighbor
+finder.
+Special (1-4) pairs get the correction with their full charges, whereas
+`weight_special` only scales their direct Coulomb interaction.
+"""
+function reaction_field_exclusions(inter::AbstractReactionField, eligible, special=nothing;
+                                   kwargs...)
+    return reaction_field_exclusions(inter, size(eligible, 1),
+                                     find_excluded_pairs(eligible, special); kwargs...)
+end
+
+function reaction_field_exclusions(inter::AbstractReactionField, n_atoms::Integer,
+                                   excluded_pairs; self::Bool=true, array_type=Array,
+                                   kwargs...)
+    use_neighbors(inter) || throw(ArgumentError("the reaction field interaction must use " *
+                    "the neighbor list, otherwise excluded pairs are counted twice"))
+    data = CoulombReactionFieldExclusionData(inter; kwargs...)
+    return reaction_field_exclusions(data, n_atoms, excluded_pairs, self, array_type)
+end
+
+function reaction_field_exclusions(data::CoulombReactionFieldExclusionData, n_atoms,
+                                   excluded_pairs, self, array_type)
+    pairs = normalize_pairs(excluded_pairs; n_atoms=n_atoms)
+    self_inds = (self ? (1:n_atoms) : (1:0))
+    is = Int32[[p[1] for p in pairs]; self_inds]
+    js = Int32[[p[2] for p in pairs]; self_inds]
+    inters = [fill(CoulombReactionFieldExclusion(false), length(pairs));
+              fill(CoulombReactionFieldExclusion(true), length(self_inds))]
+    return InteractionList2Atoms(
+        to_device(is, array_type),
+        to_device(js, array_type),
+        to_device(inters, array_type),
+        fill("", length(is)),
+        data,
+    )
+end
+
+has_self_exclusions(inter_list) = any(inter -> inter.self, from_device(inter_list.inters))
+
+# The exclusion data hold a copy of the parameters, which must agree with the pairwise
+#   reaction field
+function check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
+    for il in values(specific_inter_lists)
+        il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData || continue
+        for inter in values(pairwise_inters)
+            inter isa AbstractReactionField || continue
+            for field in (:dist_cutoff, :solvent_dielectric, :solute_dielectric, :coulomb_const)
+                if !isapprox(getfield(il.data, field), getfield(inter, field))
+                    throw(ArgumentError("the $field of the reaction field exclusions, " *
+                            "$(getfield(il.data, field)), differs from that of the pairwise " *
+                            "reaction field, $(getfield(inter, field))"))
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+@inline function inject_list_data(il::InteractionList2Atoms{<:Any, <:Any,
+                                                           <:CoulombReactionFieldExclusionData},
+                                  pis)
+    rfs = filter(inter -> inter isa AbstractReactionField, pis)
+    isempty(rfs) && return il
+    inter = first(rfs)
+    data = CoulombReactionFieldExclusionData(inter.dist_cutoff, inter.solvent_dielectric,
+                                             inter.solute_dielectric, inter.coulomb_const,
+                                             il.data.scheduler)
+    return InteractionList2Atoms(il.is, il.js, il.inters, il.types, data)
+end
+
+@doc raw"""
+    CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true, weight_special=1,
                  coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short range Ewald electrostatic interaction between two atoms.
@@ -1600,21 +1856,23 @@ The short range Ewald electrostatic interaction between two atoms.
 Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
 which provide the long-range term, and the [`EwaldExclusion`](@ref) specific
 interaction, which provides the exclusions for bonded atoms.
-`dist_cutoff` and `error_tol` should match these interactions.
+`dist_cutoff`, `error_tol`, `ϵr` and `coulomb_const` should match these interactions.
 
 The potential energy is defined as
 ```math
-V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0} \frac{\mathrm{erfc}(\alpha r_{ij})}{r_{ij}}, \quad
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 \varepsilon_r} \frac{\mathrm{erfc}(\alpha r_{ij})}{r_{ij}}, \quad
 \alpha = \frac{\sqrt{-\ln(2 \epsilon_{\mathrm{tol}})}}{r_c}
 ```
 for ``r_{ij} \le r_c``, where ``r_c`` is `dist_cutoff`, the cutoff distance for short range
-interactions, and ``\epsilon_{\mathrm{tol}}`` is `error_tol`.
+interactions, ``\epsilon_{\mathrm{tol}}`` is `error_tol` and ``\varepsilon_r`` is `ϵr`, the
+relative permittivity.
 Special pairs use the undamped Coulomb interaction scaled by `weight_special`.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
 """
-struct CoulombEwald{T, D, W, C, A} <: PairwiseInteraction
+struct CoulombEwald{T, D, E, W, C, A} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::T
+    ϵr::E
     use_neighbors::Bool
     weight_special::W
     coulomb_const::C
@@ -1622,21 +1880,23 @@ struct CoulombEwald{T, D, W, C, A} <: PairwiseInteraction
     approximate_erfc::Bool
 end
 
-function CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+function CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true,
                       weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
     α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
-    return CoulombEwald(dist_cutoff, error_tol, use_neighbors, weight_special, coulomb_const,
-                        α_ewald, approximate_erfc)
+    ϵr_T = typeof(ustrip(dist_cutoff))(ϵr)
+    return CoulombEwald(dist_cutoff, error_tol, ϵr_T, use_neighbors, weight_special,
+                        coulomb_const, α_ewald, approximate_erfc)
 end
 
 use_neighbors(inter::CoulombEwald) = inter.use_neighbors
 
 required_atom_fields(::CoulombEwald) = (:charge,)
 
-function Base.zero(coul::CoulombEwald{T, D, W, C, A}) where {T, D, W, C, A}
+function Base.zero(coul::CoulombEwald{T, D, E, W, C, A}) where {T, D, E, W, C, A}
     return CoulombEwald(
         zero(D),
         zero(T),
+        zero(E),
         coul.use_neighbors,
         zero(W),
         zero(C),
@@ -1649,6 +1909,7 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
     return CoulombEwald(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.error_tol + c2.error_tol,
+        c1.ϵr + c2.ϵr,
         c1.use_neighbors,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
@@ -1681,7 +1942,7 @@ end
                        special=false,
                        args...) where T
     r2 = sum(abs2, dr)
-    ke, α_ewald = inter.coulomb_const, inter.α_ewald
+    ke, α_ewald = inter.coulomb_const / inter.ϵr, inter.α_ewald
     qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
@@ -1706,7 +1967,7 @@ end
                                   special=false,
                                   args...)
     r2 = sum(abs2, dr)
-    ke, α_ewald = inter.coulomb_const, inter.α_ewald
+    ke, α_ewald = inter.coulomb_const / inter.ϵr, inter.α_ewald
     qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
@@ -1722,7 +1983,7 @@ end
 end
 
 @doc raw"""
-    CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+    CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true,
                        λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler(),
                        weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
 
@@ -1749,7 +2010,7 @@ struct CoulombEwaldScaled{T, D, LM, SCH, W, C, A} <: PairwiseInteraction
     approximate_erfc::Bool
 end
 
-function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=false, λ_mixing=MinimumMixing(),
+function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true, λ_mixing=MinimumMixing(),
                             scheduler=DefaultLambdaScheduler(), weight_special=1,
                             coulomb_const=coulomb_const, approximate_erfc=true)
     α_ewald = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
@@ -1761,7 +2022,7 @@ use_neighbors(inter::CoulombEwaldScaled) = inter.use_neighbors
 
 required_atom_fields(::CoulombEwaldScaled) = (:charge, :λ, :alch_role)
 
-function Base.zero(coul::CoulombEwaldScaled{T, D, SCH, W, C, A}) where {T, D, SCH, W, C, A}
+function Base.zero(coul::CoulombEwaldScaled{T, D, LM, SCH, W, C, A}) where {T, D, LM, SCH, W, C, A}
     return CoulombEwaldScaled(
         zero(D),
         zero(T),
@@ -1795,13 +2056,14 @@ parameter_fields(::Type{<:CoulombEwaldScaled}) =
      (:coulomb_const, "coulomb_const"))
 
 
-function to_lambda_function(inter::CoulombEwald, ::ScaledSoftCore; α=0.3, 
+# The λ versions of CoulombEwald have no ϵr, so it is folded into the Coulomb constant
+function to_lambda_function(inter::CoulombEwald, ::ScaledSoftCore; α=0.3,
                                 λ_mixing=MinimumMixing(), scheduler=DefaultLambdaScheduler(), 
                                 float_type=Float32, args...)
     return CoulombEwaldScaled(;dist_cutoff=inter.dist_cutoff, error_tol=inter.error_tol, 
                                 use_neighbors=inter.use_neighbors, λ_mixing=λ_mixing, 
                                 scheduler=scheduler, weight_special=inter.weight_special, 
-                                coulomb_const=inter.coulomb_const,
+                                coulomb_const=inter.coulomb_const / inter.ϵr,
                                 approximate_erfc=inter.approximate_erfc)
 end
 
@@ -1903,7 +2165,7 @@ end
 
 @doc raw"""
     CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                use_neighbors=false, σ_mixing=LorentzMixing(),
+                                use_neighbors=true, σ_mixing=LorentzMixing(),
                                 ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                 scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                 coulomb_const=coulomb_const, approximate_erfc=true)
@@ -1935,7 +2197,7 @@ struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA} <: Pairw
 end
 
 function CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                     use_neighbors=false, σ_mixing=LorentzMixing(),
+                                     use_neighbors=true, σ_mixing=LorentzMixing(),
                                      ϵ_mixing=GeometricMixing(), λ_mixing=MinimumMixing(),
                                      scheduler=DefaultLambdaScheduler(), weight_special=1,
                                      coulomb_const=coulomb_const, approximate_erfc=true)
@@ -2008,7 +2270,7 @@ function to_lambda_function(inter::CoulombEwald, ::BeutlerSoftCore; α=0.3, σ_m
     return CoulombSoftCoreBeutlerEwald(dist_cutoff=inter.dist_cutoff, error_tol=inter.error_tol, α=float_type(α), 
                                             use_neighbors=inter.use_neighbors, σ_mixing=σ_mixing, 
                                             ϵ_mixing=ϵ_mixing, λ_mixing=λ_mixing, scheduler=scheduler, 
-                                            weight_special=inter.weight_special, coulomb_const=inter.coulomb_const,
+                                            weight_special=inter.weight_special, coulomb_const=inter.coulomb_const / inter.ϵr,
                                             approximate_erfc=inter.approximate_erfc)
 end
 
@@ -2105,7 +2367,7 @@ end
 
 @doc raw"""
     CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3, σQ=1.0u"nm",
-                               use_neighbors=false, λ_mixing=MinimumMixing(),
+                               use_neighbors=true, λ_mixing=MinimumMixing(),
                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1,
                                coulomb_const=coulomb_const, approximate_erfc=true)
 
@@ -2135,7 +2397,7 @@ struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA} <: PairwiseIn
 end
 
 function CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
-                                    σQ=1.0u"nm", use_neighbors=false,
+                                    σQ=1.0u"nm", use_neighbors=true,
                                     λ_mixing=MinimumMixing(),
                                     scheduler=DefaultLambdaScheduler(),
                                     weight_special=1, coulomb_const=coulomb_const,
@@ -2205,7 +2467,7 @@ function to_lambda_function(inter::CoulombEwald, ::GapsysSoftCore; α=0.3, σQ=1
     return CoulombSoftCoreGapsysEwald(dist_cutoff=inter.dist_cutoff, error_tol=inter.error_tol, α=float_type(α), 
                                         σQ=softcore_σQ(σQ, inter.coulomb_const, float_type), use_neighbors=inter.use_neighbors, 
                                         λ_mixing=λ_mixing, scheduler=scheduler, 
-                                        weight_special=inter.weight_special, coulomb_const=inter.coulomb_const,
+                                        weight_special=inter.weight_special, coulomb_const=inter.coulomb_const / inter.ϵr,
                                         approximate_erfc=inter.approximate_erfc)
 end
 
@@ -2332,7 +2594,7 @@ where ``\kappa`` is `kappa`, the inverse of the screening length.
 """
 @kwdef struct Yukawa{C, W, T, K} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     weight_special::W = 1
     coulomb_const::T = coulomb_const
     kappa::K = 1.0*u"nm^-1"

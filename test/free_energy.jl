@@ -20,7 +20,8 @@ function end_state_map(mapping, core_mapAB, n_end, dual, state)
 end
 
 function real_terms(il, real)
-    eltype(il.inters) <: Union{EwaldExclusion, Molly.LennardJones14λ} && return il
+    eltype(il.inters) <: Union{EwaldExclusion, CoulombReactionFieldExclusion,
+                               Molly.LennardJones14λ} && return il
     atom_fields = fieldnames(typeof(il))[1:(end - 3)]
     keep = [all(real[getfield(il, f)[n]] for f in atom_fields) for n in eachindex(il.inters)]
     return typeof(il).name.wrapper((getfield(il, f)[keep] for f in atom_fields)...,
@@ -318,7 +319,8 @@ end
     is_disp(g) = g isa LJDispersionCorrection || g isa Molly.LJDispersionCorrectionλ
     without_disp(s) = Tuple(g for g in s.general_inters if !is_disp(g))
 
-    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true))
         sys = System(joinpath(data_dir, "benzene_solv.pdb"), ff_solv; nonbonded_method=nonbonded,
                      dist_cutoff=1.0u"nm", center_coords=false)
         E_ref = potential_energy(sys; general_inters=without_disp(sys))
@@ -383,7 +385,8 @@ end
                      center_coords=false)
         return AbsoluteFESystem(sys, 0.5, collect(1:12); Csoftcore=Csoftcore)
     end
-    for nonbonded in (SetupPME(), SetupCoulombReactionField()), Csoftcore in softcores
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true)), Csoftcore in softcores
         E_units = potential_energy(benzene_λ(true, nonbonded, Csoftcore); n_threads=1)
         E_nounits = potential_energy(benzene_λ(false, nonbonded, Csoftcore); n_threads=1)
         @test E_nounits ≈ ustrip(u"kJ * mol^-1", E_units) rtol=1e-12
@@ -397,7 +400,7 @@ end
                              custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
     for nonbonded in (SetupPME(), SetupCoulombReactionField())
         sys = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; nonbonded_method=nonbonded,
-                     dist_cutoff=1.0u"nm", strictness=:nowarn)
+                     dist_cutoff=1.0u"nm", dispersion_correction=true, strictness=:nowarn)
         @test any(inter isa DoubleExponential for inter in values(sys.pairwise_inters))
         E_ref, F_ref = potential_energy(sys), forces(sys)
         solvent = setdiff(eachindex(sys.atoms), solute)
@@ -410,10 +413,85 @@ end
         for S in lambda_schedulers, LJsoftcore in softcores
             sys_0 = AbsoluteFESystem(sys, 0.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
             @test any(inter isa DoubleExponentialSoftCore for inter in values(sys_0.pairwise_inters))
-            @test abs(potential_energy(sys_0) - E_ref) < etol
+            # As in OpenFE, the OpenFE scheduler leaves the alchemical atoms out of the
+            #   dispersion correction, so it is compared without it
+            if S == Molly.OpenFEScheduler
+                no_disp(s) = Tuple(g for g in s.general_inters if !(g isa DExpDispersionCorrection ||
+                                                                g isa Molly.DExpDispersionCorrectionλ))
+                @test abs(potential_energy(sys_0; general_inters=no_disp(sys_0)) -
+                          potential_energy(sys; general_inters=no_disp(sys))) < etol
+            else
+                @test abs(potential_energy(sys_0) - E_ref) < etol
+            end
             @test maximum(norm.(forces(sys_0) .- F_ref)) < ftol
             sys_1 = AbsoluteFESystem(sys, 1.0, solute; scheduler=S(dual=true), LJsoftcore=LJsoftcore)
             @test maximum(norm.(forces(sys_1)[solvent] .- F_decoupled[solvent])) < ftol
+        end
+    end
+end
+
+@testset "Double exponential dispersion correction" begin
+    # The soft core changes the shape of the double exponential at every distance, so the
+    #   correction is checked against the integrals of the soft-core pair potentials themselves
+    α, β, rs, rc = 16.766, 4.427, 0.6, 1.0
+    types = [(0.30, 0.5), (0.30, 0.5), (0.25, 0.1), (0.35, 0.8), (0.32, 0.6), (0.28, 0.3)]
+    atoms = [Atom(index=i, mass=10.0u"g/mol", σ=(σ * u"nm"), ϵ=(ϵ * u"kJ * mol^-1"))
+             for (i, (σ, ϵ)) in enumerate(types)]
+    coords = [SVector(0.5 + 1.2 * (i - 1), 1.0, 1.0)u"nm" for i in eachindex(atoms)]
+    disp(s) = potential_energy(s; pairwise_inters=(), specific_inter_lists=())
+    simpson(f, a, b, n) = (b - a) / 3n * sum((i in (0, n) ? 1 : (isodd(i) ? 4 : 2)) *
+                                             f(a + i * (b - a) / n) for i in 0:n)
+
+    for cutoff in (DistanceCutoff(rc * u"nm"), ShiftedPotentialCutoff(rc * u"nm"),
+                   PolynomialCutoff(rs * u"nm", rc * u"nm"))
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=CubicBoundary(8.0u"nm"),
+            atoms_data=[AtomData(element="C") for _ in atoms],
+            pairwise_inters=(DoubleExponential(α=α, β=β, cutoff=cutoff, use_neighbors=false),),
+            general_inters=(DExpDispersionCorrection(atoms, cutoff, α, β),),
+        )
+        for S in (Molly.DefaultLambdaScheduler, Molly.LinearLambdaScheduler,
+                  Molly.GROMACSLambdaABFEScheduler)
+            # λ = 0 is the coupled end state
+            @test disp(AbsoluteFESystem(sys, 0.0, [1, 2]; scheduler=S(dual=true))) ≈
+                  disp(sys) rtol=1e-12
+            for λ in (0.5, 0.8, 0.95, 1.0)
+                sys_λ = AbsoluteFESystem(sys, λ, [1, 2]; scheduler=S(dual=true))
+                sc = only(sys_λ.pairwise_inters)
+                sc_nocut = DoubleExponentialSoftCore(α=α, β=β, λ_mixing=sc.λ_mixing,
+                                                     scheduler=sc.scheduler)
+                atoms_λ = Array(sys_λ.atoms)
+                # Each atom counts by its steric coupling, so the decoupled solute counts as absent
+                n_eff = sum(first(Molly.scale_sterics(sc.scheduler, a.λ, a.alch_role, Val(true)))
+                            for a in atoms_λ)
+                # Over all pairs including the pairs of each atom with itself, the integral of
+                #   r^2 times the potential that the cutoff leaves out, and the potential at the
+                #   cutoff that the shifted potential leaves out
+                I_sum, V_rc_sum = 0.0, 0.0
+                for i in eachindex(atoms_λ), j in i:length(atoms_λ)
+                    V(r) = ustrip(potential_energy(sc_nocut, SVector(r, 0.0, 0.0)u"nm",
+                                                   atoms_λ[i], atoms_λ[j]))
+                    V_cut(r) = ustrip(potential_energy(sc, SVector(r, 0.0, 0.0)u"nm",
+                                                       atoms_λ[i], atoms_λ[j]))
+                    I_sum += simpson(r -> r^2 * V(r), rc, 13.0, 100_000)
+                    if cutoff isa ShiftedPotentialCutoff
+                        I_sum += simpson(r -> r^2 * (V(r) - V_cut(r)), 0.0, rc, 10_000)
+                        V_rc_sum += V(rc)
+                    elseif cutoff isa PolynomialCutoff
+                        I_sum += simpson(r -> r^2 * (V(r) - V_cut(r)), rs, rc, 10_000)
+                    end
+                end
+                n_pairs = n_eff * (n_eff + 1) / 2
+                # As in GROMACS each atom has one fewer partner within the shifted cutoff
+                E_ref = 2π * n_eff^2 / ustrip(volume(sys_λ)) * I_sum / n_pairs -
+                        n_eff / 2 * V_rc_sum / n_pairs
+                @test ustrip(disp(sys_λ)) ≈ E_ref rtol=1e-9
+                @test disp(Molly.set_lambda!(AbsoluteFESystem(sys, 0.0, [1, 2];
+                                                              scheduler=S(dual=true)), λ)) ≈
+                      disp(sys_λ) rtol=1e-12
+            end
         end
     end
 end
@@ -431,24 +509,57 @@ end
     mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
     core_mapAB = Dict(i => i for i in 1:8)
 
-    for nonbonded in (SetupPME(), SetupCoulombReactionField())
+    for nonbonded in (SetupPME(), SetupCoulombReactionField(),
+                      SetupCoulombReactionField(exclusion_correction=true))
         build(file) = System(
             joinpath(data_dir, "ethanol_solv.pdb"),
             MolecularForceField(file;
                 custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
-            nonbonded_method=nonbonded, dist_cutoff=1.0u"nm", strictness=:nowarn,
+            nonbonded_method=nonbonded, dist_cutoff=1.0u"nm", dispersion_correction=true,
+            strictness=:nowarn,
         )
         sysA, sysB = build(garnet), build(garnet_B)
         @test abs(potential_energy(sysA) - potential_energy(sysB)) > 1.0u"kJ * mol^-1"
+        is_disp(g) = g isa DExpDispersionCorrection || g isa Molly.DExpDispersionCorrectionλ
+        no_disp(s) = System(s; general_inters=Tuple(g for g in s.general_inters if !is_disp(g)))
+        disp(s) = potential_energy(s; pairwise_inters=(), specific_inter_lists=(),
+                                   general_inters=Tuple(g for g in s.general_inters if is_disp(g)))
         for dual in (true, false), (λ, ref, state) in ((0.0, sysA, :A), (1.0, sysB, :B))
             sys = RelativeFESystem(sysA, sysB, λ, deepcopy(mapping), core_mapAB;
                                    scheduler=Molly.DefaultLambdaScheduler(dual=dual))
             @test any(inter isa DoubleExponentialSoftCore for inter in values(sys.pairwise_inters))
-            dE, dF, F_dummy = end_state_diff(sys, ref, end_state_map(mapping, core_mapAB,
-                                                                     length(ref), dual, state)...)
+            # Single topology counts the dummy atom in the effective number of atoms of the
+            #   dispersion correction, so the correction is compared on its own
+            @test disp(sys) ≈ disp(ref) rtol=1e-7
+            dE, dF, F_dummy = end_state_diff(no_disp(sys), no_disp(ref),
+                                    end_state_map(mapping, core_mapAB, length(ref), dual, state)...)
             @test dE < 1e-6u"kJ * mol^-1"
             @test dF < 1e-6u"kJ * mol^-1 * nm^-1"
             @test iszero(F_dummy)
+        end
+        if nonbonded isa SetupCoulombReactionField && nonbonded.exclusion_correction
+            # The charged hydroxyl hydrogens of the two states get no correction between them
+            for dual in (true, false)
+                sys = RelativeFESystem(sysA, sysB, 0.5, deepcopy(mapping), core_mapAB;
+                                       scheduler=Molly.LinearLambdaScheduler(dual=dual))
+                il = only(il for il in sys.specific_inter_lists
+                          if il.data isa Molly.CoulombReactionFieldExclusionData)
+                roles = [atom.alch_role for atom in sys.atoms]
+                @test !any(minmax(roles[i], roles[j]) == minmax(Molly.InsertRole, Molly.DeleteRole)
+                           for (i, j) in zip(il.is, il.js))
+            end
+
+            sysB_off = System(
+                joinpath(data_dir, "ethanol_solv.pdb"),
+                MolecularForceField(garnet_B;
+                    custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
+                nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
+                strictness=:nowarn,
+            )
+            @test_throws ArgumentError RelativeFESystem(sysA, sysB_off, 0.0, deepcopy(mapping),
+                                                        core_mapAB)
+            @test_throws ArgumentError RelativeFESystem(sysB_off, sysA, 0.0, deepcopy(mapping),
+                                                        core_mapAB)
         end
     end
 end
@@ -489,6 +600,29 @@ end
     sys_single = relative(sys_ref, 0.5; dual=false)
     @test_throws ArgumentError extract_parameters(sys_single)
     @test_throws ArgumentError ParameterPlan(sys_single, Dict{String, Float64}())
+end
+
+@testset "Alchemical systems without a neighbor finder" begin
+    ff = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml");
+                             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+    sys = System(joinpath(data_dir, "ethanol_solv.pdb"), ff; dist_cutoff=1.0u"nm",
+                 neighbor_finder_type=Nothing, strictness=:nowarn)
+
+    # The hybrid system excludes the pairs between the A and B sides with the neighbor finder
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+    for dual in (true, false)
+        @test_throws ArgumentError RelativeFESystem(sys, sys, 0.5, deepcopy(mapping), core_mapAB;
+                                        scheduler=Molly.DefaultLambdaScheduler(dual=dual))
+    end
+
+    # An absolute system keeps the pairs of the original system, so it does not need one
+    is_disp(g) = g isa LJDispersionCorrection || g isa Molly.LJDispersionCorrectionλ
+    pe_no_disp(s) = potential_energy(s; general_inters=Tuple(g for g in s.general_inters
+                                                              if !is_disp(g)))
+    sys_0 = AbsoluteFESystem(sys, 0.0, collect(1:9))
+    @test isnothing(sys_0.neighbor_finder)
+    @test isapprox(pe_no_disp(sys_0), pe_no_disp(sys); rtol=1e-10)
 end
 
 @testset "Alchemical parameter keys" begin

@@ -29,7 +29,7 @@ The default `shortcut` is [`Molly.BuckinghamZeroShortcut`](@ref).
 """
 @kwdef struct Buckingham{C, S, A, B, M, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::S = BuckinghamZeroShortcut()
     A_mixing::A = GeometricMixing()
     B_mixing::B = InverseMixing()
@@ -43,7 +43,7 @@ required_atom_fields(inter::Buckingham) = (:A, :B, :C,
             mixing_atom_fields(inter.A_mixing)..., mixing_atom_fields(inter.B_mixing)...,
             mixing_atom_fields(inter.C_mixing)...)
 
-function Base.zero(b::Buckingham{C, W}) where {C, W}
+function Base.zero(b::Buckingham{C, S, A, B, M, W}) where {C, S, A, B, M, W}
     return Buckingham(b.cutoff, b.use_neighbors, b.shortcut, b.A_mixing,
                       b.B_mixing, b.C_mixing, zero(W))
 end

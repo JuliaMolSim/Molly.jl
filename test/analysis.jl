@@ -164,9 +164,8 @@ end
     for i in 2:n
         series[i] = φ * series[i - 1] + randn(rng)
     end
-    si = Molly.statistical_inefficiency(series)
+    si = Molly.StatisticalInefficiency(series)
     @test si.inefficiency ≈ (1 + φ) / (1 - φ) rtol=0.1
     @test si.effective_size == n ÷ si.stride
-    @test Molly.subsample(series, si.stride) == series[1:si.stride:end]
-    @test Molly.statistical_inefficiency(randn(rng, n)).inefficiency ≈ 1 atol=0.05
+    @test Molly.StatisticalInefficiency(randn(rng, n)).inefficiency ≈ 1 atol=0.05
 end

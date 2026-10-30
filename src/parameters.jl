@@ -2,8 +2,8 @@
 
 export
     ParameterPlan,
-    extract_parameters,
-    inject_gradients
+    inject_gradients,
+    extract_parameters
 
 @public parameter_prefix,
     parameter_fields
@@ -309,6 +309,12 @@ inject_interaction(inter, args...) = inter
 #   interaction that caches values computed from the charges
 update_charges(inter, atoms) = inter
 
+# A copy of a general interaction that is consistent with the injected atoms (on the host) and
+#   its own injected parameters, for an interaction that caches values computed from them, such
+#   as the dispersion corrections. Called inside the function being differentiated, so the
+#   recomputation carries the gradients.
+update_cached_parameters(inter, atoms) = inter
+
 # The values of the plan's parameters, in slot order
 function plan_values(params_dic, plan::ParameterPlan{V}) where {V}
     ks = plan.keys
@@ -333,10 +339,15 @@ function parameter_flat(params_dic, plan::ParameterPlan{V}) where {V}
     return flat
 end
 
-@inline function inject_atoms(sys, flat, plan, ::Type{AT}) where {AT}
-    isempty(plan.ranges[1]) && return sys.atoms
+@inline function inject_atoms_host(flat, plan)
+    isempty(plan.ranges[1]) && return plan.atoms_host
     m, q, s, e = target_views(flat, plan, 1, Val(4))
-    return to_device(inject_atom.(plan.atoms_host, m, q, s, e), AT)
+    return inject_atom.(plan.atoms_host, m, q, s, e)
+end
+
+@inline function inject_atoms(sys, atoms_host, plan, ::Type{AT}) where {AT}
+    isempty(plan.ranges[1]) && return sys.atoms
+    return to_device(atoms_host, AT)
 end
 
 # Whether the dictionary sets the charge of any atom
@@ -383,6 +394,14 @@ end
 @inline inject_lists(ils::Tuple, hosts::Tuple, flat, plan, target, ::Type{AT}) where {AT} =
     (inject_list(first(ils), first(hosts), flat, plan, target, AT),
      inject_lists(Base.tail(ils), Base.tail(hosts), flat, plan, target + 1, AT)...)
+
+# Lists whose data repeats parameters of a pairwise interaction, such as the reaction field
+#   exclusions, take the injected values
+@inline inject_list_data(il, pis) = il
+
+@inline inject_lists_data(::Tuple{}, pis) = ()
+@inline inject_lists_data(ils::Tuple, pis) =
+    (inject_list_data(first(ils), pis), inject_lists_data(Base.tail(ils), pis)...)
 
 @inline inject_inters(::Tuple{}, flat, plan, target) = ()
 @inline inject_inters(inters::Tuple, flat, plan, target) =
@@ -450,7 +469,9 @@ units that each parameter is stored with in `sys`, as returned by
 Gradients are only supported for systems without units.
 
 When charges are injected, the charge sums that a [`PME`](@ref) with `fixed_charges=true`
-caches are recomputed from the new charges.
+caches are recomputed from the new charges. The dispersion corrections, such as
+[`LJDispersionCorrection`](@ref), are recomputed from the injected σ and ϵ values (and `α` and
+`β` for [`DExpDispersionCorrection`](@ref)), so their gradients are included.
 """
 inject_gradients(sys::System, params_dic) =
     inject_gradients(sys, params_dic, ParameterPlan(sys, params_dic))
@@ -462,18 +483,21 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic, plan::ParameterPla
                           coords) where {AT}
     flat = parameter_flat(params_dic, plan)
 
-    atoms = inject_atoms(sys, flat, plan, AT)
+    atoms_host = inject_atoms_host(flat, plan)
+    atoms = inject_atoms(sys, atoms_host, plan, AT)
     # Walked recursively rather than with `ntuple`, so that the heterogeneous tuples are
     # unrolled and each element keeps its concrete type
     n_lists = length(sys.specific_inter_lists)
     n_pairwise = length(sys.pairwise_inters)
     sis = inject_lists(sys.specific_inter_lists, plan.inters_host, flat, plan, 2, AT)
     pis = inject_inters(sys.pairwise_inters, flat, plan, 2 + n_lists)
+    sis = inject_lists_data(sis, pis)
     gis = inject_generals(sys.general_inters, flat, plan, 2 + n_lists + n_pairwise,
                           params_dic, sys)
     if injects_charges(plan)
         gis = map(inter -> update_charges(inter, atoms), gis)
     end
+    gis = map(inter -> update_cached_parameters(inter, atoms_host), gis)
 
     masses, total_mass = injected_masses(sys, flat, plan, AT)
     velocities = copy(sys.velocities)

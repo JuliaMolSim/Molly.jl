@@ -2,7 +2,14 @@
 
 @public LJZeroShortcut,
     BuckinghamZeroShortcut,
+    mixing_atom_fields,
     LorentzMixing,
+    σ_mixing,
+    ϵ_mixing,
+    λ_mixing,
+    A_mixing,
+    B_mixing,
+    C_mixing,
     GeometricMixing,
     WaldmanHaglerMixing,
     FenderHalseyMixing,
@@ -50,7 +57,14 @@ function params_mixing(λ_params, params::Tuple, args...)
     return sum(((1-λ_params),λ_params) .* params)
 end
 
-# Extra Atom fields that a mixing rule reads
+"""
+    mixing_atom_fields(mixing)
+
+Extra atom fields that a mixing rule reads.
+
+Custom mixing schemes should implement this function if fields not specified by
+[`Molly.required_atom_fields`](@ref) are required by the mixing rule.
+"""
 mixing_atom_fields(mr) = ()
 
 @doc raw"""
@@ -79,11 +93,58 @@ function xy_mixing(::LorentzMixing, x::Tuple, y::Tuple, λ_params, alch_role)
     return (1-λ_params)*A + λ_params*B
 end
 
+"""
+    σ_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing σ parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 σ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.σ , atom_j.σ, args...)
+
+"""
+    ϵ_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing ϵ parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 ϵ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.ϵ , atom_j.ϵ, args...)
+
+"""
+    λ_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing λ parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 λ_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.λ , atom_j.λ, args...)
+
+"""
+    A_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing A ([`Buckingham`](@ref)) parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 A_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.A , atom_j.A, args...)
+
+"""
+    B_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing B ([`Buckingham`](@ref)) parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 B_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.B , atom_j.B, args...)
+
+"""
+    C_mixing(mixing, atom_i, atom_j, args...)
+
+The rule for mixing C ([`Buckingham`](@ref)) parameters for a given mixing scheme.
+
+Custom mixing schemes can implement this function.
+"""
 C_mixing(m::LorentzMixing, atom_i, atom_j, args...) = xy_mixing(m, atom_i.C , atom_j.C, args...)
 
 @doc raw"""

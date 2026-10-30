@@ -968,9 +968,6 @@ function lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace,
     return coords
 end
 
-lincs_apply!(coords, old_coords, data::LincsData, ws::LincsWorkspace, boundary) =
-    lincs_apply!(coords, old_coords, data, ws, boundary, default_position_constraint_context())
-
 function accumulate_lincs_position_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
     context.needs_virial || return context
@@ -1059,10 +1056,6 @@ function lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspac
     accumulate_lincs_velocity_virial!(data, ws, context)
     return velocities
 end
-
-lincs_vel_apply!(velocities, coords, data::LincsData, ws::LincsWorkspace, boundary) =
-    lincs_vel_apply!(velocities, coords, data, ws, boundary,
-                     default_velocity_constraint_context())
 
 function accumulate_lincs_velocity_virial!(data::LincsData, ws::LincsWorkspace,
                                            context)
@@ -1397,7 +1390,7 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
 end
 
 function setup_constraints!(lincs::LINCS, neighbor_finder, arr_type)
-    if !(neighbor_finder isa NoNeighborFinder)
+    if !isnothing(neighbor_finder)
         disable_constrained_interactions!(neighbor_finder, lincs.clusters)
     end
 

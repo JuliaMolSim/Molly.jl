@@ -9,7 +9,8 @@ export
     CRescaleBarostat,
     MonteCarloBarostat
 
-@public apply_coupling!
+@public apply_coupling!,
+    needs_virial
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
@@ -36,8 +37,15 @@ function apply_coupling!(sys, buffers, couplers::Union{Tuple, NamedTuple}, sim, 
     return recompute_forces
 end
 
-# By default, couplers do not require the virial
-needs_virial(c) = Inf
+"""
+    needs_virial(coupler)
+
+The step interval at which a coupler requires the [`virial`](@ref), e.g. to calculate pressure.
+
+`Inf` by default, indicating that the virial is not required.
+Custom coupler should implement this function if the virial is required.
+"""
+needs_virial(c) = Inf # By default, couplers do not require the virial
 
 apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = false
 
@@ -88,6 +96,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     sys.velocities .*= sqrt(thermostat.temperature / temp)
     return false
 end
@@ -149,13 +159,9 @@ function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRe
     c = exp(-dt / τ) # e^{-Δt/τ}
     A = Kbar / (Nf * K) # = (K̄/(Nf*K)), dimensionless
 
-    # Draw R1 ~ N(0,1), and χ²_{Nf-1} via sum of squares
+    # Draw R1 ~ N(0,1), and χ²_{Nf-1} directly, with χ²_0 being zero
     R1 = randn(rng)
-    rsum = zero(eltype(R1))
-    for _ in 1:(Nf-1)
-        x = randn(rng)
-        rsum += x*x
-    end
+    rsum = (Nf > 1 ? rand(rng, Chisq(Nf - 1)) : zero(R1))
 
     # λ² (Appendix A7), guard tiny negatives from roundoff
     lam2 = c + (1 - c) * A * (R1*R1 + rsum) + 2 * sqrt(c * (1 - c) * A) * R1
@@ -177,7 +183,8 @@ end
 The Andersen thermostat for controlling temperature.
 
 The velocity of each atom is randomly changed each time step with probability
-`dt / coupling_const` to a velocity drawn from the Maxwell-Boltzmann distribution.
+`1 - exp(-dt / coupling_const)`, which is approximately `dt / coupling_const`, to a velocity
+drawn from the Maxwell-Boltzmann distribution.
 See [Andersen 1980](https://doi.org/10.1063/1.439486).
 
 Note that when used with constraints this can lead to velocities that violate
@@ -196,13 +203,17 @@ function andersen_warn(sys, strictness)
     end
 end
 
+# Probability of a collision during a time step for collisions with rate 1 / coupling_const
+andersen_prob(thermostat, sim) = -expm1(-uconvert(NoUnits, sim.dt / thermostat.coupling_const))
+
 function apply_coupling!(sys::System{D}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(), strictness=default_strictness()) where D
     andersen_warn(sys, strictness)
+    prob = andersen_prob(thermostat, sim)
     for i in eachindex(sys)
-        if rand(rng) < (sim.dt / thermostat.coupling_const) && !sys.virtual_site_flags[i]
+        if rand(rng) < prob && !sys.virtual_site_flags[i]
             sys.velocities[i] = random_velocity_svector(Val(D), mass(sys.atoms[i]),
                                                         thermostat.temperature, sys.k; rng=rng)
         end
@@ -218,7 +229,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     backend = get_backend(sys.velocities)
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
-    prob_val = clamp(Float64(sim.dt / thermostat.coupling_const), 0.0, prevfloat(1.0))
+    prob_val = clamp(Float64(andersen_prob(thermostat, sim)), 0.0, prevfloat(1.0))
     prob_val_u64 = round(UInt64, prob_val*2.0^64)
     kernel! = apply_andersen_coupling_kernel!(backend)
     kernel!(
@@ -250,6 +261,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temp) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
@@ -662,8 +675,9 @@ function apply_coupling!(sys::System{D},
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = energy_remove_mol(sys.k * temperature(
-        sys; kin_tensor=buffers.kin_tensor, recompute=isnothing(pressure_kin_tensor)))
+    temp      = hasproperty(sim, :temperature) ? sim.temperature :
+                temperature(sys; kin_tensor=buffers.kin_tensor, recompute=isnothing(pressure_kin_tensor))
+    kT_energy = energy_remove_mol(sys.k * temp)
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
@@ -783,7 +797,9 @@ The barostat assumes that the simulation is being run at a constant temperature 
 does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
-The neighbor list is not updated when making trial moves or after accepted moves.
+By default the neighbor list is not updated when calculating the energy of trial moves,
+which assumes that the volume changes are small; set `trial_find_neighbors` to `true` to
+update it.
 Note that the barostat can change the bounding box of the system.
 Does not work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.

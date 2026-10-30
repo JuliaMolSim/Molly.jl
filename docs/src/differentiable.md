@@ -35,7 +35,7 @@ For training force fields, gradients are required with respect to all force fiel
 In this case [`extract_parameters`](@ref) can be used to get a dictionary of parameters, a [`ParameterPlan`](@ref) is used to insert the parameters into the loss function, and [`inject_gradients`](@ref) is used inside the loss function to set up the system.
 For example, to get the gradient of the potential energy with respect to each parameter:
 ```julia
-using Enzyme
+using Molly, Enzyme
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"); units=false)
@@ -135,7 +135,7 @@ simulator = VelocityVerlet(
 )
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-lj = LennardJones(cutoff=DistanceCutoff(1.5), use_neighbors=true)
+lj = LennardJones(cutoff=DistanceCutoff(1.5))
 pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
@@ -145,7 +145,7 @@ neighbor_finder = DistanceNeighborFinder(
 
 function loss(σ, coords, velocities, boundary, pairwise_inters,
               neighbor_finder, simulator, n_steps, n_atoms, atom_mass, dist_true)
-    atoms = [Atom(i, 1, atom_mass, 0.0, σ, 0.2) for i in 1:n_atoms]
+    atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=σ, ϵ=0.2) for i in 1:n_atoms]
 
     sys = System(
         atoms=atoms,
@@ -273,7 +273,7 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
-atoms = [Atom(i, 1, atom_mass, 0.0, 0.0, 0.0) for i in 1:n_atoms]
+atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=0.0, ϵ=0.0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.05,
     coupling=BerendsenThermostat(temp, 0.5),
@@ -424,7 +424,7 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
-atoms = [Atom(i, 1, 10.0f0, 0.0f0, 0.0f0, 0.0f0) for i in 1:n_atoms]
+atoms = [Atom(index=i, mass=10.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=1.0f0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02f0,
     coupling=BerendsenThermostat(temp, 0.5f0),
@@ -547,5 +547,5 @@ Gradients propagate through the values recorded by loggers, so a loss function c
 - The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities and conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. Langevin dynamics also seems to work. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
 - Forward mode AD holds much promise for differentiable simulation, provided that the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach is likely to use finite differencing with the simulation as a black box. Adjoint sensitivity is another approach to getting gradients which is not yet available in Molly.jl.
-- [`PME`](@ref) stores mesh buffers that carry gradient information, so it must be passed as `Duplicated` with a `zero` shadow rather than as `Const`. Marking it `Const` silently gives the wrong gradient rather than erroring, which also means that a [`System`](@ref) containing a `PME` interaction should not be passed as `Const`.
+- [`PME`](@ref) stores mesh buffers that carry gradient information, so it must be passed as `Duplicated` with a `zero` shadow rather than as `Const`. Marking it `Const` silently gives the wrong gradient rather than erroring, which also means that a [`System`](@ref) containing a [`PME`](@ref) interaction should not be passed as `Const`.
 - Second derivatives can be obtained by applying forward mode over reverse mode with `autodiff_deferred`, for example to get the Hessian of the potential energy for normal mode analysis. This currently works when differentiating the interaction energy functions directly but not when going through [`System`](@ref).

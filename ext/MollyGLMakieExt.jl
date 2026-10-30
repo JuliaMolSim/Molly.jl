@@ -102,9 +102,10 @@ function Molly.visualize(coord_logger,
     end
 
     boundary_conv = ustrip.(dist_unit, Molly.cubic_bounding_box(boundary))
-    xlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 1))
-    ylims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 2))
-    dims == 3 && zlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 3))
+    boundary_min_conv = ustrip.(dist_unit, Molly.cubic_bounding_box_min(boundary))
+    xlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 1, boundary_min_conv))
+    ylims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 2, boundary_min_conv))
+    dims == 3 && zlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 3, boundary_min_conv))
 
     GLMakie.record(fig, out_filepath, eachindex(values(coord_logger)); framerate=framerate) do frame_i
         coords = values(coord_logger)[frame_i]

@@ -20,7 +20,7 @@ function make_tss_thermo_states(; n_atoms=6, n_states=3)
             atoms=atoms,
             coords=coords,
             boundary=boundary,
-            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3, use_neighbors=true,
+            pairwise_inters=(LennardJonesSoftCoreBeutler(α=0.3,
                              scheduler=Molly.LinearLambdaScheduler(dual=true)),),
             neighbor_finder=neighbor_finder,
         )

@@ -290,6 +290,21 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
     )
     @test potential_energy(sys_ljcut) ≈ 42906.57411130544u"kJ * mol^-1"
 
+    # The dispersion correction includes the part removed by the switching function
+    sys_ljcut_dc = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+        lj_cutoff=PolynomialCutoff(0.8u"nm", 1.0u"nm"),
+        dispersion_correction=true,
+        strictness=:nowarn,
+    )
+    @test only(gi for gi in sys_ljcut_dc.general_inters if gi isa LJDispersionCorrection).cutoff ==
+            PolynomialCutoff(0.8u"nm", 1.0u"nm")
+    @test isapprox(potential_energy(sys_ljcut_dc), 41781.805721469114u"kJ * mol^-1";
+                   atol=1e-5u"kJ * mol^-1")
+
     # Test with no units
     ff_nounits = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
@@ -565,6 +580,29 @@ end
                 params[prefix * "kappa"] = params[prefix * "sa_factor"] = 0.0
                 @test potential_energy(inject_gradients(sys_nu, params); n_threads=1) ≈
                         potential_energy(System(sys_nu; general_inters=()); n_threads=1)
+
+                # Implicit solvent uses the Coulomb constant of the non-bonded method unless
+                #   it sets its own, and without the surface area term its energy is
+                #   proportional to the constant
+                c0 = Molly.coulomb_const
+                is_c = (solvent_model == :obc2 ?
+                    c -> SetupImplicitSolventOBC(use_OBC2=true, kappa=1.0u"nm^-1",
+                                                 use_ACE=false, coulomb_const=c) :
+                    c -> SetupImplicitSolventGBN2(kappa=1.0u"nm^-1", use_ACE=false,
+                                                  coulomb_const=c))
+                function gb_energy(nonbonded_method, is)
+                    sys_gb = System(joinpath(data_dir, "6mrr_nowater.pdb"), ff;
+                                    boundary=CubicBoundary(100.0u"nm"), dist_cutoff=5.0u"nm",
+                                    nonbonded_method=nonbonded_method,
+                                    dispersion_correction=false, implicit_solvent=is,
+                                    strictness=:nowarn, n_threads=1)
+                    return potential_energy(sys_gb; pairwise_inters=(), specific_inter_lists=(),
+                                            n_threads=1)
+                end
+                coul_2 = SetupCoulomb(cutoff=DistanceCutoff(5.0u"nm"), coulomb_const=(2 * c0))
+                E_gb_1 = gb_energy(DistanceCutoff(5.0u"nm"), is_c(nothing))
+                @test gb_energy(coul_2, is_c(nothing)) ≈ 2 * E_gb_1
+                @test gb_energy(coul_2, is_c(c0)) ≈ E_gb_1
 
                 bench_result = @benchmark AtomsCalculators.forces!($forces_molly, $sys_1,
                                     $(sys_1.general_inters[1]); n_threads=1) samples=5 evals=1

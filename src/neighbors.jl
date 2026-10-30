@@ -4,7 +4,6 @@ export
     use_neighbors,
     neighbor_pairs,
     ragged_neighbors,
-    NoNeighborFinder,
     find_neighbors,
     GPUNeighborFinder,
     GPUCellListNeighborFinder,
@@ -18,13 +17,18 @@ export
 """
     use_neighbors(inter)
 
-Whether a pairwise interaction uses the neighbor list, default `false`.
+Whether a pairwise interaction uses the neighbor list, default `true`.
 
+If `true` only the pairs in the neighbor list are considered, which requires a
+neighbor finder in the [`System`](@ref).
+If `false` all pairs of atoms are considered, without the exclusions or special pairs
+of the neighbor finder.
 Custom pairwise interactions can define a method for this function.
 For built-in interactions such as [`LennardJones`](@ref) this function accesses
-the `use_neighbors` field of the struct.
+the `use_neighbors` field of the struct, set with the `use_neighbors` keyword
+argument, which is `true` by default.
 """
-use_neighbors(inter) = false
+use_neighbors(inter) = true
 
 """
     neighbor_pairs(neighbors)
@@ -208,16 +212,6 @@ function check_neighbor_array_type(AT)
 end
 
 """
-    NoNeighborFinder()
-
-Placeholder neighbor finder that returns no neighbors.
-
-When using this neighbor finder, ensure that [`use_neighbors`](@ref) for the interactions
-returns `false`.
-"""
-struct NoNeighborFinder end
-
-"""
     find_neighbors(system; n_threads=Threads.nthreads())
     find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0,
                    force_recompute=false; n_threads=Threads.nthreads())
@@ -235,6 +229,8 @@ Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
 and energy kernels build and cache their interacting tile list internally from
 the neighbor-finder metadata.
+It also returns `nothing` when the neighbor finder is `nothing`, meaning that no
+neighbor finder is used.
 
 A neighbor finder may reuse the device buffers behind `current_neighbors` for the
 list it returns, as [`GPUCellListNeighborFinder`](@ref) does, so the list passed in
@@ -242,7 +238,7 @@ should not be used afterwards.
 """
 find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
-find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
+find_neighbors(sys::System, ::Nothing, args...; kwargs...) = nothing
 
 #=
     uses_gpu_neighbor_finder(AT)
@@ -341,7 +337,8 @@ function dense_masks_to_pair_lists(eligible, special)
     return ineligible_pairs(eligible), true_pairs(special)
 end
 
-function neighbor_finder_masks(nf::NoNeighborFinder, n_atoms::Integer)
+# No neighbor finder, all pairs are eligible and none are special
+function neighbor_finder_masks(::Nothing, n_atoms::Integer)
     eligible = trues(n_atoms, n_atoms)
     special = falses(n_atoms, n_atoms)
     for i in 1:n_atoms
@@ -1772,7 +1769,7 @@ end
 # Dense masks, as for the other neighbor finders
 function neighbor_finder_masks(nf::GPUCellListNeighborFinder, n_atoms::Integer)
     # :ragged and :geometric_pairs ignore the exceptions, so all pairs are eligible
-    isnothing(nf.eligible) && return neighbor_finder_masks(NoNeighborFinder(), n_atoms)
+    isnothing(nf.eligible) && return neighbor_finder_masks(nothing, n_atoms)
     return copy_to_bitmatrix(from_device(nf.eligible)), copy_to_bitmatrix(from_device(nf.special))
 end
 
@@ -2234,6 +2231,9 @@ function find_neighbors(sys::System{<:Any, AT},
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
+    if sys.boundary isa TriclinicBoundary
+        throw(ArgumentError("TreeNeighborFinder cannot be used with a TriclinicBoundary"))
+    end
 
     dist_unit = unit(first(first(sys.coords)))
     bv = ustrip.(dist_unit, sys.boundary)
@@ -2379,8 +2379,38 @@ end
     return neighbors
 end
 
+#=
+Whether CellListMap.jl can give a pair more than once.
+
+From CellListMap.jl v0.10.7 the box can be less than twice the cutoff, in which case a
+pair is given once for each periodic image within the cutoff, including an atom paired
+with its own image. The force and energy loops use the minimum image of each listed pair,
+so such a pair would be counted more than once. Two images can only be within the cutoff
+if a lattice vector is shorter than twice the cutoff, and no lattice vector is shorter
+than the shortest box side, which is a diagonal element for a `TriclinicBoundary`.
+=#
+function clm_lists_images(boundary, dist_cutoff)
+    has_infinite_boundary(boundary) && return false
+    return minimum(box_sides(boundary)) <= 2 * dist_cutoff
+end
+
+# Add a pair to the pair list only for the image that `vector` gives, so that each pair is
+#   listed once when CellListMap.jl gives more than one image
+# Other images differ from that one by a lattice vector, which is at least as long as the
+#   shortest box side
+@inline function push_pair_min_image!(pair, neighbors::NeighborList, eligible, special,
+                                      boundary, min_side_sq)
+    if pair.i != pair.j
+        image_diff = (pair.y - pair.x) - vector(pair.x, pair.y, boundary)
+        if 4 * sum(abs2, image_diff) < min_side_sq
+            push_pair!(pair, neighbors, eligible, special)
+        end
+    end
+    return neighbors
+end
+
 # Parallelization interface for custom output of CellListMap
-CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list)) 
+CellListMap.copy_output(nl::NeighborList) = NeighborList(nl.n, copy(nl.list))
 CellListMap.reset_output!(nl::NeighborList) = empty!(nl)
 
 function CellListMap.reduce_output!(output::NeighborList, output_threaded::Vector{<:NeighborList})
@@ -2442,10 +2472,20 @@ function find_neighbors(sys::System{D, AT},
 
     # Update the neighbor list
     eligible, special = kernel_matrix(nf.eligible), kernel_matrix(nf.special)
-    neighbors = CellListMap.pairwise!(
-        (p, neighbors) -> push_pair!(p, neighbors, eligible, special),
-        nf.clm_particlesystem,
-    )
+    boundary = sys.boundary
+    if clm_lists_images(boundary, nf.dist_cutoff)
+        min_side_sq = minimum(box_sides(boundary))^2
+        neighbors = CellListMap.pairwise!(
+            (p, neighbors) -> push_pair_min_image!(p, neighbors, eligible, special,
+                                                   boundary, min_side_sq),
+            nf.clm_particlesystem,
+        )
+    else
+        neighbors = CellListMap.pairwise!(
+            (p, neighbors) -> push_pair!(p, neighbors, eligible, special),
+            nf.clm_particlesystem,
+        )
+    end
 
     if AT <: AbstractGPUArray
         return NeighborList(neighbors.n, to_device(neighbors.list, AT))

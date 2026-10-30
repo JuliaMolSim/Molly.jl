@@ -13,7 +13,7 @@ V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
 @kwdef struct Gravity{T, C} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     G::T = Unitful.G
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
 end
 
 use_neighbors(inter::Gravity) = inter.use_neighbors

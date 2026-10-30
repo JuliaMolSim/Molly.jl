@@ -8,7 +8,11 @@ export
     CubicSplineCutoff,
     PolynomialCutoff
 
-@public AbstractCutoff
+@public AbstractCutoff,
+    pe_cutoff,
+    force_cutoff,
+    pe_apply_cutoff,
+    force_apply_cutoff
 
 """
 Base type for non-bonded interaction cutoffs.
@@ -49,6 +53,15 @@ end
 @inline skip_pair_cutoff(::Nothing, r2) = false
 @inline skip_pair_cutoff(sqdist_cutoff, r2) = r2 > sqdist_cutoff
 
+"""
+    pe_cutoff(cutoff, inter, r, params)
+
+The potential of a pairwise interaction with a cutoff applied.
+
+Custom pairwise interactions can implement this function and use it in their
+[`potential_energy`](@ref) function to allow the application of arbitrary cutoffs.
+`params` is generally a tuple of parameters and must not depend on the distance `r`.
+"""
 function pe_cutoff(cutoff::AbstractCutoff{0}, inter, r, params)
     return pairwise_pe(inter, r, params)
 end
@@ -65,6 +78,15 @@ function pe_cutoff(cutoff::AbstractCutoff{2}, inter, r, params)
     )
 end
 
+"""
+    force_cutoff(cutoff, inter, r, params)
+
+The force of a pairwise interaction with a cutoff applied.
+
+Custom pairwise interactions can implement this function and use it in their
+[`force`](@ref) function to allow the application of arbitrary cutoffs.
+`params` is generally a tuple of parameters and must not depend on the distance `r`.
+"""
 function force_cutoff(cutoff::AbstractCutoff{0}, inter, r, params)
     return pairwise_force(inter, r, params)
 end
@@ -112,7 +134,22 @@ end
 
 DistanceCutoff(dist_cutoff::D) where D = DistanceCutoff{1, D}(dist_cutoff)
 
+"""
+    pe_apply_cutoff(cutoff, inter, r, params)
+
+Apply a cutoff to the potential energy of a pairwise interaction.
+
+Custom cutoffs should implement this function.
+"""
 pe_apply_cutoff(::DistanceCutoff, inter, r, params) = pairwise_pe(inter, r, params)
+
+"""
+    force_apply_cutoff(cutoff, inter, r, params)
+
+Apply a cutoff to the force of a pairwise interaction.
+
+Custom cutoffs should implement this function.
+"""
 force_apply_cutoff(::DistanceCutoff, inter, r, params) = pairwise_force(inter, r, params)
 
 @doc raw"""

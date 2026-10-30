@@ -7,12 +7,15 @@ export
     CalcSingleDist,
     CalcDist,
     calculate_cv,
+    CalcAngle,
     CalcRg,
     CalcRMSD,
-    CalcAngle,
     CalcTorsion
 
-@public cv_gradient
+@public cv_gradient, cv_period
+
+# Defined in Enzyme extension, but available here for use in testing
+function cv_gradient_enzyme end
 
 # Does not account for periodic boundary conditions, assumes appropriate unwrapping
 function center_of_mass(coords, atoms)
@@ -20,8 +23,6 @@ function center_of_mass(coords, atoms)
     com = sum(masses .* coords; dims=1) ./ sum(masses)
     return only(com)
 end
-
-function calculate_virial(cv, args...; kwargs...) end
 
 function pairwise_distance_matrix(coords_1::AbstractArray{SVector{D, C}},
                                   coords_2::AbstractArray{SVector{D, C}},
@@ -225,72 +226,6 @@ function calculate_cv(cv::CalcDist, coords, atoms, boundary, args...; kwargs...)
     dist_val = dist_between_groups(cv.dist_type, coords_1, coords_2, boundary, atoms_1, atoms_2)
     return dist_val
 end
-
-"""
-    CalcAngle(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true)
-
-A collective variable that calculates the angle defined by three atoms.
-
-Given as an argument to [`BiasPotential`](@ref).
-The angle is defined by the angle between the vectors (j -> i) and (j -> k), where the indices are given by `atom_inds`.
-
-# Fields
-- `atom_inds::AbstractVector{Int}`: The indices of the three atoms (i, j, k) defining the angle.
-- `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
-- `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
-"""
-struct CalcAngle
-    atom_inds::Vector{Int}
-    correction::Symbol
-    has_virial::Bool
-
-    function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
-        check_correction_arg(correction)
-        return new(atom_inds, correction, has_virial)
-    end
-end
-
-function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
-    c = @view coords[collect(cv.atom_inds)]
-    return  bond_angle(c[1], c[2], c[3], boundary)
-end
-
-function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
-    i, j, k = cv.atom_inds
-    ri, rj, rk = coords[i], coords[j], coords[k]
-    
-    ba = vector_pad3D(rj, ri, boundary)
-    bc = vector_pad3D(rj, rk, boundary)
-    cross_ba_bc = ba × bc
-    theta = bond_angle(ri, rj, rk, boundary)
-
-    grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
-    if iszero_value(cross_ba_bc)
-        return -grad, theta
-    end
-    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
-    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
-
-    grad_i = pa / norm(ba)
-    grad_k = pc / norm(bc)
-    grad[i] = -grad_i
-    grad[k] = -grad_k
-    grad[j] = grad_i + grad_k
-
-    return -grad, theta 
-end
-
-function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary)
-    ids = collect(cv.atom_inds)
-    c = @view coords[ids]
-    f = @view forces[ids]
-    r_ji = vector(c[2], c[1], boundary) 
-    r_jk = vector(c[2], c[3], boundary)
-    
-    virial_buff .+= r_ji * transpose(f[1]) + 
-                    r_jk * transpose(f[3])
-end
-
 
 # Computes the analytical gradient of the distance between two atoms.
 #
@@ -537,8 +472,10 @@ function calculate_virial_dist!(virial_buff, dt::CalcMinDist, cv, coords, forces
         r_ji = c1[min_idx[1]] - c2[min_idx[2]]
     end
     
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_ji * transpose(f_sum)
+    # Only the selected pair feels the bias force, and summing over group 1 would cancel
+    #   that force if both atoms of the pair are in group 1, as when the groups overlap
+    f_i = forces[cv.atom_inds_1[min_idx[1]]]
+    virial_buff .+= r_ji * transpose(f_i)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces, atoms, boundary)
@@ -570,8 +507,10 @@ function calculate_virial_dist!(virial_buff, dt::CalcMaxDist, cv, coords, forces
         r_ji = c1[max_idx[1]] - c2[max_idx[2]]
     end
     
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_ji * transpose(f_sum)
+    # Only the selected pair feels the bias force, and summing over group 1 would cancel
+    #   that force if both atoms of the pair are in group 1, as when the groups overlap
+    f_i = forces[cv.atom_inds_1[max_idx[1]]]
+    virial_buff .+= r_ji * transpose(f_i)
 end
 
 function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces, atoms, boundary)
@@ -589,8 +528,91 @@ function calculate_virial_dist!(virial_buff, dt::CalcCMDist, cv, coords, forces,
         r_12 = com1 - com2
     end
 
-    f_sum = sum(forces[cv.atom_inds_1])
-    virial_buff .+= r_12 * transpose(f_sum)
+    # The bias force on atom k is c_k * f_12, where f_12 is the force between the centers
+    #   of mass and c_k sums m_k / M_1 over group 1 and -m_k / M_2 over group 2, so recover
+    #   f_12 by least squares since the sum over group 1 misses part of it when the groups
+    #   overlap
+    m1, m2 = mass.(a1), mass.(a2)
+    M1, M2 = sum(m1), sum(m2)
+    c = zeros(typeof(first(m1) / M1), length(coords))
+    for (idx, i) in enumerate(cv.atom_inds_1)
+        c[i] += m1[idx] / M1
+    end
+    for (idx, j) in enumerate(cv.atom_inds_2)
+        c[j] -= m2[idx] / M2
+    end
+    c_norm2 = sum(abs2, c)
+    # Zero when the groups are the same, in which case there is no bias force
+    if !iszero(c_norm2)
+        f_12 = sum(c .* forces) / c_norm2
+        virial_buff .+= r_12 * transpose(f_12)
+    end
+    return virial_buff
+end
+
+"""
+    CalcAngle(atom_inds::AbstractVector{Int}=[], correction=:pbc, has_virial::Bool=true)
+
+A collective variable that calculates the angle defined by three atoms.
+
+Given as an argument to [`BiasPotential`](@ref).
+The angle is defined by the angle between the vectors (j -> i) and (j -> k), where the indices are given by `atom_inds`.
+
+# Fields
+- `atom_inds::AbstractVector{Int}`: The indices of the three atoms (i, j, k) defining the angle.
+- `correction::Symbol`: The method used to handle periodic boundary conditions. Defaults to `:pbc`.
+- `has_virial::Bool`: Whether the virial contribution should be calculated for this collective variable. Defaults to `true`.
+"""
+struct CalcAngle
+    atom_inds::Vector{Int}
+    correction::Symbol
+    has_virial::Bool
+
+    function CalcAngle(atom_inds=[], correction=:pbc, has_virial = true)
+        check_correction_arg(correction)
+        return new(atom_inds, correction, has_virial)
+    end
+end
+
+function calculate_cv(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    c = @view coords[collect(cv.atom_inds)]
+    return  bond_angle(c[1], c[2], c[3], boundary)
+end
+
+function cv_gradient(cv::CalcAngle, coords, atoms, boundary, args...; kwargs...)
+    i, j, k = cv.atom_inds
+    ri, rj, rk = coords[i], coords[j], coords[k]
+    
+    ba = vector_pad3D(rj, ri, boundary)
+    bc = vector_pad3D(rj, rk, boundary)
+    cross_ba_bc = ba × bc
+    theta = bond_angle(ri, rj, rk, boundary)
+
+    grad = ustrip_vec.(zero(coords)) / oneunit(eltype(eltype(coords)))
+    if iszero_value(cross_ba_bc)
+        return -grad, theta
+    end
+    pa = normalize(trim3D( ba × cross_ba_bc, boundary))
+    pc = normalize(trim3D(-bc × cross_ba_bc, boundary))
+
+    grad_i = pa / norm(ba)
+    grad_k = pc / norm(bc)
+    grad[i] = -grad_i
+    grad[k] = -grad_k
+    grad[j] = grad_i + grad_k
+
+    return -grad, theta 
+end
+
+function calculate_virial!(virial_buff, cv::CalcAngle, coords, forces, atoms, boundary)
+    ids = collect(cv.atom_inds)
+    c = @view coords[ids]
+    f = @view forces[ids]
+    r_ji = vector(c[2], c[1], boundary) 
+    r_jk = vector(c[2], c[3], boundary)
+    
+    virial_buff .+= r_ji * transpose(f[1]) + 
+                    r_jk * transpose(f[3])
 end
 
 """
@@ -940,3 +962,16 @@ function calculate_virial!(virial_buff, cv::CalcTorsion, coords, forces, atoms, 
                     r_jk * transpose(f[3]) +
                     r_jl * transpose(f[4])
 end
+
+"""
+    cv_period(cv)
+
+Period of a periodic collective variable, or zero for a non-periodic one.
+
+[`CalcTorsion`](@ref) is periodic with period 2π. All other built-in CVs are not periodic,
+including [`CalcAngle`](@ref), whose values lie in [0, π]. Custom CV types that are
+periodic define a method, which may depend on the instance, e.g.
+`Molly.cv_period(cv::MyCV) = cv.period`.
+"""
+cv_period(cv) = 0
+cv_period(::CalcTorsion) = 2π

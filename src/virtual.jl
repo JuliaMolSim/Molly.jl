@@ -8,6 +8,15 @@ export
     LocalCoordinatesSite,
     place_virtual_sites!
 
+@public VirtualSite
+
+"""
+A virtual site, with coordinates determined by the coordinates of other atoms.
+
+Created with [`OneParticleSite`](@ref), [`TwoParticleAverageSite`](@ref),
+[`ThreeParticleAverageSite`](@ref), [`OutOfPlaneSite`](@ref) or [`LocalCoordinatesSite`](@ref)
+and given to a [`System`](@ref) as `virtual_sites`.
+"""
 struct VirtualSite{T, IC, P}
     type::Int # 1/2/3/4/5 for OneParticleSite/TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite/LocalCoordinatesSite
     atom_ind::Int
@@ -61,7 +70,7 @@ end
 
 A virtual site defined to have the same coordinates as another atom.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = \mathbf{r}_1
 ```
@@ -82,7 +91,7 @@ end
 
 A virtual site defined by the weighted average of the coordinates of two atoms.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
 ```
@@ -105,7 +114,7 @@ end
 
 A virtual site defined by the weighted average of the coordinates of three atoms.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
 ```
@@ -130,7 +139,7 @@ end
 A virtual site defined by the weighted average of the coordinates of three atoms
 and the cross product of their relative displacements.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = \mathbf{r}_1 + w_{12} \mathbf{r}_{12} + w_{13} \mathbf{r}_{13} + w_{\mathrm{cross}} (\mathbf{r}_{12} \times \mathbf{r}_{13})
 ```
@@ -152,7 +161,7 @@ end
 A virtual site defined by a position in a local coordinate system given by three atoms,
 matching the `LocalCoordinatesSite` of OpenMM.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \begin{aligned}
 \mathbf{o} &= \sum_i w_i^o \mathbf{r}_i &

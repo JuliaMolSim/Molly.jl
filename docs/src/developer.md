@@ -71,11 +71,11 @@ To use your custom neighbor finder, give it as the `neighbor_finder` argument wh
 
 Molly throws various standard exception types, especially `ArgumentError`s, but also has its own error types:
 
-| Exception type                | Description                                                                                     |
-| :---------------------------- | :---------------------------------------------------------------------------------------------- |
-| `NaNSimulationError`          | A `NaN` is encountered during a simulation or setup                                             |
-| `ForceFieldXMLError`          | An error reading a force field XML file, [see more here](@ref "Simulating a protein")           |
-| `MissingResidueTemplateError` | A residue cannot be matched to a residue template, [see more here](@ref "Simulating a protein") |
+| Exception type                                     | Description                                                                                     |
+| :------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| [`Molly.NaNSimulationError`](@ref)                 | A `NaN` is encountered during a simulation or setup                                             |
+| [`Molly.ForceFieldXMLError`](@ref)                 | An error reading a force field XML file, [see more here](@ref "Simulating a protein")           |
+| [`Molly.MissingResidueTemplateError`](@ref)        | A residue cannot be matched to a residue template, [see more here](@ref "Simulating a protein") |
 
 ## Fast math
 

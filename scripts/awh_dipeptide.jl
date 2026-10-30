@@ -161,7 +161,7 @@ pmf_deconv = PMFDeconvolution(
 
 awh_sim = AWHSimulation(
     awh_state;
-    num_md_steps = N_MD_STEPS,
+    n_md_steps = N_MD_STEPS,
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,

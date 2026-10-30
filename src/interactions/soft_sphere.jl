@@ -12,7 +12,7 @@ V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 """
 @kwdef struct SoftSphere{C, H, S, E} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
