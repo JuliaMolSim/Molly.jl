@@ -1726,6 +1726,9 @@ For more information on the sampling properties of splitting schemes, see
 Not compatible with constraints, will print a warning and continue
 without applying constraints.
 
+The neighbor finder should use a skin sufficient to cover atomic motion between
+rebuilds, since neighbors are not refreshed between splitting substeps.
+
 # Arguments
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
@@ -2161,6 +2164,10 @@ be 1.
 When simulating, `n_steps` is the number of outer steps.
 Coupling, removing the center of mass motion and running loggers applies per outer time step.
 
+With `inner_step_neighbors=false`, the neighbor finder should use a skin sufficient
+to cover atomic motion between rebuilds, since neighbors are not refreshed during
+inner steps.
+
 # Arguments
 - `dt::T`: the outer time step of the simulation.
 - `pi_fractions`: the number of times each pairwise interaction is evaluated per outer
@@ -2208,6 +2215,10 @@ All fractions should be multiples of previous fractions, and at least one fracti
 be 1.
 When simulating, `n_steps` is the number of outer steps.
 Coupling, removing the center of mass motion and running loggers applies per outer time step.
+
+With `inner_step_neighbors=false`, the neighbor finder should use a skin sufficient
+to cover atomic motion between rebuilds, since neighbors are not refreshed during
+inner steps.
 
 # Arguments
 - `dt::T`: the outer time step of the simulation.

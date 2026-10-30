@@ -254,6 +254,66 @@
     for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
         device = array_type === Array ? "CPU" : "GPU"
 
+        @testset "Langevin with Monte Carlo barostat temperature bounds $device" begin
+            float_type = Float64
+            qeq_float_type = Float64
+            qeq_tolerance = 1e-6
+            boundary = CubicBoundary(float_type(3.5)u"nm")
+            temp = 300.0u"K"
+
+            reaxff = ReaxFF(
+                force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
+                float_type=float_type,
+                array_type=array_type
+            )
+
+            sys = System(
+                joinpath(data_dir, "ReaxFF", "data", "methane_oxidation.pdb"),
+                reaxff,
+                boundary=boundary,
+                array_type=array_type,
+                eem_float_type=qeq_float_type,
+                eem_tolerance=qeq_tolerance,
+                loggers=(temperature=TemperatureLogger(40),)
+            )
+
+            minimizer = SteepestDescentMinimizer()
+            simulate!(sys, minimizer; run_loggers=false, show_progress=false)
+            Random.seed!(2024)
+            random_velocities!(sys, temp)
+            remove_CM_motion!(sys)
+
+            barostat = MonteCarloBarostat(
+                1.0u"bar", 
+                temp, 
+                sys.boundary;
+                n_steps=30, 
+                trial_find_neighbors=true
+            )
+
+            simulator = Langevin(
+                dt=0.25u"fs",
+                temperature=temp,
+                friction=1.0u"ps^-1",
+                coupling=barostat,
+            )
+
+            # 5ps equilibration
+            simulate!(sys, simulator, 20_000; run_loggers=false, show_progress=false)
+
+            # 10ps production
+            simulate!(sys, simulator, 40_000; init_step=20_000, run_loggers=:skipstart, show_progress=false)
+
+            temperatures = values(sys.loggers.temperature)
+            @test length(temperatures) == 1_000
+            @test sys.boundary != boundary
+            @test 280.0u"K" < mean(temperatures) < 320.0u"K"
+        end
+    end
+
+    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+        device = array_type === Array ? "CPU" : "GPU"
+
         @testset "Neighbor and CSR rebuilds $device" begin
             reaxff = ReaxFF(
                 force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),

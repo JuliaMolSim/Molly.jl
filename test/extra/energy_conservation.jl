@@ -5,6 +5,7 @@ using AMDGPU
 using CUDA
 using GPUArrays
 
+using Random
 using Test
 
 @testset "Lennard-Jones energy conservation" begin
@@ -90,5 +91,59 @@ using Test
     if AMDGPU.functional()
         test_energy_conservation(true , ROCArray, 1, 100_000)
         test_energy_conservation(false, ROCArray, 1, 100_000)
+    end
+end
+
+@testset "ReaxFF energy conservation" begin
+    data_dir = normpath(@__DIR__, "..", "..", "data")
+
+    for array_type in (CUDA.functional() ? (Array, CuArray) : (Array,))
+        device = array_type === Array ? "CPU" : "GPU"
+
+        @testset "$device" begin
+            float_type = Float64
+            qeq_float_type = Float64
+            qeq_tolerance = 1e-12
+
+            reaxff = ReaxFF(
+                force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Monti_2013_CHONSMgPNaCuCl.ff"),
+                float_type=float_type,
+                array_type=array_type,
+                smoothness_correction=true
+            )
+
+            sys = System(
+                joinpath(data_dir, "ReaxFF", "data", "crambin.pdb"),
+                reaxff,
+                boundary=CubicBoundary(float_type(5.3004)u"nm"),
+                array_type=array_type,
+                eem_float_type=qeq_float_type,
+                eem_tolerance=qeq_tolerance,
+                loggers=(energy=TotalEnergyLogger(100),)
+            )
+
+            temp = 300.0u"K"
+            minimizer = SteepestDescentMinimizer()
+            simulate!(sys, minimizer; run_loggers=false, show_progress=false)
+            Random.seed!(2024)
+            random_velocities!(sys, temp)
+            remove_CM_motion!(sys)
+
+            simulator = VelocityVerlet(
+                dt=0.1u"fs",
+                remove_CM_motion=false
+            )
+
+            # 10 ps equilibration
+            simulate!(sys, simulator, 100_000; run_loggers=false, show_progress=false)
+            E0 = total_energy(sys)
+
+            n_steps = array_type === Array ? 700_000 : 20_000_000
+            simulate!(sys, simulator, n_steps; show_progress=false)
+
+            E = values(sys.loggers.energy)
+            max_ΔE = maximum(abs.(E .- E0))
+            @test max_ΔE < 10.0u"kJ * mol^-1"
+        end
     end
 end

@@ -565,6 +565,9 @@ function System(coord_file_path::AbstractString,
         atom = Chemfiles.Atom(frame, at_index-1)
         atom_type = Chemfiles.type(atom)
         if !haskey(at_map, atom_type)
+            atom_type = uppercasefirst(lowercase(atom_type))
+        end
+        if !haskey(at_map, atom_type)
             throw(ArgumentError("Atom Not Found: atom <$atom_type> in coord file not defined in ReaxFF force field file"))
         end
 
@@ -2009,6 +2012,9 @@ end
                 if bo′ > zero(T) 
                     fp_i = Atomix.@atomic fill_pos[i] += 1
                     fp_j = Atomix.@atomic fill_pos[j] += 1
+                    if fp_i > size(nbrs, 1) || fp_j > size(nbrs, 1)
+                        error("ReaxFF bonded-neighbor capacity exceeded")
+                    end
     
                     nbrs[fp_i, i] = j
                     nbrs[fp_j, j] = i
@@ -2261,6 +2267,7 @@ function bonds!(
         ndrange=length(neighbors),
         workgroupsize=backend_workgroupsize(backend, length(neighbors), n_threads)
     )
+    synchronize(backend)
 
     Δ′ = inter.state.Δ         # uncorrected overcoordination
     Δ′_boc = inter.state.Δ_boc     # second uncorrected overcoordination
