@@ -34,7 +34,7 @@ module MollyLuxExt
 
 using Molly
 using Molly: from_device, to_device, vector, celu01, cosine_cutoff
-import AtomsCalculators
+import AtomsBase, AtomsCalculators
 using Lux, HDF5
 using KernelAbstractions
 using LazyArtifacts
@@ -51,38 +51,33 @@ Molly.ani2x_data_dir() = artifact"ani2x"
 
 const NM_TO_ANGSTROM = 10
 
-# In-place conversion of coordinates to unitless Å in a pre-allocated buffer (zero allocations).
-# The unit check is on the element type (no indexing), so it also works for device arrays.
-function coords_to_angstrom_into!(out::AbstractVector{SVector{D,TF}},
-                                  coords::AbstractVector{SVector{D,T}}) where {D, TF, T}
-    if T <: Real   # unitless Molly coords are nm
-        @inbounds for i in eachindex(coords)
-            out[i] = SVector{D,TF}(coords[i]) * TF(NM_TO_ANGSTROM)
-        end
-    else
-        @inbounds for i in eachindex(coords)
-            out[i] = SVector{D,TF}(ustrip.(u"Å", coords[i]))
-        end
+# The ANI-2x weights are Float32, so all ANI calculation is in Float32. The entry points
+#   convert the coordinates and boundary to Float32 Å with the functions below, and the
+#   kernels and networks take their float type from the coordinates. The unit check is on the
+#   element type, so this also works for device arrays.
+@inline coord_to_angstrom(c::SVector{D, <:Real}) where {D} =
+    SVector{D, Float32}(c) * Float32(NM_TO_ANGSTROM) # Unitless Molly coords are nm
+@inline coord_to_angstrom(c::SVector{D}) where {D} = SVector{D, Float32}(ustrip.(u"Å", c))
+
+# In-place conversion of coordinates to unitless Å in a pre-allocated buffer
+function coords_to_angstrom_into!(out, coords)
+    @inbounds for i in eachindex(coords)
+        out[i] = coord_to_angstrom(coords[i])
     end
+    return out
 end
 
-# Non-mutating conversion of coordinates to unitless Å, staying on the coords' device. Unitless
-# Molly coords are treated as nm. Unit check is on the element type so this works on GPU arrays.
-function coords_to_angstrom(coords)
-    eltype(eltype(coords)) <: Real ? coords .* NM_TO_ANGSTROM : ustrip_vec.(u"Å", coords)
-end
+# Non-mutating conversion of coordinates to unitless Å, on the device of the coordinates
+coords_to_angstrom(coords) = coord_to_angstrom.(coords)
 
-# Convert a boundary to unitless Å (unitless side lengths are treated as nm).
-strip_boundary(b::CubicBoundary) =
-    unit(b.side_lengths[1]) == NoUnits ? CubicBoundary(b.side_lengths .* NM_TO_ANGSTROM) :
-                                         CubicBoundary(ustrip.(u"Å", b.side_lengths))
+@inline length_to_angstrom(x::Real) = Float32(x) * Float32(NM_TO_ANGSTROM)
+@inline length_to_angstrom(x) = Float32(ustrip(u"Å", x))
+
+# Convert a boundary to unitless Float32 Å (unitless side lengths are treated as nm)
+strip_boundary(b::CubicBoundary) = CubicBoundary(length_to_angstrom.(b.side_lengths))
 
 function strip_boundary(b::TriclinicBoundary{D, T, C, A}) where {D, T, C, A}
-    if unit(b.basis_vectors[1][1]) == NoUnits
-        bv = SVector(ntuple(i -> b.basis_vectors[i] .* NM_TO_ANGSTROM, 3))
-    else
-        bv = SVector(ntuple(i -> ustrip.(u"Å", b.basis_vectors[i]), 3))
-    end
+    bv = SVector(ntuple(i -> length_to_angstrom.(b.basis_vectors[i]), 3))
     return TriclinicBoundary(bv; approx_images=A)
 end
 
@@ -474,9 +469,8 @@ end
 # Read an HDF5 dataset as a Vector{T}, handling scalar datasets gracefully.
 h5vec(grp, name, T) = T.(vcat(read(grp[name])))
 
-function Molly.ANIPotential(path::AbstractString;
-                           T            = Float32,
-                           ensemble_idx = nothing)
+function Molly.ANIPotential(path::AbstractString; ensemble_idx=nothing)
+    T = Float32 # As for the weights, see `build_element_model`
     h5open(path, "r") do h5
         # AEV hyperparameters
         ag    = h5["aev_params"]
