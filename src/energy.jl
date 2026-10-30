@@ -254,15 +254,30 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           general_inters=sys.general_inters,
                           visit_state::Bool=false,
                           strictness=default_strictness()) where TH
+    pe = zero(TH) * sys.energy_units
+    pes_early = map(values(general_inters)) do inter
+        if evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(TH) * sys.energy_units
+        end
+    end
+    for pe_early in pes_early
+        pe += pe_early
+    end
+
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
-        pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        pe += with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
             pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                              neighbors, sys.energy_units, length(sys), pis_nonl, pis_nl,
                              step_n, Val(TH), Val(n_threads), Val(use_vel), Val(sys.grad_safe))
         end
-    else
-        pe = zero(TH) * sys.energy_units
     end
 
     if length(specific_inter_lists) > 0
@@ -279,12 +294,16 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
     # `map` over the tuple keeps each interaction concretely typed; a loop over general
     #   interactions of different types gives a Union that Enzyme can not differentiate
     pes_general = map(values(general_inters)) do inter
-        uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, visit_state=visit_state,
-                                              strictness=strictness),
-        )
+        if !evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(TH) * sys.energy_units
+        end
     end
     for pe_general in pes_general
         pe += pe_general
@@ -545,18 +564,39 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           general_inters=sys.general_inters,
                           visit_state::Bool=false,
                           strictness=default_strictness())
+    pe = zero(float_type_high(sys)) * sys.energy_units
+    pes_early = map(values(general_inters)) do inter
+        if evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(float_type_high(sys)) * sys.energy_units
+        end
+    end
+    for pe_early in pes_early
+        pe += pe_early
+    end
+
     # Allow an Enzyme reverse rule
-    pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+    pe += gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
 
     # `map` keeps each general interaction concretely typed for Enzyme, as on the CPU
     pes_general = map(values(general_inters)) do inter
-        uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, visit_state=visit_state,
-                                              strictness=strictness),
-        )
+        if !evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(float_type_high(sys)) * sys.energy_units
+        end
     end
     for pe_general in pes_general
         pe += pe_general

@@ -556,3 +556,271 @@ end
         end
     end
 end
+
+@testset "Enzyme $quantity gradient CPU $structure_file smoothness=$smoothness_correction" for smoothness_correction in (false, true),
+        quantity in (:energy, :force_loss), structure_file in ("ethane.pdb", "water.pdb")
+    reaxff = ReaxFF(
+        force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
+        float_type=Float64,
+        array_type=Array,
+        smoothness_correction=smoothness_correction,
+    )
+
+    sys = System(
+        joinpath(data_dir, "ReaxFF", "data", structure_file),
+        reaxff;
+        boundary=CubicBoundary(2.5),
+        array_type=Array,
+        units=false,
+        eem_tolerance=1e-12
+    )
+
+    neighbors = find_neighbors(sys; n_threads=1)
+
+    function loss_function(reaxff, sys, neighbors)
+        eem = sys.general_inters[1]
+        fill!(eem.state.q, 0.0)
+
+        forces, energy = Molly.enzyme_forces_and_energy(sys, reaxff, eem; neighbors)
+        if quantity == :energy
+            return energy
+        else
+            return sqrt(sum(abs2, forces))
+        end
+    end
+
+    loss_function(reaxff, sys, neighbors)
+
+    grad_sys = Enzyme.make_zero(sys)
+    grad_reaxff = grad_sys.general_inters[2]
+
+    Enzyme.autodiff(
+        Reverse,
+        loss_function,
+        Active,
+        Duplicated(reaxff, grad_reaxff),
+        Duplicated(sys, grad_sys),
+        Const(neighbors)
+    )
+
+    function fd_general_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        dp = reaxff_new.device_params
+
+        reaxff_new.device_params = Molly.DeviceParams(
+            parameters, dp.atom_parameters, dp.bond_parameters,
+            dp.off_diagonal_parameters, dp.angle_entries,
+            dp.angle_parameters, dp.torsion_parameters,
+            dp.h_bond_parameters, dp.global_parameters,
+            dp.taper_parameters, dp.h_bond_donors, dp.h_bond_acceptors
+        )
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_atom_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        reaxff_new.device_params.atom_parameters .= parameters
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_bond_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        bonds = reaxff_new.device_params.bond_parameters
+
+        for i in eachindex(bonds)
+            bonds[i] = Molly.BondParameters(parameters[i]..., bonds[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_off_diagonal_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        pairs = reaxff_new.device_params.off_diagonal_parameters
+
+        for i in eachindex(pairs)
+            pairs[i] = Molly.OffDiagonalParameters(parameters[i]..., pairs[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_angle_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        angles = reaxff_new.device_params.angle_parameters
+
+        for i in eachindex(angles)
+            angles[i] = Molly.AngleParameters(parameters[i]..., angles[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_torsion_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        torsions = reaxff_new.device_params.torsion_parameters
+
+        for i in eachindex(torsions)
+            torsions[i] = Molly.TorsionParameters(parameters[i]..., torsions[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_h_bond_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        h_bonds = reaxff_new.device_params.h_bond_parameters
+
+        for i in eachindex(h_bonds)
+            h_bonds[i] = Molly.HBondParameters(parameters[i]..., h_bonds[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    parameters = reaxff.device_params.general_parameters
+    fdm = central_fdm(5, 1)
+    finite_diff_gradients = grad(fdm, fd_general_loss, parameters)[1]
+
+    enzyme_gradients = grad_reaxff.device_params.general_parameters
+
+    for name in fieldnames(typeof(parameters))
+        # these parameters require updating cached values first
+        if name in (:upper_taper_radius, :cutoff_bond_order)
+            continue
+        end
+
+        @test isapprox(
+            getfield(enzyme_gradients, name),
+            getfield(finite_diff_gradients, name);
+            rtol=1e-6,
+            atol=1e-8
+        )
+    end
+
+    atom_params = reaxff.device_params.atom_parameters
+    finite_diff_atom_gradients = grad(fdm, fd_atom_loss, atom_params)[1]
+    enzyme_atom_gradients = grad_reaxff.device_params.atom_parameters
+
+    for i in eachindex(atom_params)
+        for name in fieldnames(typeof(atom_params[i]))
+            if name in (:D_ij, :r_vdW, :alpha, :ro_sigma, :ro_pi, :ro_pipi)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_atom_gradients[i], name),
+                getfield(finite_diff_atom_gradients[i], name);
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    bond_params = reaxff.device_params.bond_parameters
+    bond_names = fieldnames(eltype(bond_params))[1:end-1]
+    bond_values = [[getfield(bond, name) for name in bond_names] for bond in bond_params]
+
+    finite_diff_bond_gradients = grad(fdm, fd_bond_loss, bond_values)[1]
+    enzyme_bond_gradients = grad_reaxff.device_params.bond_parameters
+
+    for i in eachindex(bond_params)
+        for (j, name) in enumerate(bond_names)
+            if name in (:ot_corr, :ovcoord)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_bond_gradients[i], name),
+                finite_diff_bond_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    off_diagonal_params = reaxff.device_params.off_diagonal_parameters
+    off_diagonal_names = fieldnames(eltype(off_diagonal_params))[1:end-1]
+    off_diagonal_values = [[getfield(pair, name) for name in off_diagonal_names] for pair in off_diagonal_params]
+
+    finite_diff_off_diagonal_gradients = grad(fdm, fd_off_diagonal_loss, off_diagonal_values)[1]
+    enzyme_off_diagonal_gradients = grad_reaxff.device_params.off_diagonal_parameters
+
+    for i in eachindex(off_diagonal_params)
+        for (j, name) in enumerate(off_diagonal_names)
+            if name in (:gamma_w_inv_pow, :gamma_ij_inv_pow)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_off_diagonal_gradients[i], name),
+                finite_diff_off_diagonal_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    angle_params = reaxff.device_params.angle_parameters
+    angle_names = fieldnames(eltype(angle_params))[1:end-1]
+    angle_values = [[getfield(angle, name) for name in angle_names] for angle in angle_params]
+
+    angle_fdm = central_fdm(5, 1; factor=100)
+    finite_diff_angle_gradients = grad(angle_fdm, fd_angle_loss, angle_values)[1]
+    enzyme_angle_gradients = grad_reaxff.device_params.angle_parameters
+
+    for i in eachindex(angle_params)
+        for (j, name) in enumerate(angle_names)
+            @test isapprox(
+                getfield(enzyme_angle_gradients[i], name),
+                finite_diff_angle_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    torsion_params = reaxff.device_params.torsion_parameters
+    torsion_names = fieldnames(eltype(torsion_params))[1:end-1]
+    torsion_values = [[getfield(torsion, name) for name in torsion_names] for torsion in torsion_params]
+
+    finite_diff_torsion_gradients = grad(fdm, fd_torsion_loss, torsion_values)[1]
+    enzyme_torsion_gradients = grad_reaxff.device_params.torsion_parameters
+
+    for i in eachindex(torsion_params)
+        for (j, name) in enumerate(torsion_names)
+            @test isapprox(
+                getfield(enzyme_torsion_gradients[i], name),
+                finite_diff_torsion_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    h_bond_params = reaxff.device_params.h_bond_parameters
+    h_bond_names = fieldnames(eltype(h_bond_params))[1:end-1]
+    h_bond_values = [[getfield(h_bond, name) for name in h_bond_names] for h_bond in h_bond_params]
+
+    finite_diff_h_bond_gradients = grad(fdm, fd_h_bond_loss, h_bond_values)[1]
+    enzyme_h_bond_gradients = grad_reaxff.device_params.h_bond_parameters
+
+    for i in eachindex(h_bond_params)
+        for (j, name) in enumerate(h_bond_names)
+            @test isapprox(
+                getfield(enzyme_h_bond_gradients[i], name),
+                finite_diff_h_bond_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+end

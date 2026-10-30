@@ -435,10 +435,10 @@ end
 
 """
     GPUCellListNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
-                              n_steps=10, array_type, max_neighbors=nothing,
+                              n_steps=10, force_float32=false, array_type, max_neighbors=nothing,
                               output=:molly_pairs, ragged=true, strictness=:warn)
     GPUCellListNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
-                              array_type=nothing, max_neighbors=nothing,
+                              force_float32=false, array_type=nothing, max_neighbors=nothing,
                               output=:molly_pairs, ragged=true, strictness=:warn)
 
 Neighbor finder for GPU systems that bins atoms into a uniform grid of cells and
@@ -449,11 +449,14 @@ the recommended neighbor finder for non-CUDA GPUs, where [`GPUNeighborFinder`](@
 is not available. Three-dimensional [`CubicBoundary`](@ref) and
 [`TriclinicBoundary`](@ref) systems are supported, provided the grid has at least
 three cells along every box axis, i.e. opposite box faces are at least three times
-`dist_cutoff` apart. For a [`TriclinicBoundary`](@ref) that distance is smaller than
-the length of the corresponding basis vector.
+the internally padded search cutoff apart. For a [`TriclinicBoundary`](@ref), that
+distance is smaller than the length of the corresponding basis vector.
 
 `dist_cutoff` is the neighbor search distance, which should be the interaction cutoff
 distance plus a buffer distance since the list is only updated every `n_steps` steps.
+
+Neighbor finding uses the system's floating-point type by default.
+Set `force_float32=true` to use `Float32` for neighbor finding.
 
 The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` and
 `special_pairs`, or by the `eligible` and `special` matrices, as for
@@ -503,6 +506,7 @@ trial list, would see the new neighbors with a stale pair count.
 mutable struct GPUCellListNeighborFinder{D, B, S}
     dist_cutoff::D
     n_steps::Int
+    force_float32::Bool
     max_neighbors::Union{Nothing, Int}
     output::Symbol
     ragged::Bool
@@ -532,6 +536,7 @@ function GPUCellListNeighborFinder(;
     excluded_pairs=(),
     special_pairs=(),
     n_steps=10,
+    force_float32::Bool=false,
     array_type=nothing,
     max_neighbors=nothing,
     output::Symbol=:molly_pairs,
@@ -578,7 +583,7 @@ function GPUCellListNeighborFinder(;
     if output !== :molly_pairs
         # The other modes ignore the exceptions, so nothing is stored for them
         return GPUCellListNeighborFinder{typeof(dist_cutoff), Nothing, Nothing}(
-            dist_cutoff, n_steps_int, max_neighbors_int, output, ragged,
+            dist_cutoff, n_steps_int, force_float32, max_neighbors_int, output, ragged,
             (isnothing(n_atoms) ? 0 : Int(n_atoms)), nothing, nothing,
         )
     end
@@ -601,7 +606,7 @@ function GPUCellListNeighborFinder(;
 
     return GPUCellListNeighborFinder{typeof(dist_cutoff), typeof(eligible_sparse),
                                      typeof(special_sparse)}(
-        dist_cutoff, n_steps_int, max_neighbors_int, output, ragged, n_atoms_used,
+        dist_cutoff, n_steps_int, force_float32, max_neighbors_int, output, ragged, n_atoms_used,
         eligible_sparse, special_sparse,
     )
 end
@@ -1676,10 +1681,12 @@ function find_neighbors(sys::System{3, AT},
         "GPUCellListNeighborFinder does not support infinite boundaries"))
 
     dist_unit = unit(zero(eltype(eltype(sys.coords))))
-    T = float_type(sys)
+    T = nf.force_float32 ? Float32 : float_type(sys)
     box = cell_list_box_matrix(sys.boundary, T, dist_unit)
     widths = SVector{3, T}(T.(ustrip.(dist_unit, cell_list_box_widths(sys.boundary))))
-    cutoff = T(ustrip(dist_unit, nf.dist_cutoff))
+    requested_cutoff = ustrip(dist_unit, nf.dist_cutoff)
+    roundoff_margin = T(16) * eps(T) * opnorm(box, Inf)
+    cutoff = nextfloat(T(requested_cutoff + roundoff_margin))
 
     n_atoms = length(sys)
     build_pairs = nf.output !== :ragged
@@ -1730,12 +1737,19 @@ end
 Whether a box can be used with GPUCellListNeighborFinder.
 
 The 3x3x3 cell stencil needs at least three cells along every box axis, so opposite
-box faces have to be at least three times the neighbor search distance apart.
+box faces have to be at least three times the internally padded search cutoff apart.
 =#
-function gpu_cell_list_suitable(boundary, dist_cutoff)
+function gpu_cell_list_suitable(boundary, dist_cutoff; force_float32=false)
     (boundary isa CubicBoundary{3} || boundary isa TriclinicBoundary) || return false
     has_infinite_boundary(boundary) && return false
-    return minimum(cell_list_box_widths(boundary)) >= 3 * dist_cutoff
+    T = force_float32 ? Float32 : float_type(boundary)
+    dist_unit = unit(dist_cutoff)
+    box = cell_list_box_matrix(boundary, T, dist_unit)
+    widths = SVector{3, T}(T.(ustrip.(dist_unit, cell_list_box_widths(boundary))))
+    requested_cutoff = ustrip(dist_unit, dist_cutoff)
+    roundoff_margin = T(16) * eps(T) * opnorm(box, Inf)
+    cutoff = nextfloat(T(requested_cutoff + roundoff_margin))
+    return minimum(widths) / cutoff >= 3
 end
 
 # Defined so that unsupported systems get an explanation rather than a MethodError

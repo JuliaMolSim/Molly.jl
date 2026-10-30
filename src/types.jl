@@ -51,6 +51,9 @@ Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
+# Whether a general interaction is evaluated before pairwise and specific interactions
+evaluate_before_pairwise(inter) = false
+
 """
     from_device(arr)
 

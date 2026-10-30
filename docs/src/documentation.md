@@ -472,6 +472,240 @@ water_sdf  = System(joinpath(data_dir, "water_formats", "water.sdf" ), ff) # Res
       potential_energy(water_mol2) ≈ potential_energy(water_sdf)
 ```
 
+## ReaxFF
+
+`ReaxFF` is a reactive empirical force-field that allows the description of chemical bonding and reactive events without expensive quantum chemical calculations. ([van Duin et al. 2001](https://doi.org/10.1021/jp004368u)).
+
+The reactive description is enabled through a continuous bond order formalism, where bond orders are calculated from interatomic distances and then corrected based on each atom's local coordination environment. 
+A fixed bonding topology is therefore not required. 
+Partial charges for all atoms are also updated each MD step using a dynamic charge equilibration scheme, allowing the charge distribution to respond to changes in geometry as bonds form and break.
+
+Force-field parameters are assigned by chemical element and their combinations. 
+Parameters sets are generally developed for particular chemical applications, so careful selection of a force-field file is important for the environments and reactions you intend to simulate. 
+A selection of literature ReaxFF force-fields is provided in the
+[ReaxFF force-field directory](https://github.com/JuliaMolSim/Molly.jl/tree/master/data/ReaxFF/force_fields).
+
+For implementation notes, see [ReaxFF implementation details](@ref).
+
+### Simulating methane combustion
+
+This section introduces the setup of ReaxFF MD simulations in Molly by adapting the procedure for high-temperature oxidation of methane in the canonical ensemble (NVT) as described in [Chenoweth et al. (2008)](https://doi.org/10.1021/jp709896w). 
+This involves simulating one methane molecule in a box with 100 oxygen molecules using periodic boundary conditions, starting with low-temperature equilibration at 100 K and high-temperature equilibration at 2500 K, followed by 1 ns of production NVT simulation at 2500 K. 
+This example walks through selecting a ReaxFF force-field file, constructing a Molly system compatible with ReaxFF simulation, minimizing the initial structure, controlling the temperature, and recording a reactive trajectory.
+
+#### Computational setup
+
+We first load Molly and CUDA and locate the bundled ReaxFF data, containing literature force-field files and example systems. 
+Setting `array_type = CuArray` selects GPU execution; use `Array` for CPU execution. 
+If running on CPU, the CUDA import can be omitted. 
+We use `Float64` to set internal ReaxFF calculations to double-precision, which is highly recommended as single-precision arithmetic can lead to significant energy drifts in long NVE simulations (see discussion in [Senftle et al. (2016)](https://doi.org/10.1038/npjcompumats.2015.11)).
+
+```julia
+using Molly
+using CUDA
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data", "ReaxFF")
+float_type = Float64
+array_type = CuArray
+```
+
+#### Load the force field
+
+We construct a `ReaxFF` interaction using the Chenoweth C/H/O parameter set for hydrocarbon oxidation. 
+ReaxFF force fields in general are trained for highly specific applications, and should not be assumed to be transferable to other systems outside of their parameterization domain, even if they contain the same elements. 
+The force-field must contain parameters for every element that will be present in the simulated system.
+
+The `force_field_file` argument selects the parameter file, while `float_type` and `array_type` carry over our precision and CPU/GPU choices.
+
+```julia
+reaxff = ReaxFF(
+    force_field_file=joinpath(data_dir, "force_fields", "Chenoweth_2008_CHO.ff"),
+    float_type=float_type,
+    array_type=array_type
+)
+```
+
+#### Construct the system
+
+The methane + oxygen system is loaded from the supplied PDB file. 
+In principle any structure file that is supported by Chemfiles can be loaded, but they must contain element information for every atom since ReaxFF requires atomic coordinates and elements. 
+In our case, the PDB file must contain valid element names in the column `Element symbol` (columns 77-78).
+
+A periodic cubic box with side length 2.5 nm is chosen to give a reasonable system density. 
+Molly sets up the charge equilibration and ReaxFF interactions using the selected force field by constructing a general interactions tuple with EEM and ReaxFF interactions attached.
+
+`eem_float_type` selects the numerical precision of the EEM solver (Float64 highly recommended), while `eem_tolerance` controls its convergence tolerance (typically 1e-6 is used).
+
+The loggers record total energy and write trajectory frames every 100 steps. 
+These loggers run during minimization, equilibration, and production.
+
+```julia
+sys = System(
+    joinpath(data_dir, "data", "methane_oxidation.pdb"),
+    reaxff;
+    boundary=CubicBoundary(float_type(2.5)u"nm"),
+    array_type=array_type,
+    eem_float_type=Float64,
+    eem_tolerance=1e-6,
+    loggers=(
+        total_energy=TotalEnergyLogger(100),
+        writer=TrajectoryWriter(100, "methane_oxidation_ReaxFF_NVT.dcd"; correction=:pbc),
+    )
+)
+```
+
+#### Minimize the initial structure
+
+Before starting dynamics, we relax the initial structure using energy minimization via steepest-descent. 
+Setting `run_loggers=true` includes the minimization energies and trajectory frames in the recorded output.
+
+```julia
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer; run_loggers=true)
+```
+
+#### Equilibrate at low temperature
+
+Atomic velocities are initialized from the Maxwell–Boltzmann distribution at a temperature of 100 K, followed by 10 ps of molecular dynamics using velocity Verlet and a Berendsen thermostat. 
+We note that the Berendsen thermostat does not generate the correct canonical distribution, but we use it following the procedure in the paper.
+
+The timestep, `dt=0.1u"fs"`, used in ReaxFF is typically small, with simulations reported in literature using the range 0.1 - 0.25 fs. 
+We select the coupling time, `0.1u"ps"`, of the thermostat to match the settings in the Chenoweth et al. paper.
+
+```julia
+# low-temperature equilibration
+temp = 100.0u"K"
+random_velocities!(sys, temp)
+
+simulator = VelocityVerlet(
+    dt=0.1u"fs",
+    coupling=BerendsenThermostat(temp, 0.1u"ps")
+)
+simulate!(sys, simulator, 100_000)      # 10 ps
+
+```
+
+#### Heat to the reaction temperature
+
+We raise the thermostat target to 2500 K and equilibrate for 100 ps, retaining a timestep of 0.1 fs and thermostat coupling of 0.1 ps. 
+Although Chenoweth et al. turned off C–O and H–O bond parameters during this equilibration section to prevent reactions, this example keeps the full force field active, so reactions can occur during equilibration.
+
+```julia
+# high-temperature equilibration
+temp = 2500.0u"K"
+simulator = VelocityVerlet(
+    dt=0.1u"fs",
+    coupling=BerendsenThermostat(temp, 0.1u"ps")
+)
+simulate!(sys, simulator, 1_000_000)    # 100 ps
+```
+
+#### Run production dynamics
+
+We run production MD at 2500 K for 1 ns with the same 0.1 fs timestep. 
+The thermostat coupling is increased to 0.5 ps to match the paper’s production settings, weakening the temperature coupling.
+
+```julia
+# start production
+simulator = VelocityVerlet(
+    dt=0.1u"fs",
+    coupling=BerendsenThermostat(temp, 0.5u"ps")
+)
+simulate!(sys, simulator, 10_000_000)   # 1 ns
+```
+
+#### Inspect the output
+
+The trajectory is written to `methane_oxidation_ReaxFF_NVT.dcd` in the working directory. 
+The 100-step logging interval corresponds to saving a frame every 10 fs. 
+The trajectory and energy histories also include minimization, equilibration, and production.
+
+The recorded total energies can be accessed through the system’s logger:
+
+```julia
+energies = values(sys.loggers.total_energy)
+```
+
+### Simulating a solvated protein
+
+This example simulates solvated ubiquitin (PDB ID: 1UBQ) in the isothermal-isobaric ensemble (NPT) using the Monti et al. `ProtReaxFF` force-field ([Monti et al. 2013](https://doi.org/10.1039/C3CP51931G)).
+
+It runs on a NVIDIA GPU at 300 K and 1 bar, using a Nosé–Hoover thermostat and an isotropic Monte Carlo barostat. 
+Since ReaxFF does not currently implement the virial, the Monte Carlo barostat is required for pressure coupling.
+In addition, when using the Monte Carlo barostat without a neighbor finder skin, the `trial_find_neighbors` field must be set to `true` in order to refresh the neighbors when a trial attempt changes the atomic coordinates.
+
+```julia
+using Molly
+using CUDA
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data", "ReaxFF")
+float_type = Float64
+array_type = CuArray
+
+reaxff = ReaxFF(
+    force_field_file=joinpath(data_dir, "force_fields", "Monti_2013_CHONSMgPNaCuCl.ff"),
+    float_type=float_type,
+    array_type=array_type
+)
+
+sys = System(
+    joinpath(data_dir, "data", "1UBQ_solvated.pdb"),
+    reaxff;
+    boundary=CubicBoundary(float_type(6.503)u"nm"),
+    array_type=array_type,
+    eem_float_type=Float64,
+    eem_tolerance=1e-6,
+    loggers=(
+        total_energy=TotalEnergyLogger(1_000),
+        writer=TrajectoryWriter(1_000, "1UBQ_ReaxFF_NPT.dcd"; correction=:pbc),
+    )
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer; run_loggers=true)
+
+temp = 300.0u"K"
+random_velocities!(sys, temp)
+
+barostat = MonteCarloBarostat(
+    1.0u"bar",
+    temp,
+    sys.boundary;
+    n_steps=30,
+    trial_find_neighbors=true,
+)
+
+simulator = NoseHoover(
+    dt=0.25u"fs",
+    temperature=temp,
+    damping=0.1u"ps",
+    coupling=barostat
+)
+
+simulate!(sys, simulator, 4_000_000)    # 1 ns
+```
+
+### Furman and Wales smoothness correction
+
+ReaxFF uses several cutoffs in its functional forms for bond-orders and distances to limit the number of interactions that require evaluating, therefore saving computation. 
+However, abrupt truncation at these various cutoffs introduces discontinuities in the potential energy and forces, which can result in poor energy conservation and other issues. 
+This implementation provides an optional flag to turn on the smoothness correction based on [Furman and Wales (2019)](https://doi.org/10.1021/acs.jpclett.9b02810), which applies seventh-order polynomial tapering functions to bond orders and selected bonded energy contributions near their cutoffs.
+
+Enable the correction by setting `smoothness_correction=true` when constructing the `ReaxFF` interaction, before creating the `System`. The default is `false`.
+
+```julia
+reaxff = ReaxFF(
+    force_field_file=joinpath(data_dir, "force_fields", "Chenoweth_2008_CHO.ff"),
+    float_type=float_type,
+    array_type=array_type,
+    smoothness_correction=true,
+)
+```
+
+In this implementation, this smoothness correction smooths the uncorrected bond-order components and applies tapering to the valence-angle, penalty, conjugation, torsion, hydrogen-bond, and C–O triple-bond correction ReaxFF energy terms. 
+The same force-field parameter file is used, but enabling the correction changes the evaluated energies and forces near the affected cutoffs.
+More details about the implementation of this correction can be found in the [Furman-Wales smoothness correction](@ref) section of the developer documentation.
+
 ## Enhanced sampling
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExchangeMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
@@ -1107,7 +1341,8 @@ The neighbors calculated from the neighbor list are available in this function, 
 You could carry out your own neighbor finding in this function if required.
 Since the forces are available for mutation in the function, general interactions can be used to modify the forces in arbitrary ways, though it is up to you to write an appropriate potential energy function if energies are required.
 In cases where the forces are not simply added to, the order of general interactions can matter.
-General interactions are applied after pairwise and specific interactions.
+General interactions are applied after pairwise and specific interactions by default.
+Define `Molly.evaluate_before_pairwise(::MyGeneralInter) = true` to evaluate an interaction before them.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by the [`masses`](@ref) of the system, `masses(sys)`, to get the forces according to F=ma.
 
 If you want to use the [`virial`](@ref) in your simulation, for example for to control pressure, you will also need to calculate the contribution to the virial in the `AtomsCalculators.forces!` function.
