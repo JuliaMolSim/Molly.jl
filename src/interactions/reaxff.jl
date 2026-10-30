@@ -838,6 +838,10 @@ function _set_force_field_file_reaxff_params(
                 end
             end
 
+            if atmp_tmp[3] < T(21)
+                atmp_tmp[23] = atmp_tmp[11]
+            end
+
             atmp = AtomParameters{T}(atmp_tmp...)
             push!(atom_parameters, atmp)
         end
