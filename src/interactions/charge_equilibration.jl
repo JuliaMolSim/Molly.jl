@@ -1273,3 +1273,6 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, 
 
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::ElectronegativityEqualizationMethod) =
+                                                                        zero_forces(sys)

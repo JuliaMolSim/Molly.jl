@@ -1310,8 +1310,8 @@ end
 end
 
 @testset "Metadynamics AtomsCalculators interface" begin
-    # forces, energy_forces and energy_forces! match forces! and potential_energy. A large
-    #   n_steps keeps the manual call counter from depositing between the calls.
+    # forces, calculate, energy_forces and energy_forces! match forces! and potential_energy.
+    #   A large n_steps keeps the manual call counter from depositing between the calls.
     dist = CalcDist([1], [2], CalcSingleDist(), :wrap)
     mem = GridHills((dist,), 1.0, 0.1, 0.0, 1.0, 101)
     Molly.add_hill!(mem, 0.45, 1.0)
@@ -1325,9 +1325,12 @@ end
     fs = AtomsCalculators.forces!(Molly.zero_forces(sys), sys, md)
     @test any(!iszero, fs)
     @test AtomsCalculators.forces(sys, md) ≈ fs
+    @test typeof(AtomsCalculators.forces(sys, md)) == typeof(fs)
+    @test AtomsCalculators.calculate(AtomsCalculators.Forces(), sys, md).forces ≈ fs
     ef = AtomsCalculators.energy_forces(sys, md)
     @test ef.forces ≈ fs
     @test ef.energy ≈ AtomsCalculators.potential_energy(sys, md)
+    @test AtomsCalculators.calculate(AtomsCalculators.Energy(), sys, md).energy ≈ ef.energy
     ef_inplace = AtomsCalculators.energy_forces!(Molly.zero_forces(sys), sys, md)
     @test ef_inplace.forces ≈ fs && ef_inplace.energy ≈ ef.energy
     @test md.n_deposits == 0
@@ -1340,7 +1343,8 @@ end
     AtomsCalculators.forces(sys, md_1; visit_state=true)
     AtomsCalculators.energy_forces(sys, md_1; visit_state=true)
     AtomsCalculators.potential_energy(sys, md_1; visit_state=true)
-    @test md_1.n_deposits == 3
+    AtomsCalculators.calculate(AtomsCalculators.Forces(), sys, md_1; visit_state=true)
+    @test md_1.n_deposits == 4
 end
 
 @testset "Metadynamics logger" begin

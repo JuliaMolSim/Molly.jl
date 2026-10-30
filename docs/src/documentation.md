@@ -1359,6 +1359,7 @@ For example, the following could go in the function above:
 ```
 
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
+You can add the `AtomsCalculators.@generate_interface` annotation to these functions as per the [AtomsCalculators.jl docs](https://juliamolsim.github.io/AtomsCalculators.jl/stable/utilities).
 
 A general interaction that changes with the simulation history, such as [`Metadynamics`](@ref), can use the `visit_state` keyword argument.
 This is given to [`forces`](@ref) and [`potential_energy`](@ref) and defaults to `false`.

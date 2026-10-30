@@ -444,6 +444,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     return fs
 end
 
+AtomsCalculators.zero_forces(sys::System, ::LJDispersionCorrection) = zero_forces(sys)
+
 @doc raw"""
     LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
 
@@ -587,6 +589,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     end
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::LJDispersionCorrectionλ) = zero_forces(sys)
 
 @inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
     if iszero_value(σ6_shift)

@@ -1927,8 +1927,11 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
     return fs
 end
 
-function AtomsCalculators.potential_energy(sys::AtomsBase.AbstractSystem{3}, inter::AbstractGBSA;
-                                           n_threads::Integer=Threads.nthreads(), kwargs...)
+AtomsCalculators.zero_forces(sys::System, ::AbstractGBSA) = zero_forces(sys)
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
+                        sys::AtomsBase.AbstractSystem{3}, inter::AbstractGBSA;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
     check_gbsa_n_threads(inter.buffer_force_chunks, n_threads)
     Bs, B_grads = born_radii_and_grad!(inter, sys.coords, sys.boundary, n_threads)
     gbsa_setup!(inter, sys, Bs)

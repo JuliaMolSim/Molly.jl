@@ -345,6 +345,38 @@
             @test length(neighbors) == n_pairs == 21
             @test isapprox(E_before, E_after, rtol=1e-12)
         end
+
+        @testset "AtomsCalculators interface $device" begin
+            reaxff = ReaxFF(
+                force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
+                float_type=Float64,
+                array_type=array_type,
+            )
+
+            sys = System(
+                joinpath(data_dir, "ReaxFF", "data", "ethane.pdb"),
+                reaxff;
+                boundary=CubicBoundary(3.5u"nm"),
+                array_type=array_type,
+                eem_tolerance=1e-12,
+            )
+            neighbors = find_neighbors(sys)
+
+            # The allocating methods generated for the general interactions give forces like
+            #   those of the in-place method, since the interactions have no units of their own
+            for inter in values(sys.general_inters)
+                fs = AtomsCalculators.forces!(Molly.zero_forces(sys), sys, inter;
+                                              neighbors=neighbors)
+                for fs_ac in (AtomsCalculators.forces(sys, inter; neighbors=neighbors),
+                              AtomsCalculators.calculate(AtomsCalculators.Forces(), sys, inter;
+                                                         neighbors=neighbors).forces,
+                              AtomsCalculators.energy_forces(sys, inter;
+                                                             neighbors=neighbors).forces)
+                    @test typeof(fs_ac) == typeof(fs)
+                    @test all(isapprox.(Molly.from_device(fs_ac), Molly.from_device(fs)))
+                end
+            end
+        end
     end
 
     for array_type in array_list

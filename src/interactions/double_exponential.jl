@@ -667,6 +667,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     return fs
 end
 
+AtomsCalculators.zero_forces(sys::System, ::DExpDispersionCorrection) = zero_forces(sys)
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                     inter::DExpDispersionCorrectionλ; kwargs...)
     return inter.factor / volume(sys) + inter.energy_const
@@ -682,3 +684,5 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     end
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::DExpDispersionCorrectionλ) = zero_forces(sys)

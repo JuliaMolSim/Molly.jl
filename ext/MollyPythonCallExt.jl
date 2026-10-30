@@ -6,7 +6,7 @@ module MollyPythonCallExt
 using Molly
 using Molly: from_device, to_device
 using PythonCall
-import AtomsCalculators
+import AtomsBase, AtomsCalculators
 using GPUArrays
 using StaticArrays
 using Unitful
@@ -109,13 +109,14 @@ function from_ase_energy(x, energy_units)
     end
 end
 
-function AtomsCalculators.forces!(fs,
-                                  sys::System{D, AT, T},
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
+                                  sys::System,
                                   ase_calc::ASECalculator;
                                   buffers=nothing,
                                   needs_vir=false,
                                   strictness=Molly.default_strictness(),
-                                  kwargs...) where {D, AT, T}
+                                  kwargs...)
+    D, AT, T = AtomsBase.n_dimensions(sys), Molly.array_type(sys), Molly.float_type(sys)
     Molly.update_ase_calc!(ase_calc, sys)
     # The stress is requested before the forces since some calculators only calculate
     #   the stress when asked, but then also calculate the forces
@@ -146,9 +147,12 @@ function AtomsCalculators.forces!(fs,
     return fs
 end
 
-function AtomsCalculators.potential_energy(sys::System{<:Any, <:Any, T},
+AtomsCalculators.zero_forces(sys::System, ::ASECalculator) = Molly.zero_forces(sys)
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys::System,
                                            ase_calc::ASECalculator;
-                                           kwargs...) where T
+                                           kwargs...)
+    T = Molly.float_type(sys)
     Molly.update_ase_calc!(ase_calc, sys)
     pe_py = ase_calc.ase_atoms.get_potential_energy()
     pe = pyconvert(T, pe_py)

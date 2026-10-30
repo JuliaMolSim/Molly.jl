@@ -286,7 +286,8 @@ function check_bias_finite(value, label::AbstractString, bias;
     error(msg)
 end
 
-function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                            bias::BiasPotential; kwargs...)
     if bias.cv_type.correction == :pbc
         coords = unwrap_molecules(sys)
     else
@@ -307,7 +308,7 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     return check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
 end
 
-function AtomsCalculators.forces!(
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
@@ -351,3 +352,5 @@ function AtomsCalculators.forces!(
     fs .-= to_device(fs_svec, typeof(fs))
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::BiasPotential) = zero_forces(sys)

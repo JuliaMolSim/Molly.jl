@@ -618,9 +618,9 @@ function ani_raw_energy(coords_strip::AbstractVector{SVector{D,T}},
     return E / n_ens
 end
 
-function AtomsCalculators.potential_energy(sys::System{D, AT, T},
-                                           inter::ANIPotential;
-                                           kwargs...) where {D, AT, T}
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys::System,
+                                            inter::ANIPotential; kwargs...)
+    D, AT = AtomsBase.n_dimensions(sys), Molly.array_type(sys)
     nbrs = get(kwargs, :neighbors, nothing)
     n_sp = length(inter.species_map)
     # ANI-2x is a Float32 model, so the AEV + energy run in Float32 on both CPU and GPU.
@@ -1774,12 +1774,15 @@ function Molly.compute_ani_forces_ka(coords::AbstractVector{SVector{D,T}}, speci
     return F
 end
 
+AtomsCalculators.zero_forces(sys::System, ::ANIPotential) = Molly.zero_forces(sys)
+
 # The ANI forces path. Converts coords to unitless Å (staying on their device — Array → KA CPU,
 # GPU array → Metal/CUDA), computes forces via the analytic backward, and accumulates into `fs`
 # in the system's units.
-function AtomsCalculators.forces!(fs, sys::System{D, AT, T}, inter::ANIPotential;
-                                  needs_vir=false, strictness=Molly.default_strictness(),
-                                  kwargs...) where {D, AT, T}
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys::System,
+                                  inter::ANIPotential; needs_vir=false,
+                                  strictness=Molly.default_strictness(), kwargs...)
+    D, AT, T = AtomsBase.n_dimensions(sys), Molly.array_type(sys), Molly.float_type(sys)
     if needs_vir
         err_str = "The virial contribution for ANIPotential is not implemented " *
                   "and will be ignored"

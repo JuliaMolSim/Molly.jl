@@ -4796,6 +4796,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, 
     return fs
 end
 
+AtomsCalculators.zero_forces(sys::System, ::ReaxFF) = zero_forces(sys)
 
 ### Extra energy and force functions for tests below ###
 

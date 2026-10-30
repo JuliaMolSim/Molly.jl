@@ -35,6 +35,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
     return fs
 end
 
+AtomsCalculators.zero_forces(sys::System, ::AbstractEwald) = zero_forces(sys)
+
 function AtomsCalculators.energy_forces!(fs::AbstractVector, # Required for disambiguation
                                          sys::System,
                                          inter::AbstractEwald;
