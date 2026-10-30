@@ -2787,7 +2787,7 @@ end
                             for p_idx in start_index:end_index
                                 angp_ijk = angp[p_idx]
 
-                                if angp_ijk.p_val1 > 0.001
+                                if abs(angp_ijk.p_val1) > 0.001
                                     valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
 
                                     # if overflow, continue counting so can resize later
@@ -2943,7 +2943,7 @@ end
 
                     angp_ijk = angp[p_idx]
 
-                    if angp_ijk.p_val1 > 0.001
+                    if abs(angp_ijk.p_val1) > 0.001
                         if smoothness_correction
                             taper_ij, dtaper_ij = smoothness_taper(BO_ij_raw, valence_cutoff, 4 * valence_cutoff)
                             taper_jk, dtaper_jk = smoothness_taper(BO_jk_raw, valence_cutoff, 4 * valence_cutoff)
@@ -2992,7 +2992,11 @@ end
                         f7_ij_f7_jk_f8 = f7_ij_f7_jk * f8
 
                         engy_exp1 = exp(-p_val2 * (Theta_o - Theta_ijk)^2)
-                        engy_prd1 = p_val1 * (one(T) - engy_exp1)
+                        if p_val1 >= zero(T)
+                            engy_prd1 = p_val1 * (one(T) - engy_exp1)
+                        else
+                            engy_prd1 = -p_val1 * engy_exp1
+                        end
                         angle_engy = f7_ij_f7_jk_f8 * engy_prd1
 
 
