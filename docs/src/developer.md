@@ -119,6 +119,18 @@ This new form was used after the introduction of the ReaxFF water branch.
 This code uses ``1 - \exp(-p_{\mathrm{hb2}} \cdot BO)`` and ``-p_{\mathrm{hb3}}``.
 This assumes the corresponding parameters in the force field file do not need negating after being read.
 
+### Force-field compatibility
+
+**Triple-bond stabilization:** This code selects C–O pairs by the type names `C` and `O` and ignores general parameter 38 (which extends the correction to other bond types).
+
+**Inner-wall van der Waals:** This code implements the original shielded form without the inner-wall contribution. Atom parameters 30–32 (`rcore2`, `ecore2`, `acore2`) are ignored.
+
+**Nonbonded taper:** This code assumes a zero lower taper radius: non-zero values of `lower_taper_radius` are ignored.
+
+**Hydrogen-bond roles:** Hydrogen bonding uses the atom type `H`, with donor and acceptor types inferred from the hydrogen-bond parameter block. The atomic `p_hbond` flag is ignored.
+
+**Polarization energy:** This code uses the conversion factor `332.06371 / 14.4 ≈ 23.05998`, consistent with its Coulomb and EEM constants, instead of the legacy value of `23.02`. This changes the polarization contribution by approximately 0.174%, and the corresponding reference value in the tests is rescaled accordingly. 
+
 ### Furman-Wales smoothness correction
 
 In this code, `smoothness_correction=true` enables additional seventh-degree tapers for selected bond-order and bonded-interaction cutoffs.
@@ -152,3 +164,12 @@ All tapered terms also include the corresponding chain rule terms in their analy
 ### Charge equilibration
 
 Charge equilibration uses the electronegativity equalization method (EEM) ([Mortier et al. 1986](https://doi.org/10.1021/ja00275a013) and [Rappé and Goddard 1991](https://doi.org/10.1021/j100161a070)).
+
+Charges are obtained by minimizing the charge-dependent electrostatic energy while preserving the total system charge as specified by the initial charge vector.
+The solver uses the method of projected preconditioned conjugate gradients, closely following the algorithm detailed in [Shewchuk 1994](https://dl.acm.org/doi/10.5555/865018).
+Previous converged charges are used as an initial guess for each new MD step.
+
+EEM is implemented separately from ReaxFF, with an interaction-specific coupling supplying the Coulomb coefficients.
+ReaxFF supplies its tapered, shielded Coulomb form.
+Through `evaluate_before_pairwise`, EEM runs before pairwise and specific interactions and writes the equilibrated charges into `sys.atoms`.
+EEM contributes the polarization self-energy, while ReaxFF supplies the Coulomb pair energy and forces.
