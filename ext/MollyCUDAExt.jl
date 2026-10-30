@@ -2179,8 +2179,11 @@ function force_kernel!(
         opposites_sum[lane, k, warpid] = zero(T)
     end
 
+    # Virial W_αβ = Σ dr_α f_β with f the force on j, matching the CPU path. All
+    #   components are kept since the tensor is not symmetric for non-central forces.
     vir_xx = zero(T); vir_yy = zero(T); vir_zz = zero(T)
     vir_xy = zero(T); vir_xz = zero(T); vir_yz = zero(T)
+    vir_yx = zero(T); vir_zx = zero(T); vir_zy = zero(T)
 
     j_0_tile = (j - a) * warpsize()
     index_j = j_0_tile + lane
@@ -2242,15 +2245,18 @@ function force_kernel!(
                     end
 
                     if needs_vir
-                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                        vir_xx += ustrip(dr[1]) * ustrip(f[1])
                         if D >= 2
-                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                            vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                            vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                            vir_yx += ustrip(dr[2]) * ustrip(f[1])
                         end
                         if D >= 3
-                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                            vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                            vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                            vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                            vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                            vir_zy += ustrip(dr[3]) * ustrip(f[2])
                         end
                     end
                 end
@@ -2295,15 +2301,18 @@ function force_kernel!(
                     end
 
                     if needs_vir
-                        vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                        vir_xx += ustrip(dr[1]) * ustrip(f[1])
                         if D >= 2
-                            vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                            vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                            vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                            vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                            vir_yx += ustrip(dr[2]) * ustrip(f[1])
                         end
                         if D >= 3
-                            vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                            vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                            vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                            vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                            vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                            vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                            vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                            vir_zy += ustrip(dr[3]) * ustrip(f[2])
                         end
                     end
                 end
@@ -2370,15 +2379,18 @@ function force_kernel!(
                 end
                 
                 if needs_vir
-                    vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                    vir_xx += ustrip(dr[1]) * ustrip(f[1])
                     if D >= 2
-                        vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                        vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                        vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                        vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                        vir_yx += ustrip(dr[2]) * ustrip(f[1])
                     end
                     if D >= 3
-                        vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                        vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                        vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                        vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                        vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                        vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                        vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                        vir_zy += ustrip(dr[3]) * ustrip(f[2])
                     end
                 end
             end
@@ -2424,15 +2436,18 @@ function force_kernel!(
             end
             
             if needs_vir
-                vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                vir_xx += ustrip(dr[1]) * ustrip(f[1])
                 if D >= 2
-                    vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                    vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                    vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                    vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                    vir_yx += ustrip(dr[2]) * ustrip(f[1])
                 end
                 if D >= 3
-                    vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                    vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                    vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                    vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                    vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                    vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                    vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                    vir_zy += ustrip(dr[3]) * ustrip(f[2])
                 end
             end
         end
@@ -2487,15 +2502,18 @@ function force_kernel!(
                 end
                 
                 if needs_vir
-                    vir_xx += ustrip(f[1]) * ustrip(dr[1])
+                    vir_xx += ustrip(dr[1]) * ustrip(f[1])
                     if D >= 2
-                        vir_yy += ustrip(f[2]) * ustrip(dr[2])
-                        vir_xy += ustrip(f[1]) * ustrip(dr[2])
+                        vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                        vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                        vir_yx += ustrip(dr[2]) * ustrip(f[1])
                     end
                     if D >= 3
-                        vir_zz += ustrip(f[3]) * ustrip(dr[3])
-                        vir_xz += ustrip(f[1]) * ustrip(dr[3])
-                        vir_yz += ustrip(f[2]) * ustrip(dr[3])
+                        vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                        vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                        vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                        vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                        vir_zy += ustrip(dr[3]) * ustrip(f[2])
                     end
                 end
             end
@@ -2521,15 +2539,19 @@ function force_kernel!(
             if D >= 2
                 vir_yy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yy, offset_val)
                 vir_xy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xy, offset_val)
+                vir_yx += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yx, offset_val)
             end
             if D >= 3
                 vir_zz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_zz, offset_val)
                 vir_xz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_xz, offset_val)
+                vir_zx += CUDA.shfl_down_sync(0xFFFFFFFF, vir_zx, offset_val)
                 vir_yz += CUDA.shfl_down_sync(0xFFFFFFFF, vir_yz, offset_val)
+                vir_zy += CUDA.shfl_down_sync(0xFFFFFFFF, vir_zy, offset_val)
             end
             offset_val ÷= 2
         end
 
+        # The virial is column-major, element (α, β) is at α + (β - 1) * D
         if lane == 1
             if vir_xx != zero(T)
                 CUDA.atomic_add!(pointer(global_virial, 1), TH(vir_xx))
@@ -2539,21 +2561,27 @@ function force_kernel!(
                     CUDA.atomic_add!(pointer(global_virial, D + 2), TH(vir_yy))
                 end
                 if vir_xy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2), TH(vir_xy))
                     CUDA.atomic_add!(pointer(global_virial, D + 1), TH(vir_xy))
+                end
+                if vir_yx != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 2), TH(vir_yx))
                 end
             end
             if D >= 3
                 if vir_zz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 9), TH(vir_zz))
+                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 3), TH(vir_zz))
                 end
                 if vir_xz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 3), TH(vir_xz))
                     CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), TH(vir_xz))
                 end
+                if vir_zx != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, 3), TH(vir_zx))
+                end
                 if vir_yz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 6), TH(vir_yz))
                     CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), TH(vir_yz))
+                end
+                if vir_zy != zero(T)
+                    CUDA.atomic_add!(pointer(global_virial, D + 3), TH(vir_zy))
                 end
             end
         end

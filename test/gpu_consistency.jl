@@ -1,3 +1,17 @@
+# A pairwise force that is not along the vector between the atoms, giving a virial
+#   tensor that is not symmetric
+struct NonCentralInter{T} <: PairwiseInteraction
+    dist_cutoff::T
+end
+
+function Molly.force(inter::NonCentralInter, dr, atom_i, atom_j, force_units, special,
+                     coord_i, coord_j, boundary, vel_i, vel_j, step_n, args...)
+    T = eltype(dr)
+    r2 = sum(abs2, dr)
+    w = (r2 < inter.dist_cutoff^2 ? (1 - r2 / inter.dist_cutoff^2)^2 : zero(T))
+    return w * SVector(T(0.3) * dr[2] + dr[1], T(-0.7) * dr[3] + dr[2], T(0.5) * dr[1] + dr[3])
+end
+
 @testset "GPU Consistency" begin
     if run_cuda_tests
         @testset "33-atom (No Cancellation)" begin
@@ -795,6 +809,44 @@
 
             @test vels_cpu != init_vels
             @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
+        end
+
+        @testset "Non-central virial T=$T" for T in (Float32, Float64)
+            # 300 atoms gives partial tiles, and the exclusions give masked tiles
+            # The box is slightly over three cutoffs wide since GPUCellListNeighborFinder
+            #   pads the cutoff to guard against rounding
+            n_atoms = 300
+            boundary = CubicBoundary(T(3.0001))
+            dist_cutoff = T(1.0)
+            coords = place_atoms(n_atoms, boundary; min_dist=T(0.1), rng=Xoshiro(1))
+            atoms = [Atom(index=i, mass=T(1.0)) for i in 1:n_atoms]
+            excluded_pairs = [(i, i + 1) for i in 1:3:(n_atoms - 1)]
+            inters = (NonCentralInter(dist_cutoff),)
+            make_sys(AT, nf) = System(atoms=AT(atoms), coords=AT(coords), boundary=boundary,
+                                      pairwise_inters=inters, neighbor_finder=nf,
+                                      force_units=NoUnits, energy_units=NoUnits)
+            nf_args = (n_atoms=n_atoms, dist_cutoff=dist_cutoff, excluded_pairs=excluded_pairs)
+            sys_cpu = make_sys(Array, DistanceNeighborFinder(; nf_args...))
+
+            # W_αβ = Σ dr_α f_β over the pairs, with f the force on the second atom
+            W_ref = zeros(T, 3, 3)
+            for (i, j, special) in Molly.neighbor_pairs(find_neighbors(sys_cpu))
+                dr = vector(coords[i], coords[j], boundary)
+                f = Molly.force(inters[1], dr, atoms[i], atoms[j], NoUnits, special, coords[i],
+                                coords[j], boundary, nothing, nothing, 0)
+                W_ref .+= dr * transpose(f)
+            end
+            @test norm(W_ref - transpose(W_ref)) > norm(W_ref) / 2
+
+            rtol = (T == Float32 ? 1e-5 : 1e-12)
+            @test isapprox(virial(sys_cpu; n_threads=1), W_ref; rtol=rtol)
+            @test isapprox(virial(sys_cpu), W_ref; rtol=rtol)
+            for nf in (DistanceNeighborFinder(; nf_args..., array_type=CuArray),
+                       GPUCellListNeighborFinder(; nf_args..., array_type=CuArray),
+                       GPUNeighborFinder(; nf_args..., array_type=CuArray))
+                sys_gpu = make_sys(CuArray, nf)
+                @test isapprox(Array(virial(sys_gpu)), W_ref; rtol=rtol)
+            end
         end
     end
 end

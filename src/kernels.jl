@@ -193,7 +193,7 @@ end
             Atomix.@atomic fs_mat[dim, j] +=  fval
             if needs_vir
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[dim, alpha] += ustrip(dr[alpha]) * fval
+                    Atomix.@atomic vir[alpha, dim] += ustrip(dr[alpha]) * fval
                 end
             end
         end
