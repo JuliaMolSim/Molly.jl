@@ -2393,7 +2393,6 @@ end
     n_lp,
     Δ_lp,
     dn_lp_dΔi,
-    fill_pos,
     S_dE_dΔ,
     atom_energies::AbstractArray{T}
 ) where T
@@ -2446,11 +2445,9 @@ end
 
         dE_dΔi = p_lp2 * -dn_lp_i * inv1 * (one(T) + (one(T) - inv1) * T(75.0) * delta_lp_i)
 
-        if fill_pos[i] > 0
-            S_dE_dΔ[i] += dE_dΔi
-            lp_engy = p_lp2 * delta_lp_i * inv1
-            atom_energies[i] += lp_engy
-        end
+        S_dE_dΔ[i] += dE_dΔi
+        lp_engy = p_lp2 * delta_lp_i * inv1
+        atom_energies[i] += lp_engy
     end
 end
 
@@ -2472,7 +2469,6 @@ function lone_pairs!(
     n_atoms = inter.state.n_atoms
     dn_lp_dΔi = inter.state.dn_lp_dΔi
     S_dE_dΔ = inter.state.S_dE_dΔ
-    fill_pos = inter.state.fill_pos
 
     atom_energies = inter.state.thread_atom_energies_1
     fill!(atom_energies, zero(T))
@@ -2487,7 +2483,6 @@ function lone_pairs!(
         n_lp,
         Δ_lp,
         dn_lp_dΔi,
-        fill_pos,
         S_dE_dΔ,
         atom_energies;
         ndrange=n_atoms,
