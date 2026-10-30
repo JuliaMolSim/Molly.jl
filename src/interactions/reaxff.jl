@@ -2530,20 +2530,27 @@ end
         p_ovun7 = genp.p_ovun7
         p_ovun8 = genp.p_ovun8
 
+        atmp_i = atmp[atid[i]]
+        use_lp_i = atmp_i.atom_mass <= T(21)
+        delta_lp_i = use_lp_i ? Δ_lp[i] : zero(T)
+        dn_lp_i = use_lp_i ? dn_lp_dΔi[i] : zero(T)
+
         S1 = zero(T)
         S2 = zero(T)
 
         for idx_j in 1:fill_pos[i]
             j = nbrs[idx_j, i]
 
+            use_lp_j = use_lp_i && atmp[atid[j]].atom_mass <= T(21)
+            delta_lp_j = use_lp_j ? Δ_lp[j] : zero(T)
+
             p_ovun1  = bndp[atid[i], atid[j]].p_ovun1
             De_sigma = bndp[atid[i], atid[j]].De_sigma
 
-            S1 += (Δ[j] - Δ_lp[j]) * (BO_π[idx_j, i] + BO_ππ[idx_j, i])
+            S1 += (Δ[j] - delta_lp_j) * (BO_π[idx_j, i] + BO_ππ[idx_j, i])
             S2 += p_ovun1 * De_sigma * BO[idx_j, i]
         end
 
-        atmp_i = atmp[atid[i]]
         Val_i   = atmp_i.Val
         p_ovun2 = atmp_i.p_ovun2
         p_ovun5 = atmp_i.p_ovun5
@@ -2551,7 +2558,7 @@ end
         # Overcoordination energy
         ov_exp1 = exp(p_ovun4 * S1)
         inv2 = inv(one(T) + p_ovun3 * ov_exp1)
-        delta_lpcorr = Δ[i] - (Δ_lp[i] * inv2)
+        delta_lpcorr = Δ[i] - (delta_lp_i * inv2)
 
         ov_sm1 = delta_lpcorr + Val_i
         inv3 = inv(ov_sm1 + T(1e-8))
@@ -2576,7 +2583,7 @@ end
         undercoordination_energies[i] += undcoord_engy
 
         dE_over_prod = inv3 * delta_lpcorr * inv4
-        dΔ_lpcorr_prod = Δ_lp[i] * inv2 * inv2 * p_ovun3 * ov_exp1 * p_ovun4
+        dΔ_lpcorr_prod = delta_lp_i * inv2 * inv2 * p_ovun3 * ov_exp1 * p_ovun4
         dE_over_prod2 = S2 * inv3 * inv4 * (one(T) - delta_lpcorr * ov_exp2 * inv4 * p_ovun2)
    
         dE_under_tm1 = -ov_exp3 * p_ovun6 * (one(T) + ov_exp4) + 
@@ -2590,19 +2597,23 @@ end
         for idx_j in 1:fill_pos[i]
             j = nbrs[idx_j, i]
 
+            use_lp_j = use_lp_i && atmp[atid[j]].atom_mass <= T(21)
+            delta_lp_j = use_lp_j ? Δ_lp[j] : zero(T)
+            dn_lp_j = use_lp_j ? dn_lp_dΔi[j] : zero(T)
+
             idx_i = reverse_nbrs[idx_j, i]
 
             p_ovun1  = bndp[atid[i], atid[j]].p_ovun1
             De_sigma = bndp[atid[i], atid[j]].De_sigma
 
-            dΔ_lpcorr_dBOπ = dΔ_lpcorr_prod * (Δ[j] - Δ_lp[j])
+            dΔ_lpcorr_dBOπ = dΔ_lpcorr_prod * (Δ[j] - delta_lp_j)
 
             dE_over_dBO = (p_ovun1 * De_sigma) * dE_over_prod   
             dE_over_dBOπ = -S2 * inv3 * dE_over_prod * dΔ_lpcorr_dBOπ + dΔ_lpcorr_dBOπ * dE_over_prod2
     
             dE_under_dBOπ = -p_ovun5 * (
                                 dE_under_tm1 * dΔ_lpcorr_dBOπ * inv5_sq_inv6 + 
-                                dE_under_tm2 * (Δ[j] - Δ_lp[j])
+                                dE_under_tm2 * (Δ[j] - delta_lp_j)
                             )
 
             dE_tot_sum = dE_over_dBOπ + dE_under_dBOπ
@@ -2615,20 +2626,20 @@ end
 
             BO_sum = BO_π[idx_j, i] + BO_ππ[idx_j, i]
 
-            dΔ_lpcorr_dΔj = dΔ_lpcorr_prod * (one(T) + dn_lp_dΔi[j]) * BO_sum
+            dΔ_lpcorr_dΔj = dΔ_lpcorr_prod * (one(T) + dn_lp_j) * BO_sum
 
             dE_over_dΔj = dE_under_tm3 * dΔ_lpcorr_dΔj
 
             dE_under_tm5 = dE_under_tm1 * dΔ_lpcorr_dΔj
             dE_under_dΔj = -p_ovun5 * (
                                 dE_under_tm5 * inv5_sq_inv6 + 
-                                dE_under_tm2 * (one(T) + dn_lp_dΔi[j]) * BO_sum
+                                dE_under_tm2 * (one(T) + dn_lp_j) * BO_sum
                             )
 
             Atomix.@atomic S_dE_dΔ[j] += dE_over_dΔj + dE_under_dΔj
         end
 
-        dΔ_lpcorr_dΔi = one(T) + dn_lp_dΔi[i] * inv2
+        dΔ_lpcorr_dΔi = one(T) + dn_lp_i * inv2
 
         dE_over_dΔi = dE_under_tm3 * dΔ_lpcorr_dΔi
         dE_under_dΔi = -p_ovun5 * dE_under_tm1 * dΔ_lpcorr_dΔi * inv5_sq_inv6
