@@ -1038,19 +1038,36 @@ Calculate the pressure tensor of the system.
 
 The pressure is defined as
 ```math
-\bf{P} = \frac{ 2 \cdot \bf{K} + \bf{W} }{V}
+\bf{P} = \frac{ 2 \cdot \bf{K} + \bf{W} }{V} \quad\textrm{i.e.}\quad
+P_{\alpha\beta} = \frac{1}{V} \left( \sum_i m_i v_{i,\alpha} v_{i,\beta}
++ \sum_i r_{i,\alpha} f_{i,\beta} \right)
 ```
-where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
-and ``\bf{W}`` is the virial tensor.
-For systems with units the default pressure is in bar in 3D and in bar nm, which
-has dimensions of force per length, in 2D.
+where ``V`` is the system volume (area in 2D), ``\bf{K}`` is the kinetic energy tensor
+(see [`kinetic_energy`](@ref)) and ``\bf{W}`` is the [`virial`](@ref) tensor.
+``\bf{K}`` is calculated from the velocities stored in the system, including any center
+of mass motion, and does not depend on the number of degrees of freedom used by
+[`temperature`](@ref).
+For the leapfrog [`Verlet`](@ref) integrator these velocities are half a time step
+behind the coordinates.
+For systems with units the default pressure is in bar in 3D and in bar nm in 2D.
 
-To calculate the scalar pressure, see [`scalar_pressure`](@ref).
+This is the [pressure tensor of LAMMPS](https://docs.lammps.org/compute_pressure.html),
+and is the negative of the sum of the
+[per-atom stress of LAMMPS](https://docs.lammps.org/compute_stress_atom.html) divided by
+the volume, apart from tail corrections.
+LAMMPS can subtract a velocity bias in the kinetic term via the temperature compute,
+which Molly does not do.
+It is also the pressure tensor of GROMACS,
+``\bf{P} = \frac{2}{V} (\bf{E}_\textrm{kin} - \bf{\Xi})`` with
+``\bf{\Xi} = -\bf{W} / 2``, though for the leapfrog integrator GROMACS uses the average
+of the kinetic energy tensors from the two half steps around the coordinates.
 
 For constrained systems, direct recomputation approximates constraint
 contributions using a deterministic small-step constraint preview. To reuse a
 total virial from a simulation step, pass valid simulator buffers with
 `recompute=false`.
+
+To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
 Not compatible with infinite boundaries.
 """
@@ -1125,7 +1142,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     return buffers.pres_tensor
 end
 
-"""
+@doc raw"""
     scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                     recompute=true, n_threads=Threads.nthreads(),
                     pairwise_inters=system.pairwise_inters,
@@ -1134,7 +1151,16 @@ end
 
 Calculate the pressure of the system as a scalar.
 
-This is the trace of the [`pressure`](@ref) tensor divided by the number of dimensions.
+This is the trace of the [`pressure`](@ref) tensor divided by the number of dimensions
+``d``:
+```math
+P = \frac{\rm{Tr}\left[ \bf{P} \right]}{d}
+  = \frac{1}{d V} \left( 2 K + \sum_i \bf{r_i} \cdot \bf{f_i} \right)
+```
+where ``K`` is the kinetic energy.
+This matches the scalar pressure of GROMACS.
+The scalar pressure of LAMMPS uses ``N_\textrm{df} k_B T / d`` for the kinetic term, which
+is the same as ``2 K / d`` when the temperature includes all velocities.
 For constrained systems, the same deterministic preview convention as
 [`pressure`](@ref) applies.
 """

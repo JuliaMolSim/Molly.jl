@@ -1702,11 +1702,11 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         end
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
+            dist_cutoff=T(dist_neighbors),
+            boundary=boundary,
             special=special,
             n_steps=neighbor_finder_n_steps,
             x0=coords,
-            boundary=boundary,
-            dist_cutoff=T(dist_neighbors),
             strictness=strictness,
         )
     else

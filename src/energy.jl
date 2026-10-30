@@ -102,15 +102,44 @@ Calculate the virial tensor of the system.
 
 The virial, in its most general form, is defined as:
 ```math
-\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
+\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i} \quad\textrm{i.e.}\quad
+W_{\alpha\beta} = \sum_i r_{i,\alpha} f_{i,\beta}
 ```
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
 respectively, acting on atom ``i``.
-The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
-is used, taking into account pairwise interactions, specific interactions, the
-[`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
-[Essmann et al. 1995](https://doi.org/10.1063/1.470117), and bias potentials.
+It has units of energy and is positive for repulsive interactions.
+In periodic systems the sum depends on which image of each atom is used, so it is
+evaluated in translation-invariant forms that are equivalent for interactions whose forces
+sum to zero:
+```math
+\bf{W} = \sum_{i<j} \bf{r_{ij}} \otimes \bf{f_{ij}}
++ \sum_{\textrm{specific}} \sum_{k} (\bf{r_k} - \bf{r_s}) \otimes \bf{f_k}
++ \bf{W}_\textrm{general}
+```
+where ``\bf{r_{ij}} = \bf{r_i} - \bf{r_j}`` is the minimum image vector,
+``\bf{f_{ij}}`` is the pairwise force on atom ``i`` due to atom ``j``, and each specific
+interaction uses the minimum image vectors from its second atom ``s``.
+The general interaction terms include the reciprocal space of [`Ewald`](@ref) and
+[`PME`](@ref), computed as ``-\partial E / \partial \bf{\epsilon}`` for a homogeneous
+strain ``\bf{\epsilon}`` of the box as indicated in
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117), the isotropic dispersion
+correction terms, and bias potentials.
+Specific interactions acting on a single atom, such as [`HarmonicPositionRestraint`](@ref),
+do not contribute.
 Contributions from implicit solvent methods are ignored.
+
+This is the same sign convention and normalization as the
+[global virial in LAMMPS](https://docs.lammps.org/compute_pressure.html), so the
+pressure is ``(2 \bf{K} + \bf{W}) / V`` in both.
+The [per-atom stress of LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
+is ``S_{i,\alpha\beta} = -m_i v_{i,\alpha} v_{i,\beta} - W_{i,\alpha\beta}``, so
+``\sum_i \bf{W_i} = \bf{W}`` apart from long-range dispersion (tail) corrections, which
+LAMMPS leaves out of the per-atom stress and Molly includes in ``\bf{W}`` when a
+dispersion correction is used.
+GROMACS defines the virial as
+``\bf{\Xi} = -\frac{1}{2} \sum_{i<j} \bf{r_{ij}} \otimes \bf{f_{ij}}``, so
+``\bf{\Xi} = -\bf{W} / 2`` and the `Vir-XX` energy terms of GROMACS are ``-W_{xx} / 2``.
+
 For constrained systems, constraint contributions are approximated using a
 deterministic small-step constraint preview.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and
@@ -135,7 +164,7 @@ function virial(sys, neighbors, step_n::Integer=0;
     end
 end
 
-"""
+@doc raw"""
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
@@ -143,7 +172,14 @@ end
 
 Calculate the virial of the system as a scalar.
 
-This is the trace of the [`virial`](@ref) tensor.
+This is the trace of the [`virial`](@ref) tensor:
+```math
+W = \rm{Tr}\left[ \bf{W} \right] = \sum_i \bf{r_i} \cdot \bf{f_i}
+```
+It is not divided by the number of dimensions, so the virial contribution to
+[`scalar_pressure`](@ref) is ``W / (d V)`` in ``d`` dimensions.
+Some sources instead call ``-\frac{1}{2} \sum_i \bf{r_i} \cdot \bf{f_i}`` the virial,
+which is ``-W / 2`` and is the trace of the GROMACS virial tensor.
 """
 function scalar_virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads);

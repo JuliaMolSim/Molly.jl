@@ -1699,8 +1699,10 @@ Molly.needs_virial(c::MyCoupler) = c.n_steps
 Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
-Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions, the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, and bias potentials.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), ``\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}``, taking into account pairwise and specific interactions, the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, dispersion corrections and bias potentials.
+The virial tensor of GROMACS is ``-\bf{W} / 2``, but the pressure tensor has the same definition in all three packages; see [`virial`](@ref) and [`pressure`](@ref) for the differences.
 Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods are ignored.
+
 During supported constrained simulations, Molly can add constraint contributions to the total virial for steps where a barostat or virial/pressure logger requests it.
 For the initial simulation step, the same preview convention is used so that interactions and constraints both contribute to the logged virial/pressure.
 If a coordinate-scaling coupling method changes the box on a constrained step, virial and pressure loggers record the pre-coupling virial/pressure for that step, matching the state used by the coupling method.
