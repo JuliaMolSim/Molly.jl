@@ -773,7 +773,8 @@ end
     angle_names = fieldnames(eltype(angle_params))[1:end-1]
     angle_values = [[getfield(angle, name) for name in angle_names] for angle in angle_params]
 
-    finite_diff_angle_gradients = grad(fdm, fd_angle_loss, angle_values)[1]
+    angle_fdm = central_fdm(5, 1; factor=100)
+    finite_diff_angle_gradients = grad(angle_fdm, fd_angle_loss, angle_values)[1]
     enzyme_angle_gradients = grad_reaxff.device_params.angle_parameters
 
     for i in eachindex(angle_params)
