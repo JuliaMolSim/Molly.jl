@@ -926,9 +926,21 @@ function _set_force_field_file_reaxff_params(
                 at_1 = parse(Int, items[1])
                 at_2 = parse(Int, items[2])
 
-                for param in items[3:end]
+                atmp_i = atom_parameters[at_1]
+                atmp_j = atom_parameters[at_2]
+
+                mixed_values = (
+                    sqrt(atmp_i.D_ij * atmp_j.D_ij),
+                    sqrt(atmp_i.r_vdW * atmp_j.r_vdW),
+                    sqrt(atmp_i.alpha * atmp_j.alpha),
+                    T(0.5) * (atmp_i.ro_sigma + atmp_j.ro_sigma),
+                    T(0.5) * (atmp_i.ro_pi + atmp_j.ro_pi),
+                    T(0.5) * (atmp_i.ro_pipi + atmp_j.ro_pipi),
+                )
+
+                for (param, mixed_value) in zip(items[3:end], mixed_values)
                     p = parse(T, param)
-                    push!(ofdp_tmp, p)
+                    push!(ofdp_tmp, p > zero(T) ? p : mixed_value)
                 end
 
                 gamma_w_inv_pow = (one(T) / sqrt(atom_parameters[at_1].gamma_w * atom_parameters[at_2].gamma_w))^general_parameters.p_vdW1
