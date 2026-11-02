@@ -20,6 +20,7 @@ end
         Verlet(dt=0.002u"ps"),
         StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+        NoseHoover(dt=0.002u"ps", temperature=temp),
     )
 
     bond_length = 0.74u"Å"
@@ -62,7 +63,8 @@ end
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
-                # Verlet and Langevin are half-step integrators so this is not expected to be true
+                # Verlet, Langevin and NoseHoover are half-step integrators so this is not
+                #   expected to be true
                 @test check_velocity_constraints(sys, cons)
             end
         end
@@ -1087,6 +1089,7 @@ end
         Verlet(dt=dt, remove_CM_motion=0),
         StormerVerlet(dt=dt),
         Langevin(dt=dt, temperature=1.0, friction=0.0, remove_CM_motion=0),
+        NoseHoover(dt=dt, temperature=1.0, remove_CM_motion=0),
     )
 
     @testset "Initial constrained virial preview" begin

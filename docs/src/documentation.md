@@ -1522,6 +1522,15 @@ Common options when calling [`simulate!`](@ref) with these simulators include:
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
+The [`NoseHoover`](@ref) simulator gives the energy of its thermostats to the loggers as the `heat_bath_energy` keyword argument, so the quantity conserved by the integrator can be logged to check the simulation:
+```julia
+function conserved_energy(sys, neighbors, step_n, buffers; heat_bath_energy, kwargs...)
+    return kinetic_energy(sys) + potential_energy(sys, neighbors, step_n) + heat_bath_energy
+end
+
+loggers = (conserved=GeneralObservableLogger(conserved_energy, typeof(1.0u"kJ * mol^-1"), 100),)
+```
+
 To define your own simulator, first define a `struct`:
 ```julia
 struct MySimulator
@@ -1965,6 +1974,7 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`NoseHoover`](@ref)
 - [`MTSIntegrator`](@ref)
 - [`MTSLangevinIntegrator`](@ref)
 

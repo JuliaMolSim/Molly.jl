@@ -1047,7 +1047,7 @@ where ``V`` is the system volume (area in 2D), ``\bf{K}`` is the kinetic energy 
 ``\bf{K}`` is calculated from the velocities stored in the system, including any center
 of mass motion, and does not depend on the number of degrees of freedom used by
 [`temperature`](@ref).
-For the leapfrog [`Verlet`](@ref) integrator these velocities are half a time step
+For the leapfrog-like integrator these velocities are half a time step
 behind the coordinates.
 For systems with units the default pressure is in bar in 3D and in bar nm in 2D.
 

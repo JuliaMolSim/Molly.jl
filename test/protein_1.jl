@@ -112,8 +112,8 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
         @test typeof(ustrip(scalar_pressure(sys_float))) == TH
         @test typeof(ustrip(virial(sys_float)[1][1])) == TH
         @test typeof(ustrip(scalar_virial(sys_float))) == TH
-        @test Molly.length_type(sys_float) = typeof(T(1.0)u"nm")
-        @test Molly.length_type(sys_float.boundary) = typeof(T(1.0)u"nm")
+        @test Molly.length_type(sys_float) == typeof(T(1.0)u"nm")
+        @test Molly.length_type(sys_float.boundary) == typeof(T(1.0)u"nm")
     end
 
     cs = charges(sys)
@@ -400,8 +400,8 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
                 @test typeof(ustrip(scalar_pressure(sys_float))) == TH
                 @test typeof(ustrip(virial(sys_float)[1][1])) == TH
                 @test typeof(ustrip(scalar_virial(sys_float))) == TH
-                @test Molly.length_type(sys_float) = typeof(T(1.0)u"nm")
-                @test Molly.length_type(sys_float.boundary) = typeof(T(1.0)u"nm")
+                @test Molly.length_type(sys_float) == typeof(T(1.0)u"nm")
+                @test Molly.length_type(sys_float.boundary) == typeof(T(1.0)u"nm")
             end
         end
 

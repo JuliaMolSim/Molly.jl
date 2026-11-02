@@ -73,6 +73,57 @@ function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, <:Any, TH}) wh
     return kin_tensor
 end
 
+# The contribution of one atom to twice the kinetic energy tensor, as a number in the units
+#   of mass times velocity squared
+struct KineticTensorContribution{D, TH} end
+
+@inline function (::KineticTensorContribution{D, TH})(m, v) where {D, TH}
+    v_th = SVector{D, TH}(ustrip.(v))
+    return TH(ustrip(m)) * (v_th * transpose(v_th))
+end
+
+# Reduce on the device rather than copying the velocities to the host
+function kinetic_energy_tensor!(kin_tensor,
+                                sys::System{D, <:AbstractGPUArray, <:Any, TH}) where {D, TH}
+    twice_kin = mapreduce(KineticTensorContribution{D, TH}(), +, sys.masses, sys.velocities;
+                          init=zero(SMatrix{D, D, TH}))
+    mv2_unit = unit(eltype(sys.masses)) * unit(eltype(eltype(sys.velocities)))^2
+    for col in 1:D
+        for row in 1:D
+            kin_tensor[row, col] = uconvert(sys.energy_units,
+                                            (twice_kin[row, col] / 2) * mv2_unit)
+        end
+    end
+    return kin_tensor
+end
+
+# Twice the kinetic energy of one atom, as a number in the units of mass times
+#   velocity squared
+@inline function mass_vel_sq(m, v, ::Type{TH}) where TH
+    v_th = TH.(ustrip.(v))
+    return TH(ustrip(m)) * dot(v_th, v_th)
+end
+
+struct MassVelSq{TH} end
+
+@inline (::MassVelSq{TH})(m, v) where {TH} = mass_vel_sq(m, v, TH)
+
+# Twice the kinetic energy as a number in the units of mass times velocity squared,
+#   accumulated in type TH without allocating
+# Not inlined to work with Enzyme
+@noinline function sum_mass_vel_sq(masses, velocities, ::Type{TH}) where TH
+    s = zero(TH)
+    @inbounds for i in eachindex(masses, velocities)
+        s += mass_vel_sq(masses[i], velocities[i], TH)
+    end
+    return s
+end
+
+@noinline function sum_mass_vel_sq(masses::AbstractGPUArray, velocities,
+                                   ::Type{TH}) where TH
+    return mapreduce(MassVelSq{TH}(), +, masses, velocities; init=zero(TH))
+end
+
 @doc raw"""
     kinetic_energy(system; kin_tensor=nothing)
 
