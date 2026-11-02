@@ -458,6 +458,12 @@ distance plus a buffer distance since the list is only updated every `n_steps` s
 Neighbor finding uses the system's floating-point type by default.
 Set `force_float32=true` to use `Float32` for neighbor finding.
 
+The neighbor search distance is increased internally by a small margin, based on both neighbor
+finding precision and box size, to guard against missing pairs due to rounding.
+This is particularly relevant when neighbor finding is done in `Float32` when the system uses `Float64`.
+The returned neighbor list may therefore include pairs that are slightly beyond `dist_cutoff`, 
+so interactions should also use their own physical distance cutoffs.
+
 The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` and
 `special_pairs`, or by the `eligible` and `special` matrices, as for
 [`DistanceNeighborFinder`](@ref). The exceptions are stored on the device as
