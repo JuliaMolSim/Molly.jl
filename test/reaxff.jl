@@ -1,7 +1,7 @@
 @testset "ReaxFF Tests" begin
     data_dir = normpath(@__DIR__, "..", "data")
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Crambin reference match $device qeq_tolerance=$qeq_tolerance" for (qeq_tolerance, reference_file, charge_atol) in (
@@ -69,7 +69,7 @@
         end
     end
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Ethane force match energy finite differences $device smoothness=$smoothness_correction" for smoothness_correction in (false, true)
@@ -161,7 +161,7 @@
     end
 
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Water force match energy finite differences $device smoothness=$smoothness_correction" for smoothness_correction in (false, true)
@@ -251,7 +251,7 @@
         end
     end
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Langevin with Monte Carlo barostat temperature bounds $device" begin
@@ -311,7 +311,7 @@
         end
     end
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Neighbor and CSR rebuilds $device" begin
@@ -347,7 +347,7 @@
         end
     end
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Units vs Unitless $device" begin
@@ -403,7 +403,7 @@
         end
     end
 
-    for array_type in (run_cuda_tests ? (Array, CuArray) : (Array,))
+    for array_type in array_list
         device = array_type === Array ? "CPU" : "GPU"
 
         @testset "Double vs Single Precision $device" begin
