@@ -10,6 +10,7 @@ using Reexport
 @reexport using Unitful
 
 using AcceleratedKernels
+import Adapt
 using Atomix
 import AtomsBase
 import AtomsCalculators
@@ -67,6 +68,7 @@ include("kernels.jl")
 include("force.jl")
 include("energy.jl")
 include("free_energy/alchemy.jl")
+include("interactions/charge_equilibration.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
@@ -116,5 +118,6 @@ include("free_energy/cycle.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
 include("bias/metadynamics.jl")
+include("interactions/reaxff.jl")
 
 end

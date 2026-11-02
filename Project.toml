@@ -5,6 +5,7 @@ authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
 
 [deps]
 AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 AtomsCalculators = "a3e0e189-c65a-42c1-833c-339540406eb1"
@@ -60,6 +61,7 @@ MollyPythonCallExt = "PythonCall"
 
 [compat]
 AcceleratedKernels = "0.4.3"
+Adapt = "4.7.0"
 Atomix = "0.1, 1.0"
 AtomsBase = "0.5"
 AtomsCalculators = "0.2"

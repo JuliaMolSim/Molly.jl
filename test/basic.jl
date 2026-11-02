@@ -1373,7 +1373,7 @@ end
                 for (n_atoms, boundary) in (
                             (300, CubicBoundary(4.0f0)),
                             (400, CubicBoundary(SVector(4.5f0, 3.2f0, 6.1f0))),
-                            (200, CubicBoundary(3.0f0)),
+                            (200, CubicBoundary(3.0001f0)),
                             (300, TriclinicBoundary(SVector(
                                 SVector{3,Float32}(4.0, 0.0, 0.0),
                                 SVector{3,Float32}(0.4, 4.2, 0.0),
@@ -1415,7 +1415,8 @@ end
                     nf_ref = DistanceNeighborFinder(
                         eligible=to_device(eligible, AT),
                         special=to_device(special, AT),
-                        dist_cutoff=1.0f0,
+                        dist_cutoff=nextfloat(1.0f0 +
+                                             16 * eps(Float32) * opnorm(hcat(bv...), Inf)),
                     )
 
                     # Coordinates outside the box should give the same neighbors,

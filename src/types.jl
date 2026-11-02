@@ -30,6 +30,7 @@ export
     read_frame!
 
 @public pairwise_uses_velocity,
+    evaluate_before_pairwise,
     from_device,
     to_device
 
@@ -50,6 +51,17 @@ An alias for NBodyInteraction{2}.
 Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
+
+"""
+    evaluate_before_pairwise(inter)
+
+Whether a general interaction is evaluated before pairwise and specific interactions
+when calculating energy or forces.
+
+Custom general interactions should implement this function to return `true` if
+they change the state such that it affects subsequent interactions (e.g. atomic charges).
+"""
+evaluate_before_pairwise(inter) = false
 
 """
     from_device(arr)

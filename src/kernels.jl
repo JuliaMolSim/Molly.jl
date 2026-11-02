@@ -125,21 +125,27 @@ gpu_threads_copy(n_items) = gpu_threads_env("MOLLY_GPUNTHREADS_COPY", 256)
 @inline apply_force_units_gpu(f, ::Val{NoUnits}) = f
 
 function apply_force_units_gpu!(fs::AbstractGPUArray, fs_mat, force_units,
-                                ::Val{D}, ::Val{T}) where {D, T}
+                                ::Val{D}, ::Val{T},
+                                ::Val{accumulate}=Val(false)) where {D, T, accumulate}
     backend = get_backend(fs)
     n_threads_gpu = gpu_threads_copy(length(fs))
     kernel! = apply_force_units_kernel!(backend, n_threads_gpu)
-    kernel!(fs, fs_mat, Val(force_units), Val(D), Val(T); ndrange=length(fs))
+    kernel!(fs, fs_mat, Val(force_units), Val(D), Val(T), Val(accumulate);
+            ndrange=length(fs))
     return fs
 end
 
 @kernel inbounds=true function apply_force_units_kernel!(fs, @Const(fs_mat),
                                          ::Val{force_units}, ::Val{D},
-                                         ::Val{T}) where {force_units, D, T}
+                                         ::Val{T}, ::Val{accumulate}) where {force_units, D, T, accumulate}
     atom_i = @index(Global, Linear)
     if atom_i <= length(fs)
         f = SVector{D, T}(ntuple(dim -> fs_mat[dim, atom_i], Val(D)))
-        fs[atom_i] = apply_force_units_gpu(f, Val(force_units))
+        if accumulate
+            fs[atom_i] += apply_force_units_gpu(f, Val(force_units))
+        else
+            fs[atom_i] = apply_force_units_gpu(f, Val(force_units))
+        end
     end
 end
 
