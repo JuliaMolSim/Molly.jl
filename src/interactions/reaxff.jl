@@ -457,7 +457,7 @@ corrections to bond orders and energy terms ([Furman and Wales 2019](https://doi
 The default is `false`.
 
 Use `System(coord_file_path, reaxff; ...)` to set up coordinates, neighbor finding,
-and the associated [`EEM`](@ref) charge equilibration automatically. Use a fresh
+and the associated [`ElectronegativityEqualizationMethod`](@ref) charge equilibration automatically. Use a fresh
 `ReaxFF` instance for each system, since it stores a system-specific cached state.
 
 This interaction is only compatible with 3D systems. The virial is not yet supported.
@@ -482,7 +482,7 @@ end
 
 Construct a ReaxFF system from a coordinate file supported by Chemfiles.jl.
 The file must identify each atom's element, and every element must be present in
-the force field file. This constructor adds both [`EEM`](@ref) and [`ReaxFF`](@ref) to
+the force field file. This constructor adds both [`ElectronegativityEqualizationMethod`](@ref) and [`ReaxFF`](@ref) to
 the system's general interactions and selects a neighbor finder automatically.
 
 `eem_float_type` sets the charge-equilibration precision independently of the
@@ -708,7 +708,7 @@ function System(coord_file_path::AbstractString,
     end
 
     # create charge equilibration object
-    eem = EEM(
+    eem = ElectronegativityEqualizationMethod(
         reaxff, 
         atoms_data; 
         charges=initial_q,  # QEq float precision
@@ -740,7 +740,7 @@ function System(coord_file_path::AbstractString,
 end
 
 
-function _set_force_field_file_reaxff_params(
+function read_reaxff_force_field(
     file::AbstractString,
     ::Type{T},
     ::Type{AT};
@@ -1218,7 +1218,7 @@ function ReaxFF(; version::V=ReaxFF2008(),
     bond_dist_cutoff = T(unit(bond_dist_cutoff) == NoUnits ? 10 * bond_dist_cutoff : ustrip(u"Å", bond_dist_cutoff))
     hbond_dist_cutoff = T(unit(hbond_dist_cutoff) == NoUnits ? 10 * hbond_dist_cutoff : ustrip(u"Å", hbond_dist_cutoff))
     
-    params, device_params = _set_force_field_file_reaxff_params(
+    params, device_params = read_reaxff_force_field(
         force_field_file, T, AT;
         bond_dist_cutoff, hbond_dist_cutoff,
         valence_cutoff, valence_prod_cutoff, hbond_bo_cutoff,
@@ -1237,7 +1237,7 @@ function ReaxFF(; version::V=ReaxFF2008(),
 end
 
 
-function _init_reaxff_state!(
+function init_reaxff_state!(
     inter::ReaxFF{ReaxFF2008, T, AT},
     sys::System
 ) where {T, AT}
@@ -1375,7 +1375,7 @@ function _init_reaxff_state!(
 end
 
 
-function _clear_reaxff_state!(
+function clear_reaxff_state!(
     inter::ReaxFF{ReaxFF2008, T}
 ) where T
     fill!(inter.state.fill_pos, 0)
@@ -4549,10 +4549,10 @@ end
 end
 
 """
-    EEM(reaxff::ReaxFF, atoms_data; charges=nothing, tolerance=1e-6,
+    ElectronegativityEqualizationMethod(reaxff::ReaxFF, atoms_data; charges=nothing, tolerance=1e-6,
         eem_float_type=Float64, max_iterations=200)
 
-Construct [`EEM`](@ref) charge equilibration using a ReaxFF force field's
+Construct [`ElectronegativityEqualizationMethod`](@ref) charge equilibration using a ReaxFF force field's
 electronegativities, hardnesses, and tapered, shielded Coulomb interaction.
 
 `atoms_data` contains an entry for each atom with an `element` field matching the
@@ -4563,7 +4563,7 @@ charge. `tolerance` and `max_iterations` control the EEM solver.
 
 `System(coord_file_path, reaxff; ...)` calls this constructor automatically.
 """
-function EEM(
+function ElectronegativityEqualizationMethod(
     reaxff::ReaxFF{ReaxFF2008, T, AT},
     atoms_data;
     charges=nothing,
@@ -4589,7 +4589,7 @@ function EEM(
 
     q = isnothing(charges) ? nothing : to_device(QT.(charges), AT)
 
-    return EEM(
+    return ElectronegativityEqualizationMethod(
         coupling,
         to_device(type_ids, AT),
         to_device(χ, AT),
@@ -4634,7 +4634,7 @@ function compute_reaxff_energy_forces!(
     n_threads::Integer=Threads.nthreads(),
 ) where {T}
     
-    _clear_reaxff_state!(inter)
+    clear_reaxff_state!(inter)
     bonds!(inter, sys, neighbors, backend; n_threads=n_threads)
     lone_pairs!(inter, backend; n_threads=n_threads)
     over_under_coordination!(inter, backend; n_threads=n_threads)
@@ -4673,7 +4673,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
     if isnothing(inter.state) || length(sys.atoms) != inter.state.n_atoms
         inter.use_units = length_type(sys.boundary) <: Unitful.Quantity
         inter.sys_coord_unit = unit(eltype(eltype(sys.coords)))
-        _init_reaxff_state!(inter, sys)
+        init_reaxff_state!(inter, sys)
     end
 
     backend = get_backend(sys.coords)
@@ -4702,7 +4702,7 @@ end
 
 
 #=
-    Molly.enzyme_forces_and_energy(sys, inter::ReaxFF, eem::EEM; neighbors)
+    Molly.enzyme_forces_and_energy(sys, inter::ReaxFF, eem::ElectronegativityEqualizationMethod; neighbors)
 
 Return `(forces, energy)` for the ReaxFF and EEM interactions, for use in loss
 functions differentiated with Enzyme.jl.
@@ -4722,7 +4722,7 @@ parameters are changed.
 Call once to initialize the interaction state before constructing Enzyme shadow
 objects.
 =#
-function enzyme_forces_and_energy(sys, inter::ReaxFF, eem::EEM; neighbors)
+function enzyme_forces_and_energy(sys, inter::ReaxFF, eem::ElectronegativityEqualizationMethod; neighbors)
     atom_parameters = inter.device_params.atom_parameters
     off_diagonal_parameters = inter.device_params.off_diagonal_parameters
     p_vdW1 = inter.device_params.general_parameters.p_vdW1
@@ -4767,7 +4767,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, 
         inter.use_units = length_type(sys.boundary) <: Unitful.Quantity
         inter.sys_coord_unit = unit(eltype(eltype(sys.coords)))
 
-        _init_reaxff_state!(inter, sys)
+        init_reaxff_state!(inter, sys)
     end
 
     backend = get_backend(sys.coords)
@@ -4807,7 +4807,7 @@ function compute_energy_components(
     inter.use_units = length_type(sys.boundary) <: Unitful.Quantity
     inter.sys_coord_unit = unit(eltype(eltype(sys.coords)))
 
-    _init_reaxff_state!(inter, sys)
+    init_reaxff_state!(inter, sys)
 
     neighbors = find_neighbors(
         sys,
@@ -4858,7 +4858,7 @@ function compute_force(sys, inter::ReaxFF)
     inter.use_units = length_type(sys.boundary) <: Unitful.Quantity
     inter.sys_coord_unit = unit(eltype(eltype(sys.coords)))
 
-    _init_reaxff_state!(inter, sys)
+    init_reaxff_state!(inter, sys)
 
     neighbors = find_neighbors(
         sys,

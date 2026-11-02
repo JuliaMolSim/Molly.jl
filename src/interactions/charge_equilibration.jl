@@ -1,5 +1,5 @@
 export
-    EEM
+    ElectronegativityEqualizationMethod
 
 @inline scalar_getindex(a::Array, i...) = getindex(a, i...)
 scalar_getindex(a::AbstractGPUArray, i...) = @allowscalar getindex(a, i...)
@@ -54,7 +54,7 @@ end
 
 
 """
-    EEM(coupling, type_ids, χ, η; charges=nothing, tolerance=1e-6, max_iterations=200)
+    ElectronegativityEqualizationMethod(coupling, type_ids, χ, η; charges=nothing, tolerance=1e-6, max_iterations=200)
 
 Electronegativity equalization method (EEM) for calculating partial charges on atoms
 ([Mortier et al. 1986](https://doi.org/10.1021/ja00275a013) and [Rappé and Goddard 1991](https://doi.org/10.1021/j100161a070)).
@@ -79,9 +79,9 @@ Include this calculator in a system's `general_inters` interactions block to equ
 pairwise and specific interactions are evaluated. Energy and force evaluations
 write the converged charges from the solve into `sys.atoms`. EEM tallies the charge equilibration self-energy into
 the global energy, but the corresponding electrostatic pair energy and forces are supplied by another
-interaction. For [`ReaxFF`](@ref), use `EEM(reaxff, atoms_data; ...)`.
+interaction. For [`ReaxFF`](@ref), use `ElectronegativityEqualizationMethod(reaxff, atoms_data; ...)`.
 """
-@kwdef struct EEM{C, VI, VQ, QT}
+@kwdef struct ElectronegativityEqualizationMethod{C, VI, VQ, QT}
     coupling::C
     n_atoms::Int
     type_ids::VI    # Vector of Ints, shape=(n_atoms,) 
@@ -93,9 +93,9 @@ interaction. For [`ReaxFF`](@ref), use `EEM(reaxff, atoms_data; ...)`.
     state::EEMState{VQ, VI}
 end
 
-evaluate_before_pairwise(::EEM) = true
+evaluate_before_pairwise(::ElectronegativityEqualizationMethod) = true
 
-save_trial_state(eem::EEM) = (
+save_trial_state(eem::ElectronegativityEqualizationMethod) = (
     q=copy(eem.state.q),
     q_prev_1=copy(eem.state.q_prev_1),
     q_prev_2=copy(eem.state.q_prev_2),
@@ -106,7 +106,7 @@ save_trial_state(eem::EEM) = (
     last_history_step=eem.state.last_history_step,
 )
 
-function restore_trial_state!(sys, eem::EEM, snapshot::NamedTuple)
+function restore_trial_state!(sys, eem::ElectronegativityEqualizationMethod, snapshot::NamedTuple)
     eem.state.q .= snapshot.q
     eem.state.q_prev_1 .= snapshot.q_prev_1
     eem.state.q_prev_2 .= snapshot.q_prev_2
@@ -121,7 +121,7 @@ end
 
 
 # Type_ids, χ, γ, charges should already be on device
-function EEM(
+function ElectronegativityEqualizationMethod(
     coupling, 
     type_ids, 
     χ::AbstractVector{QT}, 
@@ -221,7 +221,7 @@ function EEM(
         buffers=buffers
     )
 
-    return EEM(
+    return ElectronegativityEqualizationMethod(
         coupling=coupling,
         n_atoms=n_atoms,
         type_ids=type_ids,
@@ -889,7 +889,7 @@ end
 
 
 function charge_equilibration!(
-    eem::EEM{C, VI, VQ, QT},
+    eem::ElectronegativityEqualizationMethod{C, VI, VQ, QT},
     sys::System,
     neighbors::Union{NeighborList, GPUCellListNeighborList},    # far neighbors list
     step_n::Int,
@@ -1247,7 +1247,7 @@ end
 
 # run charge equilibration using EEM, and return EEM self energy in System energy units and float precision
 # charges are written into sys.atoms 
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, eem::EEM; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys, eem::ElectronegativityEqualizationMethod; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
     backend = get_backend(sys.coords)
     charge_equilibration!(eem, sys, neighbors, step_n, backend; n_threads=n_threads)
     write_charges!(sys, eem.state.q, backend)
@@ -1266,7 +1266,7 @@ end
 
 # run charge equilibration using EEM, returns unchanged fs array
 # the EEM self energy does not contribute to the force if the parameters do not depend on geometry
-AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, eem::EEM; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys, eem::ElectronegativityEqualizationMethod; neighbors, step_n::Integer=0, n_threads::Integer=Threads.nthreads(), kwargs...)
     backend = get_backend(sys.coords)
     charge_equilibration!(eem, sys, neighbors, step_n, backend; n_threads=n_threads)
     write_charges!(sys, eem.state.q, backend)

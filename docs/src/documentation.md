@@ -532,7 +532,7 @@ In principle any structure file that is supported by Chemfiles can be loaded, bu
 In our case, the PDB file must contain valid element names in the column `Element symbol` (columns 77-78).
 
 A periodic cubic box with side length 2.5 nm is chosen to give a reasonable system density. 
-Molly sets up the charge equilibration and ReaxFF interactions using the selected force field by constructing a general interactions tuple with EEM and ReaxFF interactions attached.
+Molly sets up the charge equilibration and ReaxFF interactions using the selected force field by constructing a general interactions tuple with [`ElectronegativityEqualizationMethod`](@ref) and ReaxFF interactions attached.
 
 `eem_float_type` selects the numerical precision of the EEM solver (Float64 highly recommended), while `eem_tolerance` controls its convergence tolerance (typically 1e-6 is used).
 

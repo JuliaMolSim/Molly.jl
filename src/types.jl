@@ -58,7 +58,7 @@ const PairwiseInteraction = NBodyInteraction{2}
 Whether a general interaction is evaluated before pairwise and specific interactions
 when calculating energy or forces.
 
-Custom general interactions should implement this function to return `true` if 
+Custom general interactions should implement this function to return `true` if
 they change the state such that it affects subsequent interactions (e.g. atomic charges).
 """
 evaluate_before_pairwise(inter) = false
