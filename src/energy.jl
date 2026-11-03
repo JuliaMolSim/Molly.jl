@@ -170,6 +170,8 @@ sum to zero:
 where ``\bf{r_{ij}} = \bf{r_i} - \bf{r_j}`` is the minimum image vector,
 ``\bf{f_{ij}}`` is the pairwise force on atom ``i`` due to atom ``j``, and each specific
 interaction uses the minimum image vectors from its second atom ``s``.
+The contribution of specific interactions consisting of one atom, such as
+[`HarmonicPositionRestraint`](@ref), are ignored.
 The general interaction terms include the reciprocal space of [`Ewald`](@ref) and
 [`PME`](@ref), computed as ``-\partial E / \partial \bf{\epsilon}`` for a homogeneous
 strain ``\bf{\epsilon}`` of the box as indicated in

@@ -1708,7 +1708,7 @@ Molly.needs_virial(c::MyCoupler) = c.n_steps
 Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
-Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), ``\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}``, taking into account pairwise and specific interactions, the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, dispersion corrections and bias potentials.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), ``\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}``, taking into account pairwise and specific interactions (of two or more atoms), the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, dispersion corrections and bias potentials.
 The virial tensor of GROMACS is ``-\bf{W} / 2``, but the pressure tensor has the same definition in all three packages; see [`virial`](@ref) and [`pressure`](@ref) for the differences.
 Direct calls to [`virial`](@ref), [`scalar_virial`](@ref), [`pressure`](@ref) and [`scalar_pressure`](@ref) approximate constraint contributions with a deterministic small-step constraint preview; contributions from implicit solvent methods are ignored.
 
