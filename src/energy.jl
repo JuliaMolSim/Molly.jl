@@ -177,9 +177,10 @@ The general interaction terms include the reciprocal space of [`Ewald`](@ref) an
 strain ``\bf{\epsilon}`` of the box as indicated in
 [Essmann et al. 1995](https://doi.org/10.1063/1.470117), the isotropic dispersion
 correction terms, and bias potentials.
-Specific interactions acting on a single atom, such as [`HarmonicPositionRestraint`](@ref),
-do not contribute.
-Contributions from implicit solvent methods are ignored.
+Contributions from implicit solvent methods and specific interactions acting on a
+single atom, such as [`HarmonicPositionRestraint`](@ref), are ignored.
+Use a non-virial barostat such as the [`MonteCarloBarostat`](@ref) to control pressure
+in these cases.
 
 This is the same sign convention and normalization as the
 [global virial in LAMMPS](https://docs.lammps.org/compute_pressure.html), so the
