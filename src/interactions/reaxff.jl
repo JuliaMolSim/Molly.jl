@@ -478,7 +478,8 @@ end
     System(coord_file_path::AbstractString, reaxff::ReaxFF; eem_tolerance=1e-6,
            eem_max_iterations=200, eem_float_type=Float64, initial_charges=nothing,
            neighbor_skin=0.0, neighbor_refresh_n_steps=1, boundary=nothing,
-           array_type=Array, velocities=nothing, units=true, loggers=())
+           array_type=Array, velocities=nothing, units=true, loggers=(),
+           strictness=:warn)
 
 Construct a ReaxFF system from a coordinate file supported by Chemfiles.jl.
 The file must identify each atom's element, and every element must be present in
@@ -504,6 +505,11 @@ and velocities must match the ReaxFF floating-point type and the `units` setting
 With `units=true`, quantities carry units; with `units=false`, numerical values
 use nm, ps, g/mol, and kJ/mol units. `loggers` are passed to the system unchanged.
 
+`strictness` determines behavior when encountering possible problems, such as a box
+smaller than twice the largest ReaxFF cutoff or a `ReaxFF` instance that has already
+been used to set up a system, options are `:warn` to emit warnings, `:nowarn` to
+suppress warnings or `:error` to error.
+
 Use a fresh `ReaxFF` instance for each system, since it stores system-specific
 cached state.
 """
@@ -520,9 +526,23 @@ function System(coord_file_path::AbstractString,
                 velocities=nothing,
                 units::Bool=true,
                 loggers=(),
+                strictness=default_strictness(),
 ) where {T<:AbstractFloat, AT, ATR, QT<:AbstractFloat}
+    check_strictness(strictness)
     if AT != ATR
         throw(ArgumentError("Array Type Mismatch: ReaxFF object specified array_type $ATR but trying to construct System with array_type $AT"))
+    end
+    if !(eem_tolerance > zero(eem_tolerance))
+        throw(ArgumentError("eem_tolerance ($eem_tolerance) must be positive"))
+    end
+    if eem_max_iterations < 1
+        throw(ArgumentError("eem_max_iterations ($eem_max_iterations) must be at least 1"))
+    end
+    if reaxff.system_assigned
+        err_str = "This ReaxFF instance has already been assigned to another system. " *
+                  "Create a separate ReaxFF instance for each system to avoid using " *
+                  "incorrect cached state."
+        report_issue(err_str, strictness)
     end
 
     trajectory = Chemfiles.Trajectory(coord_file_path)
@@ -656,9 +676,9 @@ function System(coord_file_path::AbstractString,
         reaxff.device_params.general_parameters.upper_taper_radius
     ) 
     check_cutoff_box_size(
-        units ? required_cutoff * u"Å" : required_cutoff / T(10),
+        units ? uconvert(u"nm", required_cutoff * u"Å") : required_cutoff / T(10),
         boundary_used,
-        default_strictness(),
+        strictness,
     )
     neighbor_list_cutoff = required_cutoff + T(neighbor_skin_angstrom)
 
@@ -677,32 +697,37 @@ function System(coord_file_path::AbstractString,
             force_float32 = true,
             dist_cutoff = far_dist_cutoff,
             output = :geometric_pairs,
+            strictness = strictness,
         )
     elseif backend isa KernelAbstractions.GPU
         DistanceNeighborFinder(
             n_atoms = n_atoms,
             array_type = AT,
             n_steps = neighbor_refresh_n_steps,
-            dist_cutoff = far_dist_cutoff
+            dist_cutoff = far_dist_cutoff,
+            strictness = strictness,
         )
     else
-        # CellListNeighborFinder requires perpendicualr distance between cell planes to be greater than twice the cutoff
+        # CellListMapNeighborFinder requires the perpendicular distance between cell planes
+        #   to be greater than twice the cutoff
         # If the boundary is too small, use DistanceNeighborFinder on CPU instead
-        eligible = to_device(trues(n_atoms, n_atoms), AT)
+        # All pairs are eligible, so the pairs are given by n_atoms rather than a dense
+        #   matrix that would take memory proportional to n_atoms^2
         if minimum(cell_list_box_widths(boundary_used)) > 2 * far_dist_cutoff
-            finder = CellListMapNeighborFinder(
-                eligible = eligible,
+            CellListMapNeighborFinder(
+                n_atoms = n_atoms,
                 n_steps = neighbor_refresh_n_steps,
                 dist_cutoff = far_dist_cutoff,
                 boundary = boundary_used,
-                x0 = coords
+                x0 = coords,
+                strictness = strictness,
             )
-            finder
         else
             DistanceNeighborFinder(
-                eligible = eligible,
+                n_atoms = n_atoms,
                 n_steps = neighbor_refresh_n_steps,
-                dist_cutoff = far_dist_cutoff
+                dist_cutoff = far_dist_cutoff,
+                strictness = strictness,
             )
         end
     end
@@ -728,12 +753,9 @@ function System(coord_file_path::AbstractString,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
         energy_units=(units ? u"kJ * mol^-1" : NoUnits),
+        strictness=strictness,
     )
 
-    if reaxff.system_assigned
-        @warn "This ReaxFF instance has already been assigned to another system. " *
-              "Create a separate ReaxFF instance for each system to avoid using incorrect cached state."
-    end
     reaxff.system_assigned = true
 
     return sys

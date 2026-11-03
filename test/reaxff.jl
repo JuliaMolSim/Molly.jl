@@ -377,6 +377,35 @@
                 end
             end
         end
+
+        @testset "Setup checks $device" begin
+            ff_file = joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff")
+            ethane_file = joinpath(data_dir, "ReaxFF", "data", "ethane.pdb")
+            new_reaxff() = ReaxFF(force_field_file=ff_file, array_type=array_type)
+            setup(reaxff=new_reaxff(); boundary=CubicBoundary(3.5u"nm"), kwargs...) =
+                System(ethane_file, reaxff; boundary=boundary, array_type=array_type,
+                       kwargs...)
+
+            @test_throws ArgumentError setup(eem_tolerance=0.0)
+            @test_throws ArgumentError setup(eem_max_iterations=0)
+            @test_throws ArgumentError setup(strictness=:bad)
+
+            # The largest ReaxFF cutoff is 1 nm
+            small_box = CubicBoundary(1.5u"nm")
+            @test_logs (:warn, r"Minimum box side") setup(boundary=small_box)
+            @test_logs setup(boundary=small_box, strictness=:nowarn)
+            @test_throws ErrorException setup(boundary=small_box, strictness=:error)
+
+            reaxff = new_reaxff()
+            sys = setup(reaxff)
+            @test_logs (:warn, r"already been assigned") setup(reaxff)
+            @test_throws ErrorException setup(reaxff; strictness=:error)
+
+            # All pairs are eligible, so no dense matrix is needed
+            if array_type === Array
+                @test sys.neighbor_finder.eligible isa SparsePairMatrix
+            end
+        end
     end
 
     for array_type in array_list
