@@ -475,6 +475,8 @@ finding precision and box size, to guard against missing pairs due to rounding.
 This is particularly relevant when neighbor finding is done in `Float32` when the system uses `Float64`.
 The returned neighbor list may therefore include pairs that are slightly beyond `dist_cutoff`,
 so interactions should also use their own physical distance cutoffs.
+The other neighbor finders do not currently apply this same margin, so different finders can
+have different behaviours for pairs extremely close to `dist_cutoff`.
 
 The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` and
 `special_pairs`, or by the `eligible` and `special` matrices, as for

@@ -2188,11 +2188,6 @@ Like [`GPUNeighborFinder`](@ref) it stores the exclusions and special pairs as [
 Most of the memory it uses for a large system is the per-atom neighbor matrix and the pair list.
 The matrix can be left out with `ragged=false` when only the pairs are needed, as for the pairwise interactions of a [`System`](@ref), which roughly doubles the number of atoms that fit on a GPU; systems set up from a file do this.
 
-[`GPUCellListNeighborFinder`](@ref) increases the neighbor search distance internally by a small margin, based on both neighbor finding precision and box size, to guard against missing pairs due to rounding.
-This is particularly relevant when using `force_float32=true` with a `Float64` system, where rounding differences between neighbor finding and interaction calculations can cause physically interacting pairs near the cutoff to be missed when not using a skin.
-The returned neighbor list may therefore include pairs that are slightly beyond `dist_cutoff`, so interactions should also use their own physical distance cutoffs.
-The other neighbor finders do not currently apply this same margin, so different finders can have different behaviours for pairs extremely close to `dist_cutoff`.
-
 ## Analysis
 
 Molly contains some tools for analysing the results of simulations.
