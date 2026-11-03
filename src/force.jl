@@ -313,6 +313,15 @@ function has_interaction_virial(buffers, step_n::Integer)
     return has_interaction_virial(buffers.validity, step_n)
 end
 
+# Unwrapped coordinates on the device of sys.coords, computed at most once per forces! call and
+# shared by all :pbc interactions. Valid only inside forces!, which clears it before and after.
+function ensure_unwrapped_coords!(buffers, sys)
+    if isnothing(buffers.unwrapped_coords[])
+        buffers.unwrapped_coords[] = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    end
+    return buffers.unwrapped_coords[]
+end
+
 function has_constraint_virial(buffers, step_n::Integer)
     return has_constraint_virial(buffers.validity, step_n)
 end
@@ -538,6 +547,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    unwrapped_coords::Base.RefValue{Any}   # shared, once-per-call cache: see ensure_unwrapped_coords!
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -584,6 +594,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -722,6 +733,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       kin, pres, pre_coupling_ref(), pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      pre_coupling_ref(),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -1357,6 +1369,7 @@ function forces!(fs,
         fill!(buffers.virial, zero(eltype(buffers.virial)))
     end
 
+    buffers.unwrapped_coords[] = nothing # Filled by the first interaction that needs it
     for inter in values(general_inters)
         if evaluate_before_pairwise(inter)
             AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
@@ -1376,6 +1389,7 @@ function forces!(fs,
                                      visit_state=visit_state, strictness=strictness)
         end
     end
+    buffers.unwrapped_coords[] = nothing # Release the cache; valid only within this call
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
