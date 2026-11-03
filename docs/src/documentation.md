@@ -1564,30 +1564,35 @@ function Molly.simulate!(sys,
         # Ensure coordinates stay within the simulation box like this
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
+        # Find new neighbors like this, after the coordinates change and before
+        #   anything uses them
+        # The neighbor finder decides whether to rebuild the list based on the step number
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
+
         accels_t_dt = accelerations(sys, neighbors, step_n; n_threads=n_threads,
                                     visit_state=true)
         sys.velocities .+= (accels_t .+ accels_t_dt) .* sim.dt ./ 2
         accels_t = accels_t_dt
 
+        # Remove center of mass motion like this
+        remove_CM_motion!(sys)
+
         # Apply coupling like this
         recompute_forces = Molly.apply_coupling!(sys, buffers, sim.coupling, sim, neighbors,
                                                  step_n; n_threads=n_threads)
 
-        # Remove center of mass motion like this
-        remove_CM_motion!(sys)
+        # A coupler such as a barostat can change the coordinates, in which case the
+        #   neighbors are found again regardless of the step number
+        if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
+            accels_t = accelerations(sys, neighbors, step_n; n_threads=n_threads)
+        end
 
         # Apply the loggers like this
         # Computed quantities can also be given as keyword arguments to apply_loggers!
         Molly.apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads)
-
-        # Find new neighbors like this
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
-
-        # A coupler such as a barostat can change the coordinates
-        if recompute_forces
-            accels_t = accelerations(sys, neighbors, step_n; n_threads=n_threads)
-        end
     end
 
     return sys
@@ -2171,7 +2176,7 @@ A [`SparsePairMatrix`](@ref) can also be given as the `eligible` and `special` m
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms and cache a compact list of interacting `32x32` tiles internally, building the exclusion masks of the few tiles that need them from the sparse pairs.
 The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
-Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref).
+Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref), though it should still be called at the same points as for the other neighbor finders since it marks when the tile list is rebuilt.
 When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
 
 [`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).

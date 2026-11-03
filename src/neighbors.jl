@@ -228,7 +228,7 @@ Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 
 For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
 and energy kernels build and cache their interacting tile list internally from
-the neighbor-finder metadata.
+the neighbor-finder metadata, and this call marks when that list is rebuilt.
 It also returns `nothing` when the neighbor finder is `nothing`, meaning that no
 neighbor finder is used.
 
@@ -267,6 +267,9 @@ tiles that contain them, so the memory used grows linearly with the number of
 atoms.
 For that reason, [`find_neighbors`](@ref) returns `nothing` for this neighbor
 finder.
+It should still be called at the same points as for the other neighbor finders, since
+the tile list is rebuilt at the next force or energy evaluation after `find_neighbors`
+is called on a step that is a multiple of `n_steps` or with `force_recompute=true`.
 
 This is the recommended neighbor finder for `CuArray` systems. On other GPUs use
 [`GPUCellListNeighborFinder`](@ref).
@@ -285,7 +288,8 @@ The exceptions are stored in the `eligible` and `special` fields as
 - `special_pairs`: an iterable of `(i, j)` pairs, or a sparse matrix, of the pairs
   that use the special interaction path, for example 1-4 atoms.
 - `n_steps`: the number of steps between Morton reorder and tile-list refresh
-  passes.
+  passes. A forced rebuild, for example after a barostat changes the coordinates,
+  refreshes the tile list without changing the Morton order.
 - `array_type`: the array type used to store the excluded and special pairs on
   the GPU, for example `CuArray`. It is required unless `eligible` is given on
   the GPU, in which case its array type is used.
@@ -306,6 +310,8 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     n_steps::Int
     initialized::Bool
     cache_generation::UInt64
+    reorder_generation::UInt64
+    tile_generation::UInt64
     eligible::E
     special::E
 end
@@ -415,22 +421,28 @@ function GPUNeighborFinder(;
     special_sparse = sparse_special(special_given, n_atoms_used, AT)
     dist_cutoff_2 = dist_cutoff^2
     return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(dist_cutoff_2), typeof(eligible_sparse)}(
-                Int(n_atoms_used), dist_cutoff, dist_cutoff_2, n_steps, initialized, 0,
+                Int(n_atoms_used), dist_cutoff, dist_cutoff_2, n_steps, initialized, 0, 0, 0,
                 eligible_sparse, special_sparse)
 end
 
-# The interacting tile list is constructed within the CUDA pairwise kernels.
-find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
-
-# Mark neighbor data cached in `buffers` as stale so that it is rebuilt on the next force
-#   or energy evaluation
-# Neighbor finders that return a neighbor list from `find_neighbors` do not cache
-#   anything in the buffers, so this does nothing for them
-invalidate_cached_neighbors!(buffers, neighbor_finder) = buffers
-
-function invalidate_cached_neighbors!(buffers::BuffersGPU, nf::GPUNeighborFinder)
-    buffers.step_n_preprocessed = -1
-    return buffers
+# The interacting tile list is built within the CUDA pairwise kernels, so this only records
+#   that it is due to be rebuilt, at the same points as the other neighbor finders rebuild
+#   their lists
+# Every `n_steps` steps the Morton order is recomputed as well, whereas a forced rebuild
+#   only refreshes the tiles since the order is still close to optimal
+function find_neighbors(sys::System,
+                        nf::GPUNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
+                        kwargs...)
+    if iszero(step_n % nf.n_steps)
+        nf.reorder_generation += one(UInt64)
+        nf.tile_generation += one(UInt64)
+    elseif force_recompute
+        nf.tile_generation += one(UInt64)
+    end
+    return nothing
 end
 
 """

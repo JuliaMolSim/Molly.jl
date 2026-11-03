@@ -844,15 +844,26 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     return buffers
 end
 
-@inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, step_n)
+# find_neighbors increases the rebuild counts of the neighbor finder when the Morton order
+#   or the tile list is due to be rebuilt, so the cache follows the same rebuild points as
+#   the lists of the other neighbor finders
+@inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder)
     first_preprocess = (buffers.step_n_preprocessed == -1)
-    step_changed = (step_n != buffers.step_n_preprocessed)
-    needs_morton_refresh = (first_preprocess || (step_changed && step_n % nf.n_steps == 0))
+    needs_morton_refresh = (first_preprocess ||
+                            buffers.reorder_generation != nf.reorder_generation)
     sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
     needs_reorder = true # Coordinates can be changed at any point
     needs_sparse_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
-    needs_tile_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
+    needs_tile_refresh = (needs_sparse_refresh ||
+                          buffers.tile_generation != nf.tile_generation)
     return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
+end
+
+function record_neighbor_refresh!(buffers, nf::GPUNeighborFinder, step_n)
+    buffers.reorder_generation = nf.reorder_generation
+    buffers.tile_generation = nf.tile_generation
+    buffers.step_n_preprocessed = step_n
+    return buffers
 end
 
 function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray}, N::Int) where D
@@ -1016,21 +1027,22 @@ end
 Maintainer entry point for the CUDA tiled pairwise force path.
 
 Pipeline:
-1. Rebuild the Morton ordering and the Morton-ordered exception data when the
-   [`GPUNeighborFinder`](@ref) reorder cadence invalidates them.
+1. Rebuild the Morton ordering and the Morton-ordered exception data when
+   [`find_neighbors`](@ref) has marked them as due, every `n_steps` steps of the
+   [`GPUNeighborFinder`](@ref).
 2. Reorder coordinates, velocities, and atoms into Morton order.
-3. Recompute the compact list of interacting 32x32 tiles when the cached tile
-   list is stale for the current `dist_cutoff`, growing it if it overflows.
+3. Recompute the compact list of interacting 32x32 tiles when the order changed
+   or [`find_neighbors`](@ref) forced a rebuild, growing it if it overflows.
 4. Launch `force_kernel!` over that compact tile list and reverse the reorder.
 
 Cache contract:
-- `buffers.step_n_preprocessed` gates reuse of reordered coordinates and tile
-  search work within a simulation step.
+- The Morton order and tile list are rebuilt when [`find_neighbors`](@ref) has
+  increased the rebuild counts of the [`GPUNeighborFinder`](@ref) since they were
+  last built, or when `buffers.step_n_preprocessed` is `-1` for new buffers.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
 - `sys.neighbor_finder.initialized` only indicates whether the Morton-ordered
-  exception data is current. The interacting-tile list still depends on
-  the neighbor finder's `n_steps` and `dist_cutoff`.
+  exception data is current.
 """
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
@@ -1039,7 +1051,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
     nf = sys.neighbor_finder
 
     needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
-        gpu_neighbor_refresh_flags(buffers, nf, step_n)
+        gpu_neighbor_refresh_flags(buffers, nf)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
         if needs_morton_refresh
             sorted_morton_seq!(buffers, sys.coords, sys.boundary)
@@ -1058,7 +1070,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
         if needs_tile_refresh
             refresh_interacting_tiles!(buffers, sys, N)
         end
-        buffers.step_n_preprocessed = step_n
+        record_neighbor_refresh!(buffers, nf, step_n)
     end
     
     # Execute force kernel over the list of interacting tiles
@@ -1123,22 +1135,20 @@ Maintainer entry point for the CUDA tiled pairwise energy path.
 
 This follows the same Morton reorder -> exception translation -> tile search
 pipeline as `pairwise_forces_loop_gpu!`, but launches `energy_kernel!` instead
-of the force kernel. The key difference is that energy evaluation reuses any
-preprocessing already performed for the current step so forces and energies can
-share the same cached tile metadata.
+of the force kernel. Energy evaluation reuses any preprocessing already performed
+since the last rebuild, so forces and energies share the same cached tile metadata.
 """
 function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T, TH},
                                       pairwise_inters, nbs::Nothing,
                                       step_n) where {D, T, TH}
-    # The ordering is usually recomputed for potential energy, but we can reuse it
-    #   if it was already computed for this step
+    # The ordering and tiles are reused if they are current
     N = length(sys.coords)
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     backend = get_backend(sys.coords)
     nf = sys.neighbor_finder
 
     needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
-        gpu_neighbor_refresh_flags(buffers, nf, step_n)
+        gpu_neighbor_refresh_flags(buffers, nf)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
         if needs_morton_refresh
             sorted_morton_seq!(buffers, sys.coords, sys.boundary)
@@ -1158,7 +1168,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         if needs_tile_refresh
             refresh_interacting_tiles!(buffers, sys, N)
         end
-        buffers.step_n_preprocessed = step_n
+        record_neighbor_refresh!(buffers, nf, step_n)
     end
 
     kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(

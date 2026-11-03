@@ -55,6 +55,230 @@ end
     @test_throws ArgumentError simulate!(sys_chunked, sim_chunked, 1; init_step=-1)
 end
 
+# Counts how often a neighbor list does not match the coordinates it is used with
+mutable struct NeighborCheck
+    n_checks::Int
+    n_stale::Int
+end
+
+NeighborCheck() = NeighborCheck(0, 0)
+
+neighbor_pair_set(nl) = Set((nl.list[k][1], nl.list[k][2]) for k in 1:nl.n)
+
+function check_neighbors!(nc::NeighborCheck, sys, neighbors, step_n)
+    current = find_neighbors(sys, sys.neighbor_finder, nothing, step_n, true)
+    nc.n_checks += 1
+    if neighbor_pair_set(neighbors) != neighbor_pair_set(current)
+        nc.n_stale += 1
+    end
+    return nc
+end
+
+# For GPUNeighborFinder, which caches the tiles in the buffers, the energy with the buffers
+#   of the simulator is compared to that with new buffers
+function check_gpu_energy!(nc::NeighborCheck, sys, pe, step_n)
+    pe_fresh = potential_energy(sys, nothing, step_n, Molly.init_buffers!(sys, 1, true))
+    nc.n_checks += 1
+    if !isapprox(pe, pe_fresh; rtol=1e-9)
+        nc.n_stale += 1
+    end
+    return nc
+end
+
+# A general interaction with no forces or energy that checks the neighbors it is given
+struct NeighborCheckInter
+    nc::NeighborCheck
+end
+
+function AtomsCalculators.forces!(fs, sys, inter::NeighborCheckInter; neighbors=nothing,
+                                  step_n=0, kwargs...)
+    check_neighbors!(inter.nc, sys, neighbors, step_n)
+    return fs
+end
+
+function AtomsCalculators.potential_energy(sys, inter::NeighborCheckInter; neighbors=nothing,
+                                           step_n=0, kwargs...)
+    check_neighbors!(inter.nc, sys, neighbors, step_n)
+    return zero(float_type(sys)) * sys.energy_units
+end
+
+struct NeighborCheckCoupler
+    nc::NeighborCheck
+end
+
+function Molly.apply_coupling!(sys, buffers, c::NeighborCheckCoupler, sim, neighbors, step_n;
+                               kwargs...)
+    if sys.neighbor_finder isa GPUNeighborFinder
+        check_gpu_energy!(c.nc, sys, potential_energy(sys, neighbors, step_n, buffers), step_n)
+    else
+        check_neighbors!(c.nc, sys, neighbors, step_n)
+    end
+    return false
+end
+
+# Moves the atoms and asks for the forces to be recomputed, as a barostat does
+struct JiggleCoupler
+    rng::Xoshiro
+end
+
+function Molly.apply_coupling!(sys, buffers, c::JiggleCoupler, sim, neighbors, step_n;
+                               kwargs...)
+    shifts = [SVector{3}(0.01 .* randn(c.rng, 3))u"nm" for _ in 1:length(sys)]
+    sys.coords .= wrap_coords.(sys.coords .+ copyto!(similar(sys.coords), shifts),
+                               (sys.boundary,))
+    return true
+end
+
+@testset "Neighbor lists match the coordinates" begin
+    # The neighbor finders have no skin and rebuild every step, so any list that is used
+    #   after the atoms move without being rebuilt is detected
+    function neighbor_check_system(AT, inter_nc, logger_nc; nf_steps=1)
+        rng = Xoshiro(10)
+        n_atoms = 100
+        boundary = CubicBoundary(2.2u"nm")
+        atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                 for _ in 1:n_atoms]
+        coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
+        velocities = [random_velocity(10.0u"g/mol", 300.0u"K"; rng=rng) for _ in 1:n_atoms]
+        if AT <: CuArray
+            nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.0u"nm", n_steps=nf_steps,
+                                   array_type=AT)
+            logger_func = function (s, nbs, step_n, buffers; current_potential_energy=nothing,
+                                    kwargs...)
+                pe = (isnothing(current_potential_energy) ?
+                      potential_energy(s, nbs, step_n, buffers) : current_potential_energy)
+                check_gpu_energy!(logger_nc, s, pe, step_n)
+                return true
+            end
+            # The two pairwise interactions allow them to be split for MTSIntegrator
+            pairwise_inters = (LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+                               Coulomb(cutoff=DistanceCutoff(1.0u"nm")))
+            general_inters = ()
+        else
+            nf = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.0u"nm",
+                                        n_steps=nf_steps)
+            logger_func = function (s, nbs, step_n, buffers; kwargs...)
+                check_neighbors!(logger_nc, s, nbs, step_n)
+                return true
+            end
+            pairwise_inters = (LennardJones(cutoff=DistanceCutoff(1.0u"nm")),)
+            general_inters = (NeighborCheckInter(inter_nc),)
+        end
+        return System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
+            boundary=boundary,
+            velocities=to_device(velocities, AT),
+            pairwise_inters=pairwise_inters,
+            general_inters=general_inters,
+            neighbor_finder=nf,
+            loggers=(check=GeneralObservableLogger(logger_func, Bool, 1),),
+        )
+    end
+
+    dt = 0.002u"ps"
+    temp = 300.0u"K"
+    γ = 1.0u"ps^-1"
+    min_tol = 1e-9u"kJ * mol^-1 * nm^-1"
+    coupled_sims = [
+        ("VelocityVerlet"   , cpl -> VelocityVerlet(dt=dt, coupling=cpl)),
+        ("DPDVelocityVerlet", cpl -> DPDVelocityVerlet(dt=dt, coupling=cpl)),
+        ("Verlet"           , cpl -> Verlet(dt=dt, coupling=cpl)),
+        ("Langevin"         , cpl -> Langevin(dt=dt, temperature=temp, friction=γ,
+                                              coupling=cpl)),
+        ("NoseHoover"       , cpl -> NoseHoover(dt=dt, temperature=temp, coupling=cpl)),
+        ("MTSIntegrator"    , cpl -> MTSIntegrator(dt=dt, pi_fractions=(2,),
+                                                   gi_fractions=(1,), coupling=cpl)),
+        ("MTSLangevinIntegrator", cpl -> MTSLangevinIntegrator(dt=dt, temperature=temp,
+                                    friction=γ, pi_fractions=(2,), gi_fractions=(1,),
+                                    coupling=cpl)),
+        ("MTSIntegrator inner_step_neighbors", cpl -> MTSIntegrator(dt=dt,
+                                    pi_fractions=(1,), gi_fractions=(2,), coupling=cpl,
+                                    inner_step_neighbors=true)),
+    ]
+    friction_split = 10.0u"g * mol^-1 * ps^-1"
+    other_sims = [
+        ("StormerVerlet"     , StormerVerlet(dt=dt)),
+        ("OverdampedLangevin", OverdampedLangevin(dt=0.0001u"ps", temperature=temp,
+                                                  friction=10.0u"ps^-1")),
+        [("LangevinSplitting $s", LangevinSplitting(dt=dt, temperature=temp,
+                                        friction=friction_split, splitting=s))
+                                        for s in ("BAOA", "BAOAB", "ABOBA", "OBABO")]...,
+        ("SteepestDescentMinimizer", SteepestDescentMinimizer(max_steps=20, tol=min_tol)),
+        ("FIREMinimizer"           , FIREMinimizer(max_steps=20, tol=min_tol)),
+        ("LBFGSMinimizer"          , LBFGSMinimizer(max_steps=20, tol=min_tol)),
+        ("MetropolisMonteCarlo"    , MetropolisMonteCarlo(temperature=temp,
+                                        trial_moves=Molly.random_uniform_translation!,
+                                        trial_args=Dict(:shift_size => 0.05u"nm"))),
+    ]
+    is_minimizer(sim) = sim isa Union{SteepestDescentMinimizer, FIREMinimizer, LBFGSMinimizer}
+
+    @testset "$name" for (name, sim) in [[(n, f((NeighborCheckCoupler(NeighborCheck()),
+                                                 JiggleCoupler(Xoshiro(3)))))
+                                          for (n, f) in coupled_sims]..., other_sims...]
+        inter_nc, logger_nc = NeighborCheck(), NeighborCheck()
+        sys = neighbor_check_system(Array, inter_nc, logger_nc)
+        if is_minimizer(sim)
+            simulate!(sys, sim; n_threads=1, run_loggers=true)
+        else
+            simulate!(sys, sim, 20; n_threads=1, rng=Xoshiro(7))
+        end
+        @test inter_nc.n_checks > 0
+        @test inter_nc.n_stale == 0
+        @test logger_nc.n_checks > 0
+        @test logger_nc.n_stale == 0
+        if hasproperty(sim, :coupling) && sim.coupling isa Tuple
+            coupler_nc = first(sim.coupling).nc
+            @test coupler_nc.n_checks == 20
+            @test coupler_nc.n_stale == 0
+        end
+    end
+
+    if run_cuda_tests
+        gpu_coupled_sims = [(n, f) for (n, f) in coupled_sims if n in ("VelocityVerlet",
+                            "Verlet", "Langevin", "NoseHoover")]
+        push!(gpu_coupled_sims, ("MTSIntegrator", cpl -> MTSIntegrator(dt=dt,
+                                                    pi_fractions=(1, 2), coupling=cpl)))
+        @testset "GPUNeighborFinder $name" for (name, make_sim) in gpu_coupled_sims
+            # Rebuilding every step, the coupler and loggers see the current tiles
+            coupler_nc, logger_nc = NeighborCheck(), NeighborCheck()
+            sys = neighbor_check_system(CuArray, nothing, logger_nc)
+            simulate!(sys, make_sim((NeighborCheckCoupler(coupler_nc),)), 20; n_threads=1,
+                      rng=Xoshiro(7))
+            @test coupler_nc.n_checks == 20
+            @test coupler_nc.n_stale == 0
+            @test logger_nc.n_stale == 0
+
+            # Rebuilding every 10 steps, a coupler that moves the atoms forces a rebuild
+            #   that the loggers see
+            logger_nc = NeighborCheck()
+            sys = neighbor_check_system(CuArray, nothing, logger_nc; nf_steps=10)
+            simulate!(sys, make_sim((JiggleCoupler(Xoshiro(3)),)), 20; n_threads=1,
+                      rng=Xoshiro(7))
+            @test logger_nc.n_checks == 21
+            @test logger_nc.n_stale == 0
+        end
+
+        @testset "GPUNeighborFinder $name" for (name, sim) in (
+                ("LangevinSplitting BAOAB", LangevinSplitting(dt=dt, temperature=temp,
+                                        friction=friction_split, splitting="BAOAB")),
+                ("SteepestDescentMinimizer", SteepestDescentMinimizer(max_steps=20,
+                                                                      tol=min_tol)),
+                ("LBFGSMinimizer", LBFGSMinimizer(max_steps=20, tol=min_tol)),
+            )
+            logger_nc = NeighborCheck()
+            sys = neighbor_check_system(CuArray, nothing, logger_nc)
+            if is_minimizer(sim)
+                simulate!(sys, sim; n_threads=1, run_loggers=true)
+            else
+                simulate!(sys, sim, 20; n_threads=1, rng=Xoshiro(7))
+            end
+            @test logger_nc.n_checks > 0
+            @test logger_nc.n_stale == 0
+        end
+    end
+end
+
 @testset "Temperature REMD" begin
     Random.seed!(1234)
     rng = Xoshiro(10)

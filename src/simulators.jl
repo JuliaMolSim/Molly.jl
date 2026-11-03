@@ -1260,17 +1260,22 @@ end
 
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys; n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
 
         # Remove drift after the step velocity is finalized and before
         #   coupling/loggers observe the state
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
+
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng, strictness=strictness)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
-                                   n_threads=n_threads)
+        if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
+        end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,
                        strictness=strictness, current_forces=forces_t)
@@ -1567,8 +1572,9 @@ Not compatible with constraints, will print a warning and continue
 without applying constraints.
 Not compatible with virial calculation.
 
-The neighbor finder should use a skin sufficient to cover atomic motion between
-rebuilds, since neighbors are not refreshed between splitting substeps.
+Whenever **A** steps have moved the atoms since the neighbors were last found, the
+neighbors are found on the schedule of the neighbor finder before the forces are next
+calculated and at the end of the step.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -1682,10 +1688,20 @@ end
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
+        # Whether the coordinates have changed since the neighbors were last found
+        coords_moved = false
         for (j, op) in enumerate(splitting_ops)
             if op == 'A'
                 A_step!(sys, effective_dts[j], n_threads)
+                coords_moved = true
             elseif op == 'B'
+                # The neighbors are found after the coordinates are updated and before the
+                #   forces are calculated, as for the other simulators
+                if force_computation_steps[j] && coords_moved
+                    neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                               n_threads=n_threads)
+                    coords_moved = false
+                end
                 B_step!(
                     sys,
                     forces_t,
@@ -1719,8 +1735,10 @@ end
             remove_CM_motion!(sys)
         end
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                   n_threads=n_threads)
+        if coords_moved
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                       n_threads=n_threads)
+        end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers;
                        n_threads=n_threads, strictness=strictness)
@@ -2338,9 +2356,12 @@ be 1.
 When simulating, `n_steps` is the number of outer steps.
 Coupling, removing the center of mass motion and running loggers applies per outer time step.
 
-With `inner_step_neighbors=false`, the neighbor finder should use a skin sufficient
-to cover atomic motion between rebuilds, since neighbors are not refreshed during
-inner steps.
+With `inner_step_neighbors=false`, the neighbors are found once per outer step on the
+schedule of the neighbor finder, after the coordinates are updated and before the
+interactions evaluated once per outer step.
+Interactions evaluated more often use these neighbors throughout the next outer step,
+so if any pairwise interactions are evaluated more than once per outer step the neighbor
+finder should use a skin sufficient to cover atomic motion over an outer step.
 
 # Arguments
 - `dt::T`: the outer time step of the simulation.
@@ -2390,9 +2411,12 @@ be 1.
 When simulating, `n_steps` is the number of outer steps.
 Coupling, removing the center of mass motion and running loggers applies per outer time step.
 
-With `inner_step_neighbors=false`, the neighbor finder should use a skin sufficient
-to cover atomic motion between rebuilds, since neighbors are not refreshed during
-inner steps.
+With `inner_step_neighbors=false`, the neighbors are found once per outer step on the
+schedule of the neighbor finder, after the coordinates are updated and before the
+interactions evaluated once per outer step.
+Interactions evaluated more often use these neighbors throughout the next outer step,
+so if any pairwise interactions are evaluated more than once per outer step the neighbor
+finder should use a skin sufficient to cover atomic motion over an outer step.
 
 # Arguments
 - `dt::T`: the outer time step of the simulation.
@@ -2515,15 +2539,9 @@ function mts_coordinate_update!(sys, noise, sim::MTSLangevinIntegrator, dt_frac_
     return sys
 end
 
-# Recalculate the neighbors during the inner steps of an MTS integrator if required
-function mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
-    invalidate_cached_neighbors!(buffers, sys.neighbor_finder)
-    return find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                          n_threads=n_threads)
-end
-
 # Can modify sys, forces_t, accels_t, buffers, noise, cons_coord_storage and cons_vel_storage
-# Returns the neighbors, which are updated during the substeps if inner_step_neighbors is true
+# Returns the neighbors, which are updated at every inner step if inner_step_neighbors is true
+#   and otherwise once at the outer level
 function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
                        cons_vel_storage, sim, ordered_fractions, fraction_inters, neighbors,
                        dt, step_n, n_threads, rng, using_constraints, n_parent_substeps,
@@ -2558,7 +2576,8 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
             sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
             place_virtual_sites!(sys; n_threads=n_threads)
             if inner_step_neighbors
-                neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                           n_threads=n_threads)
             end
         else
             neighbors = mts_substeps!(sys, forces_t, accels_t, buffers, noise,
@@ -2569,6 +2588,12 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
                                       strictness, inner_step_neighbors, true)
         end
 
+        # The outer level runs once per step after all the coordinate updates, so without
+        #   inner step neighbors they are found here on the schedule of the neighbor finder
+        if n_substeps == 1 && !inner_step_neighbors
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                       n_threads=n_threads)
+        end
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                 pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis,
                 visit_state=true, strictness=strictness)
@@ -2664,15 +2689,11 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         end
         recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads, rng=rng, strictness=strictness)
-        if sim.inner_step_neighbors
-            # The neighbors are up to date from the substeps, so they only need to be
-            #   recalculated if the coupling changed the coordinates
-            if recompute_forces
-                neighbors = mts_find_neighbors(sys, buffers, neighbors, step_n, n_threads)
-            end
-        else
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
-                                       recompute_forces; n_threads=n_threads)
+        # The neighbors are up to date from the substeps, so they only need to be
+        #   recalculated if the coupling changed the coordinates
+        if recompute_forces
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                       n_threads=n_threads)
         end
 
         apply_loggers!(sys, neighbors, step_n, buffers, run_loggers; n_threads=n_threads,

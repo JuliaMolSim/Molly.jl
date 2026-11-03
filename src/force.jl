@@ -511,6 +511,9 @@ energy calculations.
 - `step_n_preprocessed`: Last simulation step where preprocessing was done.
 - `sparse_pair_generation`: sparse-pair generation reflected in the cached masks
   and tile metadata.
+- `reorder_generation`, `tile_generation`: the [`GPUNeighborFinder`](@ref) rebuild
+  counts reflected in the cached Morton order and tile list, which
+  [`find_neighbors`](@ref) increases when they are due to be rebuilt.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
 
@@ -564,6 +567,8 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     grad_scratch::Base.RefValue{Any}
     step_n_preprocessed::Int
     sparse_pair_generation::UInt64
+    reorder_generation::UInt64
+    tile_generation::UInt64
     num_pairs::Int
 end
 
@@ -592,7 +597,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      step_n_preprocessed, sparse_pair_generation, num_pairs)
+                      step_n_preprocessed, sparse_pair_generation, UInt64(0), UInt64(0),
+                      num_pairs)
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -730,7 +736,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      -1, UInt64(0), 0)
+                      -1, UInt64(0), UInt64(0), UInt64(0), 0)
 end
 
 """
