@@ -581,12 +581,18 @@ function vector(c1, c2, boundary::RectangularBoundary)
     )
 end
 
+# The components of the basis vectors that are always zero are skipped
 function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, true}) where T
-    dr = c2 - c1
-    dr -= boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
-    dr -= boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
-    dr -= boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
-    return dr
+    a, b, c = boundary.basis_vectors
+    rs = boundary.reciprocal_size
+    dx, dy, dz = c2 - c1
+    n3 = floor(dz * rs[3] + T(0.5))
+    dx, dy, dz = dx - c[1] * n3, dy - c[2] * n3, dz - c[3] * n3
+    n2 = floor(dy * rs[2] + T(0.5))
+    dx, dy = dx - b[1] * n2, dy - b[2] * n2
+    n1 = floor(dx * rs[1] + T(0.5))
+    dx -= a[1] * n1
+    return SVector(dx, dy, dz)
 end
 
 function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, false}) where T

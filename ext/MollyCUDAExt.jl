@@ -224,51 +224,23 @@ function autotune_benchmark_ms!(prepare!::F, run!::G;
     return best_ms
 end
 
-# The box matrix with the basis vectors as columns, so that its inverse gives fractional
-#   coordinates, see `kernel_min_max_triclinic!`
-# The arguments are in column-major order
-@inline function triclinic_boundary_matrix(boundary::TriclinicBoundary, ::Type{T}) where T
-    return SMatrix{3, 3, T}(
-        ustrip(boundary.basis_vectors[1][1]), ustrip(boundary.basis_vectors[1][2]), ustrip(boundary.basis_vectors[1][3]),
-        ustrip(boundary.basis_vectors[2][1]), ustrip(boundary.basis_vectors[2][2]), ustrip(boundary.basis_vectors[2][3]),
-        ustrip(boundary.basis_vectors[3][1]), ustrip(boundary.basis_vectors[3][2]), ustrip(boundary.basis_vectors[3][3]),
-    )
-end
-
-function autotune_prepare_block_bounds!(buffers, sys::System{D, <:CuArray, T}, N::Int) where {D, T}
+function autotune_prepare_block_bounds!(buffers, sys::System{D, <:CuArray}, N::Int) where D
     n_blocks = cld(N, Int(WARPSIZE))
-    if sys.boundary isa TriclinicBoundary
-        H = triclinic_boundary_matrix(sys.boundary, T)
-        @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-            buffers.morton_seq,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.coords,
-            inv(H),
-            Val(N),
-            sys.boundary,
-            Val(D),
-        )
-    else
-        @cuda blocks=n_blocks threads=32 kernel_min_max!(
-            buffers.morton_seq,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.coords,
-            Val(N),
-            sys.boundary,
-            Val(D),
-        )
-    end
+    @cuda blocks=n_blocks threads=32 kernel_min_max!(
+        buffers.morton_seq,
+        buffers.box_mins,
+        buffers.box_maxs,
+        sys.coords,
+        Val(N),
+        sys.boundary,
+        Val(D),
+    )
     CUDA.synchronize()
     return nothing
 end
 
 function autotune_prepare_common_state!(buffers, sys::System{D, <:CuArray}, N::Int) where D
-    morton_bits = 10
-    sides = box_sides(sys.boundary)
-    cell_width = sides ./ (2^morton_bits)
-    sorted_morton_seq!(buffers, sys.coords, cell_width, morton_bits)
+    sorted_morton_seq!(buffers, sys.coords, sys.boundary)
     refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
     buffers.sparse_pair_generation = sys.neighbor_finder.cache_generation
     reorder_system_gpu!(buffers, sys)
@@ -365,7 +337,7 @@ function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) wher
     n_blocks = cld(N, Int(WARPSIZE))
     # Also grows the tile list to fit, so that the candidates below do not overflow it
     find_interacting_tiles!(buffers, sys, n_blocks)
-    if use_tile_tree(sys, n_blocks)
+    if use_tile_tree(sys, n_blocks, buffers.num_pairs)
         # The tree search has no block shape to tune
         return nothing
     end
@@ -883,18 +855,11 @@ end
     return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
 end
 
-function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray, T}, N::Int) where {D, T}
+function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray}, N::Int) where D
     n_blocks = cld(N, WARPSIZE)
-    if sys.boundary isa TriclinicBoundary
-        Hinv = inv(triclinic_boundary_matrix(sys.boundary, T))
-        @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
-            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
-            sys.boundary, Val(D))
-    else
-        @cuda blocks=n_blocks threads=32 kernel_min_max!(
-            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-            Val(N), sys.boundary, Val(D))
-    end
+    @cuda blocks=n_blocks threads=32 kernel_min_max!(
+        buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+        Val(N), sys.boundary, Val(D))
 
     find_interacting_tiles!(buffers, sys, n_blocks)
     prune_interacting_tiles!(buffers, sys, N)
@@ -925,8 +890,8 @@ repeated. The vectors start at a size that is enough for typical systems, see
 `init_buffers!`, and are kept for later searches.
 =#
 function find_interacting_tiles!(buffers, sys, n_blocks)
-    search! = use_tile_tree(sys, n_blocks) ? find_interacting_tiles_tree! :
-                                             find_interacting_tiles_all_pairs!
+    use_tree = use_tile_tree(sys, n_blocks, buffers.num_pairs)
+    search! = use_tree ? find_interacting_tiles_tree! : find_interacting_tiles_all_pairs!
     reset_interacting_tile_state!(buffers)
     search!(buffers, sys, n_blocks)
     n_tiles = Int(only(from_device(buffers.num_interacting_tiles)))
@@ -938,6 +903,7 @@ function find_interacting_tiles!(buffers, sys, n_blocks)
         throw_if_interacting_tiles_overflowed(buffers)
     end
     buffers.num_pairs = n_tiles
+    use_tree && sort_interacting_tiles!(buffers, n_tiles)
     return buffers
 end
 
@@ -987,6 +953,63 @@ function find_interacting_tiles_tree!(buffers, sys::System{D}, n_blocks) where D
     return buffers
 end
 
+#=
+The tree search appends tiles in the order that its threads find them, so tiles next to
+each other in the list rarely share a block. `force_kernel!` runs consecutive tiles on
+the warps of a thread block, and with that order it is 10-20% slower than with the tiles
+of the all-pairs search, which appends the tiles of each 32x32 group of blocks column by
+column. Sorting the tiles into that order gives the speed back. The sort key holds the
+whole tile, so the tiles are read back from the sorted keys.
+=#
+function sort_interacting_tiles!(buffers, n_tiles)
+    n_tiles == 0 && return buffers
+    keys = similar(buffers.interacting_tiles_i, UInt64, n_tiles)
+    temp = similar(keys)
+    n_threads = 256
+    n_launch_blocks = cld(n_tiles, n_threads)
+    @cuda threads=n_threads blocks=n_launch_blocks tile_sort_keys_kernel!(
+        keys, buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+        buffers.interacting_tiles_type, Int32(n_tiles))
+    Molly.AcceleratedKernels.sort!(keys; temp=temp, block_size=256)
+    @cuda threads=n_threads blocks=n_launch_blocks tiles_from_sort_keys_kernel!(
+        buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+        buffers.interacting_tiles_type, keys, Int32(n_tiles))
+    CUDA.unsafe_free!(keys)
+    CUDA.unsafe_free!(temp)
+    return buffers
+end
+
+# Tile `(i, j)` ordered by the 32-block group of `j`, the 32-block group of `i`, `j` and
+#   `i`, with the tile type, 0 or 1 from `emit_interacting_tile!`, in the lowest bit
+# The groups take 26 bits each, enough for the Int32 block indices
+@inline function tile_sort_key(i::Int32, j::Int32, type::UInt8)
+    i0 = UInt64(i - Int32(1))
+    j0 = UInt64(j - Int32(1))
+    return ((j0 >> 5) << 37) | ((i0 >> 5) << 11) | ((j0 & 0x1f) << 6) | ((i0 & 0x1f) << 1) |
+           UInt64(type & 0x01)
+end
+
+function tile_sort_keys_kernel!(keys, tiles_i, tiles_j, tiles_type, n_tiles)
+    t = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    if t <= n_tiles
+        @inbounds keys[t] = tile_sort_key(tiles_i[t], tiles_j[t], tiles_type[t])
+    end
+    return nothing
+end
+
+function tiles_from_sort_keys_kernel!(tiles_i, tiles_j, tiles_type, keys, n_tiles)
+    t = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    if t <= n_tiles
+        @inbounds key = keys[t]
+        i0 = (((key >> 11) & 0x03ffffff) << 5) | ((key >> 1) & 0x1f)
+        j0 = ((key >> 37) << 5) | ((key >> 6) & 0x1f)
+        @inbounds tiles_i[t] = (i0 % Int32) + Int32(1)
+        @inbounds tiles_j[t] = (j0 % Int32) + Int32(1)
+        @inbounds tiles_type[t] = (key & 0x01) % UInt8
+    end
+    return nothing
+end
+
 """
     pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, nbs::Nothing, needs_vir, step_n)
 
@@ -1019,10 +1042,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
         gpu_neighbor_refresh_flags(buffers, nf, step_n)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
         if needs_morton_refresh
-            morton_bits = 10
-            sides = box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
         end
 
         if needs_sparse_refresh
@@ -1121,10 +1141,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
         gpu_neighbor_refresh_flags(buffers, nf, step_n)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
         if needs_morton_refresh
-            morton_bits = 10
-            sides = box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
         end
 
         if needs_sparse_refresh
@@ -1182,33 +1199,68 @@ function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVecto
     return SVector(ntuple(d -> r1_min[d] - r2_max[d] <= zero(T) && r2_min[d] - r1_max[d] <= zero(T) ? zero(T) : ifelse(a[d] < b[d], a[d], b[d]), D))
 end
 
-#=
-Triclinic boxes case is treated only in 3 dimensions.
-
-The block bounds are in fractional coordinates in [0, 1), see `kernel_min_max_triclinic!`,
-which carry the length unit of the coordinates. The periodic gap between the blocks along
-each box vector is found as for a cubic box of side one and converted to a distance with
-the distance between the box faces spanned by the other two vectors. Since the box
-vectors are not orthogonal these distances do not add in quadrature, so the largest of
-them is used. It is a lower bound on the distance between any atom of one block and any
-image of an atom of the other, and is returned as the first component.
-=#
-function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
-    frac_side = oneunit(T)
-    widths = Molly.cell_list_box_widths(boundary)
-    d = zero(T)
-    for k in 1:3
-        overlap = (r1_min[k] - r2_max[k] <= zero(T)) && (r2_min[k] - r1_max[k] <= zero(T))
-        gap_a = abs(Molly.vector_1D(r2_max[k], r1_min[k], frac_side))
-        gap_b = abs(Molly.vector_1D(r1_max[k], r2_min[k], frac_side))
-        gap = ifelse(overlap, zero(T), min(gap_a, gap_b))
-        d = max(d, gap * ustrip(unit(T), widths[k]))
-    end
-    return SVector(d, zero(T), zero(T))
+# Whether some periodic image of the bounding box of one block of atoms is within the cutoff
+#   of the bounding box of another
+@inline function boxes_within_cutoff(r1_min, r1_max, r2_min, r2_max, boundary, r_cut2)
+    d_block = boxes_dist(r1_min, r1_max, r2_min, r2_max, boundary)
+    return sum(d_block .* d_block) <= r_cut2
 end
 
-# Wrap a fractional coordinate, which carries the length unit of the coordinates, into [0, 1)
-@inline wrap_fractional(s) = s - floor(s / oneunit(s)) * oneunit(s)
+#=
+The block bounds of a triclinic box are in the brick coordinates of `Molly.morton_coord`.
+A displacement from a point in box 1 to a point in box 2 lies in the box
+[r2_min - r1_max, r2_max - r1_min], and its periodic images add n1 * a + n2 * b + n3 * c for
+integers n1, n2 and n3. As a has no y or z component and b has no z component, the z range of
+an image only depends on n3 and the y range only depends on n2 and n3. So the images are
+visited from z to y, over the integers that bring each range within the cutoff of zero,
+skipping those that are already further away than the cutoff, and the closest image along
+x is found directly. This is exact for the boxes, and since the distance between two boxes
+only gets smaller as a box grows, it can also be used for the tree search.
+The image counts are floats, so that the loops are empty rather than erroring for NaN.
+=#
+function boxes_within_cutoff(r1_min, r1_max, r2_min, r2_max, boundary::TriclinicBoundary,
+                             r_cut2)
+    a, b, c = boundary.basis_vectors
+    lo = r2_min - r1_max
+    hi = r2_max - r1_min
+    r_cut = sqrt(r_cut2)
+    n3 = ceil((-r_cut - hi[3]) / c[3])
+    n3_max = floor((r_cut - lo[3]) / c[3])
+    while n3 <= n3_max
+        dz2 = interval_dist2(lo[3] + n3 * c[3], hi[3] + n3 * c[3])
+        y_lo = lo[2] + n3 * c[2]
+        y_hi = hi[2] + n3 * c[2]
+        n2 = ceil((-r_cut - y_hi) / b[2])
+        n2_max = floor((r_cut - y_lo) / b[2])
+        while n2 <= n2_max
+            dyz2 = dz2 + interval_dist2(y_lo + n2 * b[2], y_hi + n2 * b[2])
+            if dyz2 <= r_cut2
+                x_shift = n3 * c[1] + n2 * b[1]
+                dx2 = periodic_interval_dist2(lo[1] + x_shift, hi[1] + x_shift, a[1])
+                if dyz2 + dx2 <= r_cut2
+                    return true
+                end
+            end
+            n2 += one(n2)
+        end
+        n3 += one(n3)
+    end
+    return false
+end
+
+# The squared distance from zero to the interval [lo, hi]
+@inline function interval_dist2(lo, hi)
+    d = max(lo, -hi, zero(lo))
+    return d * d
+end
+
+# The squared distance from zero to the closest of the intervals [lo, hi] + n * side
+@inline function periodic_interval_dist2(lo, hi, side)
+    lo_wrap = lo - side * floor(lo / side)
+    hi_wrap = lo_wrap + (hi - lo)
+    d = ifelse(hi_wrap >= side, zero(lo), min(lo_wrap, side - hi_wrap))
+    return d * d
+end
 
 """
     reorder_system_gpu!(buffers, sys)
@@ -1277,6 +1329,8 @@ end
 Compute the minimum and maximum coordinates for each 32-atom block.
 These bounds are used for fast bounding-box intersection tests during tile finding
 to skip non-interacting tile pairs.
+For a triclinic boundary the coordinates are first wrapped into the brick of the
+diagonal components of the basis vectors, see `Molly.morton_coord`.
 """
 function kernel_min_max!(
     sorted_seq,
@@ -1301,8 +1355,9 @@ function kernel_min_max!(
 
     if i <= n - r && local_i <= D32
         @inbounds s_i = sorted_seq_ro[i]
+        @inbounds c_i = Molly.morton_coord(coords[s_i], boundary)
         for k in a:b
-            @inbounds val = coords[s_i][k]
+            @inbounds val = c_i[k]
             @inbounds mins_smem[local_i, k] = val
             @inbounds maxs_smem[local_i, k] = val
         end
@@ -1341,134 +1396,15 @@ function kernel_min_max!(
     # Since the remainder array is low-dimensional, we do the scan
     if i > n - r && i <= n && local_i <= r
         @inbounds s_i = sorted_seq_ro[i]
+        @inbounds c_i = Molly.morton_coord(coords[s_i], boundary)
         for k in a:b
-            @inbounds r_smem[local_i, k] = coords[s_i][k]
+            @inbounds r_smem[local_i, k] = c_i[k]
         end
     end
     xyz_min = CuStaticSharedArray(C, b)
     xyz_max = CuStaticSharedArray(C, b)
     @inbounds for k in a:b
         xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
-        xyz_max[k] = -10 * box_sides(boundary, k)
-    end
-    # Publish the r_smem writes from lanes 1:r and the xyz_min/xyz_max initialisation
-    # by all lanes before lane 1 reads and updates them.
-    sync_threads()
-    if local_i == a
-        for j in a:r
-            @inbounds begin
-                for k in a:b
-                    if r_smem[j, k] < xyz_min[k]
-                        xyz_min[k] = r_smem[j, k]
-                    end
-                    if r_smem[j, k] > xyz_max[k]
-                        xyz_max[k] = r_smem[j, k]
-                    end
-                end
-            end
-        end
-        if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
-            @inbounds for k in a:b
-                mins[blockIdx().x, k] = xyz_min[k]
-                maxs[blockIdx().x, k] = xyz_max[k]
-            end
-        end
-    end
-
-    return nothing
-end
-
-"""
-    kernel_min_max_triclinic!(sorted_seq, mins, maxs, coords, Hinv, n_atoms, boundary, D)
-
-Compute the minimum and maximum coordinates for each 32-atom block in a system
-with a triclinic boundary. Converts to fractional coordinates using `Hinv` for
-bounds calculations.
-"""
-function kernel_min_max_triclinic!(
-    sorted_seq,
-    mins::AbstractArray{C},
-    maxs::AbstractArray{C},
-    coords_var,
-    Hinv,
-    ::Val{n},
-    boundary,
-    ::Val{D}) where {n, C, D}
-
-    D32 = Int32(32)
-    a = Int32(1)
-    b = Int32(D)
-    r = Int32(n % D32)
-    i = threadIdx().x + (blockIdx().x - a) * blockDim().x
-    local_i = threadIdx().x
-    sorted_seq_ro = CUDA_CORE.Const(sorted_seq)
-    coords = CUDA_CORE.Const(coords_var)
-    mins_smem = CuStaticSharedArray(C, (D32, b))
-    maxs_smem = CuStaticSharedArray(C, (D32, b))
-    r_smem = CuStaticSharedArray(C, (r, b))
-
-    if i <= n - r && local_i <= D32
-        @inbounds s_i = sorted_seq_ro[i]
-        @inbounds r_i = coords[s_i]
-        @inbounds for k in a:b
-            val = zero(C)
-            for j in a:b
-                val += Hinv[k,j]*r_i[j]
-            end
-            # Wrapped so that the periodic gaps in `boxes_dist` are valid for any coordinates
-            val = wrap_fractional(val)
-            @inbounds mins_smem[local_i, k] = val
-            @inbounds maxs_smem[local_i, k] = val
-        end
-    end
-    sync_threads()
-    if i <= n - r && local_i <= D32
-        for p in a:Int32(log2(D32))
-            for k in a:b
-                @inbounds begin
-                    if local_i % Int32(2^p) == Int32(0)
-                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k]
-                            mins_smem[local_i, k] = mins_smem[local_i - Int32(2^(p - 1)), k]
-                        end
-                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k]
-                            maxs_smem[local_i, k] = maxs_smem[local_i - Int32(2^(p - 1)), k]
-                        end
-                    end
-                end
-            end
-            # Level p reads slots written by other lanes at level p - 1. Lanes of a
-            # warp are not guaranteed to run in lockstep (independent thread
-            # scheduling since Volta), so a warp barrier is required between levels.
-            # The enclosing branch is uniform across the block (n - r is a multiple
-            # of 32 and threads=32), so all lanes reach this barrier.
-            sync_warp()
-        end
-        if local_i == D32
-            @inbounds for k in a:b
-                mins[blockIdx().x, k] = mins_smem[local_i, k]
-                maxs[blockIdx().x, k] = maxs_smem[local_i, k]
-            end
-        end
-
-    end
-
-    # Since the remainder array is low-dimensional, we do the scan
-    if i > n - r && i <= n && local_i <= r
-        @inbounds s_i = sorted_seq_ro[i]
-        @inbounds r_i = coords[s_i]
-        for k in a:b
-            val = zero(C)
-            @inbounds for j in a:b
-                val += Hinv[k,j]*r_i[j]
-            end
-            # Transform to fractional space: s = Hinv * r, wrapped into [0, 1)
-            @inbounds r_smem[local_i, k] = wrap_fractional(val)
-        end
-    end
-    xyz_min = CuStaticSharedArray(C, b)
-    xyz_max = CuStaticSharedArray(C, b)
-    @inbounds for k in a:b
-        xyz_min[k] =  10 * box_sides(boundary, k) # Very large (arbitrary) value
         xyz_max[k] = -10 * box_sides(boundary, k)
     end
     # Publish the r_smem writes from lanes 1:r and the xyz_min/xyz_max initialisation
@@ -1779,9 +1715,7 @@ function find_interacting_blocks_kernel!(
         @inbounds r_min_j = SVector{D}(ntuple(d -> mins_ro[j, d], D))
         @inbounds r_max_j = SVector{D}(ntuple(d -> maxs_ro[j, d], D))
 
-        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        
-        if sum(d_block .* d_block) <= r_cut2
+        if boxes_within_cutoff(r_min_i, r_max_i, r_min_j, r_max_j, boundary, r_cut2)
             emit_interacting_tile!(interacting_tiles_i, interacting_tiles_j,
                                    interacting_tiles_type, num_interacting_tiles,
                                    interacting_tiles_overflow, max_total_tiles,
@@ -1832,17 +1766,42 @@ interacting tiles times the depth of the tree.
 
 The box distance only gets smaller as a box grows, so a subtree that is skipped holds
 no block that the brute-force search would have accepted and the two searches give the
-same tiles. Only orthorhombic boundaries use the tree, see `use_tile_tree`.
+same tiles. This holds for triclinic boundaries too, see `boxes_within_cutoff`. The
+tiles are then sorted into the order of the brute-force search, see
+`sort_interacting_tiles!`.
 =#
 
-# Number of blocks from which the tree search is used
-# Below this the all-pairs search is faster, since there are too few blocks to keep
-#   the GPU busy with one thread walking the tree per block
-const TILE_TREE_MIN_BLOCKS = 6000
+#=
+Whether to use the tree search rather than the all-pairs search, given the number of
+tiles found by the previous search, or 0 before the first search.
+The all-pairs search takes time in proportion to the square of the number of blocks.
+Below about a million atoms there are too few blocks to keep the GPU busy with one thread
+walking the tree per block, so the time of the tree search and of the sort of its tiles
+depends less on the number of blocks than on the tiles per block, which set the length of
+each walk. The two take the same time at a number of blocks that grows with the square
+root of the tiles per block. Measured as the time per step on an RTX A6000 for liquid
+argon, water and protein in water with cutoffs of 0.7-2.0 nm, giving 40-260 tiles per
+block, it is 4,600-9,700 blocks for orthorhombic boxes and 3,200-5,400 blocks for
+truncated octahedra, where the box test costs more, see `boxes_within_cutoff`. The
+expressions below are within 10% of most of these and at most 35% above the rest, which
+costs at most 2% of the time per step since the searches take similar times there.
+Before the first search, the tiles per block of a solvated protein with a cutoff of
+1.2 nm are assumed.
+=#
+const TILE_TREE_BLOCKS_PER_SQRT_TILE = 750
+const TILE_TREE_BLOCKS_PER_SQRT_TILE_TRICLINIC = 470
+const TILE_TREE_DEFAULT_TILES_PER_BLOCK = 100
 
-function use_tile_tree(sys, n_blocks)
-    sys.boundary isa TriclinicBoundary && return false
-    min_blocks = something(env_override("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS"), TILE_TREE_MIN_BLOCKS)
+function use_tile_tree(sys, n_blocks, n_tiles_previous)
+    min_blocks = env_override("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS")
+    if min_blocks === nothing
+        tiles_per_block = (n_tiles_previous > 0 ? n_tiles_previous / n_blocks :
+                                                  TILE_TREE_DEFAULT_TILES_PER_BLOCK)
+        blocks_per_sqrt_tile = (sys.boundary isa TriclinicBoundary ?
+                                TILE_TREE_BLOCKS_PER_SQRT_TILE_TRICLINIC :
+                                TILE_TREE_BLOCKS_PER_SQRT_TILE)
+        min_blocks = blocks_per_sqrt_tile * sqrt(tiles_per_block)
+    end
     return n_blocks >= min_blocks
 end
 
@@ -1942,8 +1901,7 @@ function find_interacting_blocks_tree_kernel!(
                 @inbounds node = tree_offsets[k] + n
                 r_min_j, r_max_j = stored_box(tree_mins_ro, tree_maxs_ro, node, Val(D))
             end
-            d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-            visit = sum(d_block .* d_block) <= r_cut2
+            visit = boxes_within_cutoff(r_min_i, r_max_i, r_min_j, r_max_j, boundary, r_cut2)
         end
         if visit
             if k == Int32(0)

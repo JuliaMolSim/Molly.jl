@@ -614,38 +614,87 @@ end
 end
 
 #=
-    sorted_morton_seq!(buffers, coords, w, morton_bits)
+    sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
 
 Compute a Morton (Z-order) sequence for a set of coordinates.
 The indices are stored in `buffers.morton_seq`.
 =#
-function sorted_morton_seq!(buffers, coords, w, morton_bits)
+function sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
     backend = get_backend(buffers.morton_seq)
     n_threads_gpu = 32
+    w, masks = morton_grid(boundary, morton_bits)
     kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
-    kernel!(buffers.morton_seq_buffer_1, coords, w, morton_bits; ndrange=length(coords))
+    kernel!(buffers.morton_seq_buffer_1, coords, boundary, w, masks, morton_bits;
+            ndrange=length(coords))
     AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
                                  temp=buffers.morton_seq_buffer_2, block_size=512)
     return buffers
 end
 
+#=
+The cell widths of the Morton grid and, for each axis, the number of cells minus one.
+The grid covers the box, or for a TriclinicBoundary the brick of the diagonal components
+    of the basis vectors, see `morton_coord`.
+The number of cells along an axis is a power of two, at most 2^bits, chosen so that the
+    cells are within a factor of sqrt(2) of cubic. The same number of cells along each
+    axis of an elongated box would give long or flat cells, and so blocks of consecutive
+    atoms that interact with more blocks.
+An infinite side has one cell.
+=#
+function morton_grid(boundary, bits)
+    sides = box_sides(boundary)
+    max_side = maximum(s -> isfinite(s) ? s : zero(s), sides)
+    n_cells = map(sides) do s
+        if !isfinite(s) || !(max_side > zero(max_side))
+            return 1
+        else
+            return 1 << clamp(bits - round(Int, log2(max_side / s)), 0, bits)
+        end
+    end
+    return sides ./ n_cells, map(n -> UInt32(n - 1), n_cells)
+end
+
+#=
+The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
+    tile search of the CUDA pairwise kernels.
+Coordinates in an orthorhombic box are used as they are.
+Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
+    using the basis vectors. The brick holds one image of each point, as the triclinic cell
+    does, but is aligned with the grid, so that atoms close on the grid are close in the
+    box. Wrapping each axis with the side lengths does not move y with the x component of
+    b, so atoms from distant parts of the box end up in the same blocks.
+=#
+@inline morton_coord(c, boundary) = c
+
+@inline function morton_coord(c, boundary::TriclinicBoundary)
+    bv, rs = boundary.basis_vectors, boundary.reciprocal_size
+    c_wrap = c - bv[3] * floor(c[3] * rs[3])
+    c_wrap -= bv[2] * floor(c_wrap[2] * rs[2])
+    c_wrap -= bv[1] * floor(c_wrap[1] * rs[1])
+    return c_wrap
+end
+
+# The cell indices are taken modulo the number of cells along each axis, which wraps
+#   orthorhombic coordinates that are outside the box
 @kernel function sorted_morton_seq_kernel!(morton_seq,
                                            @Const(coords::AbstractVector{SVector{D, C}}),
+                                           boundary,
                                            w,
+                                           masks,
                                            bits::Integer) where {D, C}
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
-        scaled_coord = floor.(Int32, coords[i] ./ w)
-        morton_seq[i] = generalized_morton_code(scaled_coord, bits, Val(D))
+        scaled_coord = floor.(Int32, morton_coord(coords[i], boundary) ./ w)
+        cell = (scaled_coord .% UInt32) .& masks
+        morton_seq[i] = generalized_morton_code(cell, bits, Val(D))
     end
 end
 
 # See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
 # and https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN for
 # the bit-interleaving pattern used in the specialized 2D/3D fast paths.
-# The indices are negative for coordinates below zero, which wrapped coordinates in a
-#   triclinic box with negative off-diagonal components can be. `% UInt32` keeps the bits
-#   rather than erroring like `UInt32`, so the masks below take them modulo the grid size.
+# `% UInt32` keeps the bits of a negative index rather than erroring like `UInt32`, so the
+#   masks below take it modulo the grid size.
 function generalized_morton_code(indices, bits::Integer, ::Val{D}) where D
     if D == 3 && bits <= 10
         x = (indices[1] % UInt32) & 0x000003ff

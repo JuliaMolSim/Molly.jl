@@ -208,20 +208,26 @@
         end
 
         @testset "Morton Code Granularity (Phase 1)" begin
-            morton_bits = 10
-            sides = Molly.box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            Molly.sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             
             morton_codes = Array(buffers.morton_seq_buffer_1)
             @test length(unique(morton_codes)) == n_atoms
+
+            # Each axis has a power of two cells, chosen so that the cells are close to cubic
+            w, n_cells_m1 = Molly.morton_grid(sys.boundary, 10)
+            @test w == Molly.box_sides(sys.boundary) ./ 1024
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 1023, 1023)
+            w, n_cells_m1 = Molly.morton_grid(CubicBoundary(T(16.0), T(16.0), T(4.0)), 10)
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 1023, 255)
+            @test w[1] == w[3]
+            w, n_cells_m1 = Molly.morton_grid(CubicBoundary(T(10.0), T(Inf), T(10.0)), 10)
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 0, 1023)
+            w, n_cells_m1 = Molly.morton_grid(RectangularBoundary(T(4.0), T(9.0)), 10)
+            @test n_cells_m1 == SVector{2, UInt32}(511, 1023)
         end
         
         @testset "Physical Data Reordering (Phase 2)" begin
-            morton_bits = 10
-            sides = Molly.box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            Molly.sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             
             backend = Molly.get_backend(sys.coords)
             Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords,
