@@ -239,12 +239,15 @@ end
 # The eligible and special matrices are dense, since the partitions exclude dense patterns of
 #   pairs such as all solvent-solvent pairs, so the warning neighbor finders give for large
 #   dense matrices is turned off as it suggests giving the pairs sparsely
+# The lists are built from scratch for every energy evaluation, so the neighbor finders do not
+#   track displacements
 function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true, boundary = nothing)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special   = special,
+            auto_update = false,
             n_steps = 1,
             strictness = :nowarn,
         )
@@ -253,6 +256,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             boundary = boundary,
             strictness = :nowarn,
@@ -263,6 +267,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special = special,
+                auto_update = false,
                 n_steps = 1,
                 initialized = ref_nfinder.initialized,
                 strictness = :nowarn,
@@ -272,6 +277,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special   = special,
+                auto_update = false,
                 n_steps = 1,
                 strictness = :nowarn,
             )
@@ -281,6 +287,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             max_neighbors = ref_nfinder.max_neighbors,
             output = :molly_pairs,
@@ -292,6 +299,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             strictness = :nowarn,
         )

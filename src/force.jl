@@ -516,6 +516,10 @@ energy calculations.
   [`find_neighbors`](@ref) increases when they are due to be rebuilt.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
+- `neighbor_reference`: the coordinates and boundary that the interacting-tile list
+  was built from, or `nothing` before the list is built or when it is rebuilt every
+  time. Used by a [`GPUNeighborFinder`](@ref) with `auto_update` to decide when to
+  refresh the list.
 
 Every buffer takes memory proportional to the number of atoms or the number of
 exceptions, apart from the interacting-tile vectors which are sized from the number
@@ -570,6 +574,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     reorder_generation::UInt64
     tile_generation::UInt64
     num_pairs::Int
+    neighbor_reference::Base.RefValue{Any}
 end
 
 function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
@@ -598,7 +603,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
                       step_n_preprocessed, sparse_pair_generation, UInt64(0), UInt64(0),
-                      num_pairs)
+                      num_pairs, Base.RefValue{Any}(nothing))
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -736,7 +741,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      -1, UInt64(0), UInt64(0), UInt64(0), 0)
+                      -1, UInt64(0), UInt64(0), UInt64(0), 0, Base.RefValue{Any}(nothing))
 end
 
 """
@@ -1422,15 +1427,21 @@ function gpu_forces!(fs,
             pairwise_forces_loop_gpu!(buffers, sys, pis_nonl, nbs, Val(needs_vir), step_n)
         end
         if length(pis_nl) > 0
-            pairwise_forces_loop_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir), step_n)
+            start_pairwise_forces_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir),
+                                       step_n)
+        end
+
+        for inter_list in values(specific_inter_lists)
+            specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+                                inter_list, sys.coords, sys.velocities, sys.atoms,
+                                sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
+        end
+
+        if length(pis_nl) > 0
+            finish_pairwise_forces_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir),
+                                        step_n)
         end
         return nothing
-    end
-
-    for inter_list in values(specific_inter_lists)
-        specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
-                            inter_list, sys.coords, sys.velocities, sys.atoms,
-                            sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
     end
 
     apply_force_units_gpu!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T),

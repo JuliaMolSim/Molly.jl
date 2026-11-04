@@ -21,6 +21,9 @@ function eem_length_unit(coupling::AbstractEEMCoupling)
     return u"nm"
 end
 
+# The distance beyond which eem_hij is zero, or nothing if it is not known
+eem_coupling_cutoff(coupling) = nothing
+
 # Mutable since H_nonzero size can change
 @kwdef mutable struct EEMState{VQ, VI}
     q::VQ
@@ -94,6 +97,10 @@ interaction. For [`ReaxFF`](@ref), use `ElectronegativityEqualizationMethod(reax
 end
 
 evaluate_before_pairwise(::ElectronegativityEqualizationMethod) = true
+
+# The matrix is built from the pairs of the neighbor list, so a neighbor finder with
+#   auto_update rebuilds the list every time unless the coupling gives its cutoff
+neighbor_cutoff(eem::ElectronegativityEqualizationMethod) = eem_coupling_cutoff(eem.coupling)
 
 save_trial_state(eem::ElectronegativityEqualizationMethod) = (
     q=copy(eem.state.q),

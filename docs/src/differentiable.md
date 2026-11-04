@@ -139,7 +139,6 @@ lj = LennardJones(cutoff=DistanceCutoff(1.5))
 pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
-    n_steps=10,
     dist_cutoff=1.8,
 )
 

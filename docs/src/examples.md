@@ -218,7 +218,6 @@ sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_people,
-    n_steps=10,
     dist_cutoff=2.0,
 )
 simulator = VelocityVerlet(
@@ -425,7 +424,6 @@ lj = LennardJones(cutoff=DistanceCutoff(5.0u"nm"))
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
     excluded_pairs=excluded_pairs,
-    n_steps=10,
     dist_cutoff=5.5u"nm",
 )
 
@@ -873,7 +871,6 @@ pairwise_inters = (
 )
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
-    n_steps=10,
     dist_cutoff=2.2,
 )
 simulator = VelocityVerlet(

@@ -232,6 +232,8 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         append_excluded_pairs!(neighbor_finder, constrained_pairs(constraint_clusters))
         return neighbor_finder
     end
+    # A list built before the exclusions change can not be reused
+    invalidate_tracked_neighbors!(neighbor_finder)
     if !hasproperty(neighbor_finder, :eligible) || isnothing(neighbor_finder.eligible)
         throw(ArgumentError("constraints can not be set up with a $(typeof(neighbor_finder)) " *
                             "that has no eligible matrix, since constrained pairs have to " *

@@ -833,7 +833,24 @@ The first `n` entries of `list` are the `(i, j, special)` pairs, see
 mutable struct NeighborList{T}
     n::Int # Number of neighbors in list (n <= length(list))
     list::T
+    # Not used, but makes the object take more than 128 bytes. CellListMap.jl fills a
+    #   list for each task, which are allocated next to each other and have `n` changed
+    #   for every pair. When two of them shared a 128 byte block of memory, which the
+    #   cache of Intel CPUs fetches together, the cores slowed each other down, making a
+    #   rebuild for 16,000 atoms on 16 threads take up to 37 ms rather than 13 ms
+    #   depending on where they happened to be allocated.
+    padding::NTuple{15, Int}
+
+    function NeighborList{T}(n, list,
+                             padding::NTuple{15, Int}=ntuple(_ -> 0, Val(15))) where T
+        return new{T}(n, list, padding)
+    end
 end
+
+NeighborList(n, list::T, padding...) where {T} = NeighborList{T}(n, list, padding...)
+
+# The padding is left out
+Base.show(io::IO, nl::NeighborList) = print(io, typeof(nl), "(", nl.n, ", ", nl.list, ")")
 
 NeighborList() = NeighborList{Vector{Tuple{Int32, Int32, Bool}}}(0, [])
 

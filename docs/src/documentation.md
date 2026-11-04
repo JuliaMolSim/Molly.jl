@@ -233,14 +233,13 @@ specific_inter_lists = (bonds,) # Don't forget the trailing comma!
 ```
 This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don't care about interactions beyond a certain distance.
 We can use the built-in [`DistanceNeighborFinder`](@ref).
-The arguments are the number of atoms, the pairs of atoms excluded from the non-bonded interactions, the number of steps between each update and the distance cutoff to be classed as a neighbor.
-Since the neighbor finder is run every 10 steps we should also use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.
+The arguments are the number of atoms, the pairs of atoms excluded from the non-bonded interactions and the distance cutoff to be classed as a neighbor.
+The neighbor list is reused until the atoms have moved far enough that a pair within the interaction cutoff could be missing from it, so we use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
     excluded_pairs=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-    n_steps=10,
     dist_cutoff=1.0u"nm",
 )
 
@@ -632,7 +631,8 @@ This example simulates solvated ubiquitin (PDB ID: 1UBQ) in the isothermal-isoba
 
 It runs on a NVIDIA GPU at 300 K and 1 bar, using a Nosé–Hoover thermostat and an isotropic Monte Carlo barostat. 
 Since ReaxFF does not currently implement the virial, the Monte Carlo barostat is required for pressure coupling.
-In addition, when using the Monte Carlo barostat without a neighbor finder skin, the `trial_find_neighbors` field must be set to `true` in order to refresh the neighbors when a trial attempt changes the atomic coordinates.
+In addition, when using the Monte Carlo barostat without a neighbor finder skin, which is the default for ReaxFF, the `trial_find_neighbors` field must be set to `true` in order to refresh the neighbors when a trial attempt changes the atomic coordinates.
+With a skin given by `neighbor_skin`, the neighbor finder rebuilds the list only when needed, including for trial attempts.
 
 ```julia
 using Molly
@@ -1566,7 +1566,8 @@ function Molly.simulate!(sys,
 
         # Find new neighbors like this, after the coordinates change and before
         #   anything uses them
-        # The neighbor finder decides whether to rebuild the list based on the step number
+        # The neighbor finder decides whether to rebuild the list based on how far the
+        #   atoms have moved, or on the step number with auto_update=false
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
@@ -1584,6 +1585,8 @@ function Molly.simulate!(sys,
 
         # A coupler such as a barostat can change the coordinates, in which case the
         #   neighbors are found again regardless of the step number
+        # A neighbor finder with auto_update=true would also notice the change without
+        #   force_recompute=true, and only rebuild the list if needed
         if recompute_forces
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
                                        n_threads=n_threads)
@@ -2142,7 +2145,6 @@ neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
     excluded_pairs=[(1, 2), (2, 3), (1, 3)],
     special_pairs=[(1, 4)],
-    n_steps=10,
     dist_cutoff=(dist_cutoff + dist_buffer),
 )
 ```
@@ -2153,8 +2155,8 @@ For a system on the GPU using [`DistanceNeighborFinder`](@ref), [`GPUNeighborFin
 Systems set up from a file store the pairs in this way.
 
 The `dist_cutoff` of a neighbor finder is the distance used to search for neighbors, and is not the same as the interaction cutoff distance (see [Cutoffs](@ref)).
-Since the neighbor list is only rebuilt every `n_steps` steps, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance, as above.
-The buffer distance should be larger than the distance an atom can move in `n_steps` steps, otherwise interacting pairs can be missed.
+Since the neighbor list is reused until it is rebuilt, `dist_cutoff` should be the interaction cutoff distance plus a buffer distance, as above.
+By default the list is rebuilt when the atoms have moved far enough that a pair within the interaction cutoff could be missing from it, see [Updating the neighbor list](@ref), so the buffer distance only affects how often the list is rebuilt.
 When setting up a [`System`](@ref) from a file the buffer is added automatically and the two distances are given separately as the `dist_cutoff` and `dist_buffer` keyword arguments.
 
 Alternatively, the pairs can be described by an `eligible` matrix, which is `false` for pairs excluded from the pairwise interactions, and a `special` matrix, which is `true` for special pairs:
@@ -2167,7 +2169,6 @@ end
 neighbor_finder = DistanceNeighborFinder(
     eligible=eligible,
     special=falses(n_atoms, n_atoms),
-    n_steps=10,
     dist_cutoff=(dist_cutoff + dist_buffer),
 )
 ```
@@ -2178,8 +2179,9 @@ A [`SparsePairMatrix`](@ref) can also be given as the `eligible` and `special` m
 [`GPUNeighborFinder`](@ref) follows a different CUDA-specific path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the CUDA pairwise kernels reorder atoms and cache a compact list of interacting `32x32` tiles internally, building the exclusion masks of the few tiles that need them from the sparse pairs.
 The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
-Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref), though it should still be called at the same points as for the other neighbor finders since it marks when the tile list is rebuilt.
-When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above, and `n_steps` to the number of steps between reordering the atoms and refreshing the tile list.
+Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref), and the force and energy kernels decide when to refresh the tile list.
+With `auto_update=false` it should still be called at the same points as for the other neighbor finders, since it then marks when the tile list is rebuilt.
+When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above.
 
 [`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).
 It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not available.
@@ -2187,6 +2189,37 @@ Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) system
 Like [`GPUNeighborFinder`](@ref) it stores the exclusions and special pairs as [`SparsePairMatrix`](@ref)s on the device, converting dense `eligible` and `special` matrices at construction rather than keeping them, since a dense mask is `n_atoms^2` bytes on the device.
 Most of the memory it uses for a large system is the per-atom neighbor matrix and the pair list.
 The matrix can be left out with `ragged=false` when only the pairs are needed, as for the pairwise interactions of a [`System`](@ref), which roughly doubles the number of atoms that fit on a GPU; systems set up from a file do this.
+
+### Updating the neighbor list
+
+The built-in neighbor finders have three ways of deciding when to rebuild the neighbor list:
+- `auto_update=true`, the default: the list is rebuilt only when the atoms have moved far enough since it was built that a pair within the interaction cutoff could be missing from it, so no interacting pairs are missed whatever the buffer distance. `n_steps` is ignored.
+- `auto_update=false` with `n_steps` greater than one: the list is rebuilt every `n_steps` steps. This was the behavior of earlier versions. Interacting pairs are missed if an atom moves further than about half the buffer distance in that time, which nothing checks.
+- `auto_update=false` with `n_steps=1`: the list is rebuilt every step without tracking how far the atoms have moved, which is suitable when there is no buffer, as for ReaxFF by default.
+
+`System` setup from a file takes `neighbor_finder_auto_update` and `neighbor_finder_n_steps` keyword arguments for these.
+
+With `auto_update=true`, the neighbor finder stores the coordinates that the list was built from.
+Each time it is called, the two largest displacements `d₁` and `d₂` of the atoms since then are found, and the list is rebuilt if `d₁ + d₂` is larger than the buffer distance `dist_cutoff - r_c`, where `r_c` is the largest cutoff of the interactions that use the list.
+A pair of atoms that was further than `dist_cutoff` apart when the list was built can not then be within `r_c` of each other.
+This is less strict than the common rule of rebuilding when any atom has moved more than half the buffer distance.
+When a barostat changes the box, the displacements are measured relative to the scaling of the box and the buffer distance is reduced by the amount the box shrinks, so scaling the coordinates does not by itself cause a rebuild.
+The interaction cutoff `r_c` is read from the `cutoff` or `dist_cutoff` property of the pairwise interactions for which [`use_neighbors`](@ref) is `true`, and from [`Molly.neighbor_cutoff`](@ref) for general interactions that read the neighbor list, such as [`ANIPotential`](@ref) and ReaxFF.
+If one of these interactions has no cutoff or its cutoff is not known, or if the buffer distance is zero, the list is rebuilt every time without tracking the displacements.
+Custom general interactions that read the pairs of the neighbor list should define [`Molly.neighbor_cutoff`](@ref).
+
+The simulators find the neighbors after the coordinates change and before anything else uses them, so that every force calculation sees a valid list.
+This includes the trial moves of [`MonteCarloBarostat`](@ref) and [`MetropolisMonteCarlo`](@ref), the line search of [`LBFGSMinimizer`](@ref) and the inner steps of the multiple time step integrators.
+Custom simulators should do the same.
+[`GPUNeighborFinder`](@ref) makes the check in the force and energy kernels each time they run.
+
+The check takes much less time than a force calculation, but on the GPU it means waiting for the device once per step.
+[`GPUNeighborFinder`](@ref) waits once the force kernels have been launched, so that the device is kept busy.
+For a solvated protein of 16,000 atoms with a 1 nm cutoff, a step took about 1-2% longer with the default `dist_buffer` of 0.2 nm than with the list rebuilt every 10 steps.
+
+Since no interacting pairs are missed whatever the buffer distance, it can be chosen for speed alone: a larger buffer means fewer rebuilds but more pairs in the list.
+[`Molly.neighbor_update_counts`](@ref) gives the number of times a neighbor finder has built a list and checked the displacements, which helps to choose it.
+For that protein with a 4 fs time step, the fastest buffer distances were about 0.4 nm for [`GPUNeighborFinder`](@ref), which is not slowed down much by more pairs, 0.075-0.1 nm for [`GPUCellListNeighborFinder`](@ref), which is, and 0.125-0.2 nm for [`CellListMapNeighborFinder`](@ref) on the CPU.
 
 ## Analysis
 

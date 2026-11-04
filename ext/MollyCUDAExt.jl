@@ -844,12 +844,384 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, 
     return buffers
 end
 
+#=
+Displacement check
+
+The two largest squared displacements of the atoms since the reference coordinates, see
+`Molly.neighbors_invalidated`, found by one kernel. Each block reduces its atoms with warp
+shuffles, and the last block to finish reduces the results of all the blocks, decides
+whether the atoms have moved further than the allowance and writes the result to pinned
+host memory that the device can write to. It can also set a flag on the device that makes
+the tiled force and energy kernels return straight away, so that those kernels can be
+launched before the host knows the result. The host then only waits once the kernels are
+queued, and the device is kept busy while it waits.
+=#
+
+const displacement_threads = 256
+const displacement_max_blocks = 256
+
+# The field types are concrete given `T`, so that the check is type stable although the
+#   tracker holds the scratch without a type
+mutable struct CUDADisplacementScratch{T}
+    # Pinned host memory mapped into the device address space, holding the two largest
+    #   squared displacements and whether they exceed the allowance
+    result::CuArray{T, 1, CUDA_CORE.HostMemory}
+    result_host::Vector{T}
+    # The results of each block and the count of finished blocks on the device
+    block_maxs_1::CuArray{T, 1, CUDA_CORE.DeviceMemory}
+    block_maxs_2::CuArray{T, 1, CUDA_CORE.DeviceMemory}
+    counter::CuArray{Int32, 1, CUDA_CORE.DeviceMemory}
+    event::CuEvent
+    context::CuContext
+end
+
+function cuda_displacement_scratch(tracker, ::Type{T},
+                                   n_blocks::Integer=displacement_max_blocks) where T
+    scratch = (isnothing(tracker) ? nothing : tracker.scratch)
+    if scratch isa CUDADisplacementScratch{T} && scratch.context == CUDA.context() &&
+            length(scratch.block_maxs_1) >= n_blocks
+        return scratch
+    end
+    result = CuArray{T, 1, CUDA_CORE.HostMemory}(undef, 3)
+    result_host = unsafe_wrap(Array, result)
+    counter = fill!(CuArray{Int32, 1, CUDA_CORE.DeviceMemory}(undef, 1), Int32(0))
+    n_blocks_alloc = max(n_blocks, displacement_max_blocks)
+    block_maxs_1 = CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc)
+    block_maxs_2 = CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc)
+    scratch = CUDADisplacementScratch{T}(result, result_host, block_maxs_1, block_maxs_2,
+                    counter, CuEvent(CUDA_CORE.EVENT_DISABLE_TIMING), CUDA.context())
+    if !isnothing(tracker)
+        tracker.scratch = scratch
+    end
+    return scratch
+end
+
+@inline function warp_reduce_top2(max_1, max_2)
+    offset = 16
+    while offset > 0
+        other_1 = CUDA.shfl_down_sync(0xFFFFFFFF, max_1, offset)
+        other_2 = CUDA.shfl_down_sync(0xFFFFFFFF, max_2, offset)
+        max_1, max_2 = Molly.merge_top2((max_1, max_2), (other_1, other_2))
+        offset >>= 1
+    end
+    return max_1, max_2
+end
+
+# The two largest values over the block, correct in the first thread, called by every
+#   thread of the block
+# The lowest lane of each warp ends up with the two largest values of the warp, the
+#   values that other lanes end up with are not used
+@inline function block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, ::Val{T}) where T
+    tid = threadIdx().x
+    lane = (tid - 1) % 32 + 1
+    warp = (tid - 1) ÷ 32 + 1
+    max_1, max_2 = warp_reduce_top2(max_1, max_2)
+    @inbounds if lane == 1
+        warp_maxs_1[warp] = max_1
+        warp_maxs_2[warp] = max_2
+    end
+    sync_threads()
+    if warp == 1
+        n_warps = blockDim().x ÷ 32
+        @inbounds max_1 = (lane <= n_warps ? warp_maxs_1[lane] : zero(T))
+        @inbounds max_2 = (lane <= n_warps ? warp_maxs_2[lane] : zero(T))
+        max_1, max_2 = warp_reduce_top2(max_1, max_2)
+    end
+    sync_threads()
+    return max_1, max_2
+end
+
+@inline set_skip_flag!(::Nothing) = nothing
+@inline set_skip_flag!(skip_flag) = (@inbounds skip_flag[1] = Int32(1); nothing)
+
+# Called by every thread of a block with the two largest values of the block, writes them,
+#   and the last block to finish reduces the values of all the blocks and writes the result
+@inline function finish_displacement_check!(max_1, max_2, result, block_maxs_1, block_maxs_2,
+                                            counter, skip_flag, allowance::T,
+                                            ::Val{T}) where T
+    tid = threadIdx().x
+    block_i = blockIdx().x
+    n_blocks = gridDim().x
+    warp_maxs_1 = CuStaticSharedArray(T, 32)
+    warp_maxs_2 = CuStaticSharedArray(T, 32)
+    is_last = CuStaticSharedArray(Bool, 1)
+    max_1, max_2 = block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, Val(T))
+    @inbounds if tid == 1
+        block_maxs_1[block_i] = max_1
+        block_maxs_2[block_i] = max_2
+        # The result is visible to every block before this block is counted as finished
+        threadfence()
+        n_finished = CUDA.atomic_add!(pointer(counter, 1), Int32(1))
+        is_last[1] = (n_finished == n_blocks - Int32(1))
+    end
+    sync_threads()
+
+    @inbounds if is_last[1]
+        # Atomic reads, which are made in the device-wide cache, see the results of the
+        #   other blocks
+        max_1, max_2 = zero(T), zero(T)
+        b = tid
+        while b <= n_blocks
+            other_1 = CUDA.atomic_add!(pointer(block_maxs_1, b), zero(T))
+            other_2 = CUDA.atomic_add!(pointer(block_maxs_2, b), zero(T))
+            max_1, max_2 = Molly.merge_top2((max_1, max_2), (other_1, other_2))
+            b += blockDim().x
+        end
+        max_1, max_2 = block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, Val(T))
+        if tid == 1
+            invalid = !(sqrt(max_1) + sqrt(max_2) <= allowance)
+            result[1] = max_1
+            result[2] = max_2
+            result[3] = (invalid ? one(T) : zero(T))
+            if invalid
+                set_skip_flag!(skip_flag)
+            end
+            # Ready for the next check
+            counter[1] = Int32(0)
+        end
+    end
+    return nothing
+end
+
+function max_sq_displacements_kernel!(result, block_maxs_1, block_maxs_2, counter,
+                                      skip_flag, coords_var, ref_coords_var, boundary, F,
+                                      dist_unit, n_atoms::Int32, allowance::T,
+                                      ::Val{T}) where T
+    coords = CUDA_CORE.Const(coords_var)
+    ref_coords = CUDA_CORE.Const(ref_coords_var)
+    stride = blockDim().x * gridDim().x
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    max_1, max_2 = zero(T), zero(T)
+    @inbounds while i <= n_atoms
+        d2 = Molly.sq_displacement(coords[i], ref_coords[i], boundary, F, dist_unit, T)
+        max_1, max_2 = Molly.push_top2(max_1, max_2, d2)
+        i += stride
+    end
+    finish_displacement_check!(max_1, max_2, result, block_maxs_1, block_maxs_2, counter,
+                               skip_flag, allowance, Val(T))
+    return nothing
+end
+
+#=
+Reorder the coordinates and velocities into the current Morton order, as
+`reorder_system_kernel!` does, and check the displacements of the atoms in the same pass,
+setting the overflow flag of the tile list if they are too large. The tiled kernels
+launched after it then return straight away.
+=#
+function reorder_check_kernel!(coords_reordered, velocities_reordered, coords_var,
+                               velocities_var, seq_var, ref_coords_var, result, block_maxs_1,
+                               block_maxs_2, counter, skip_flag, boundary, F, dist_unit,
+                               allowance::T, ::Val{N}, ::Val{T}) where {N, T}
+    coords = CUDA_CORE.Const(coords_var)
+    velocities = CUDA_CORE.Const(velocities_var)
+    seq = CUDA_CORE.Const(seq_var)
+    ref_coords = CUDA_CORE.Const(ref_coords_var)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    max_1 = zero(T)
+    @inbounds if i <= N
+        original_i = seq[i]
+        c = coords[original_i]
+        coords_reordered[i] = c
+        velocities_reordered[i] = velocities[original_i]
+        max_1 = Molly.sq_displacement(c, ref_coords[original_i], boundary, F, dist_unit, T)
+    end
+    finish_displacement_check!(max_1, zero(T), result, block_maxs_1, block_maxs_2, counter,
+                               skip_flag, allowance, Val(T))
+    return nothing
+end
+
+function launch_reorder_check!(buffers, sys, tracker, ref_coords, F, dist_unit,
+                               allowance::T) where T
+    N = length(sys.coords)
+    n_blocks = max(cld(N, displacement_threads), 1)
+    scratch = cuda_displacement_scratch(tracker, T, n_blocks)
+    @cuda threads=displacement_threads blocks=n_blocks reorder_check_kernel!(
+            buffers.coords_reordered, buffers.velocities_reordered, sys.coords,
+            sys.velocities, buffers.morton_seq, ref_coords, scratch.result,
+            scratch.block_maxs_1, scratch.block_maxs_2, scratch.counter,
+            buffers.interacting_tiles_overflow, sys.boundary, F, dist_unit, allowance,
+            Val(N), Val(T))
+    CUDA.record(scratch.event, CUDA.stream())
+    return scratch
+end
+
+#=
+Launch the check without waiting for it, returning the scratch to wait on.
+`allowance` is the total displacement of the two atoms that have moved furthest that the
+list allows, and `skip_flag`, if given, is set on the device when it is exceeded.
+=#
+function launch_displacement_check!(tracker, coords::CuArray, ref_coords, boundary, F,
+                                    dist_unit, ::Type{T}, allowance=T(Inf),
+                                    skip_flag=nothing) where T
+    n_atoms = length(coords)
+    n_blocks = clamp(cld(n_atoms, displacement_threads), 1, displacement_max_blocks)
+    scratch = cuda_displacement_scratch(tracker, T)
+    @cuda threads=displacement_threads blocks=n_blocks max_sq_displacements_kernel!(
+            scratch.result, scratch.block_maxs_1, scratch.block_maxs_2, scratch.counter,
+            skip_flag, coords, ref_coords, boundary, F, dist_unit, Int32(n_atoms), T(allowance),
+            Val(T))
+    CUDA.record(scratch.event, CUDA.stream())
+    return scratch
+end
+
+#=
+Wait for a check, returning the two largest squared displacements and whether they
+exceed the allowance.
+The host spins on the event rather than calling `CUDA.synchronize`, which after a short
+spin hands the wait to another thread and can take hundreds of microseconds to wake up
+once the event completes. That is the usual case when the device is behind the host, as
+for the neighbor finders that build a list on the GPU, where it made the check cost about
+15% of a step. After a second the normal synchronization is used.
+=#
+function wait_displacement_check(scratch::CUDADisplacementScratch)
+    event = scratch.event
+    if !CUDA.isdone(event)
+        t_start = time_ns()
+        while !CUDA.isdone(event)
+            ccall(:jl_cpu_pause, Cvoid, ())
+            # Lets other threads collect garbage while this one waits
+            ccall(:jl_gc_safepoint, Cvoid, ())
+            if time_ns() - t_start > 1_000_000_000
+                CUDA.synchronize(event)
+                break
+            end
+        end
+    end
+    result = scratch.result_host
+    @inbounds return result[1], result[2], !iszero(result[3])
+end
+
+function Molly.max_sq_displacements(coords::CuArray, ref_coords, boundary, F, dist_unit,
+                                    ::Type{T}, n_threads::Integer, tracker=nothing) where T
+    iszero(length(coords)) && return (zero(T), zero(T))
+    scratch = launch_displacement_check!(tracker, coords, ref_coords, boundary, F,
+                                         dist_unit, T)
+    max_sq_1, max_sq_2, _ = wait_displacement_check(scratch)
+    return max_sq_1, max_sq_2
+end
+
+#=
+The coordinates and boundary that the tile list held in a set of buffers was built from,
+kept in the buffers since a neighbor finder can be used with more than one set of
+buffers, for example those of a simulation and those made by a call to `forces(sys)`.
+`moved_last` and `moved_prev` are the total displacements of the two atoms that had moved
+furthest at the last two checks, used to predict when the tile list will be rebuilt.
+`pending_check` is a check that has been launched but not waited for, see
+`run_tiled_kernel!`.
+=#
+mutable struct TileReference{C, B, T}
+    coords::C
+    boundary::B
+    moved_last::T
+    moved_prev::T
+    pending_check::Union{Nothing, CUDADisplacementScratch{T}}
+end
+
+#=
+Whether the next check is expected to fail, extrapolating the displacements of the last
+two checks. The tile list is then rebuilt without checking, which is always safe, rather
+than checking and launching the force kernel before the result is known, since waiting
+for a check that fails means the device is idle while the rebuild is launched. This only
+affects speed.
+=#
+@inline function tile_check_expected_to_fail(ref::TileReference, allowance)
+    predicted = ref.moved_last + max(ref.moved_last - ref.moved_prev, zero(ref.moved_last))
+    return predicted > allowance
+end
+
+@inline function record_tile_check!(ref::TileReference, max_sq_1, max_sq_2)
+    ref.moved_prev = ref.moved_last
+    ref.moved_last = sqrt(max_sq_1) + sqrt(max_sq_2)
+    return ref
+end
+
+# The squared cutoff of the pairwise interactions that use the tile list
+tile_inters_sqdist(sys, pairwise_inters) = Molly.neighbor_inters_sqdist(pairwise_inters, (),
+                                                Molly.coords_length_unit(sys.coords))
+
+# Whether the tile list has to be rebuilt for reasons other than the atoms moving
+@inline function tile_refresh_due(buffers, nf::GPUNeighborFinder)
+    return buffers.step_n_preprocessed == -1 ||
+           buffers.reorder_generation != nf.reorder_generation ||
+           buffers.tile_generation != nf.tile_generation ||
+           buffers.sparse_pair_generation != nf.cache_generation || !nf.initialized
+end
+
+#=
+The reference held in `buffers` if it is for coordinates and a boundary of the types of
+those of `sys`, otherwise `nothing`. The buffers hold the reference without a type, so
+this makes the check type stable. A reference of another type, which would come from
+using the buffers with another system, is replaced when the tile list is rebuilt.
+=#
+@inline function tile_reference(buffers, sys)
+    T = Molly.coords_float_type(sys.coords)
+    ref = buffers.neighbor_reference[]
+    return (ref isa TileReference{typeof(sys.coords), typeof(sys.boundary), T} ? ref : nothing)
+end
+
+#=
+Reorder the coordinates and velocities into the current Morton order and check whether the
+atoms have moved far enough since the tile list in `buffers` was built that a pair within
+the cutoff of `pairwise_inters` could be missing. The check sets the overflow flag of the
+tile list if so, which makes the force and energy kernels return without doing anything,
+so that they can be launched straight after. Returns the scratch to wait on, or `nothing`
+if the tile list has to be rebuilt whatever the displacements are, as when the cutoff is
+not known or when the check is expected to fail, in which case nothing is launched.
+=#
+function start_tile_check!(ref::TileReference, buffers, sys, nf, pairwise_inters)
+    T = Molly.coords_float_type(sys.coords)
+    dist_unit = Molly.coords_length_unit(sys.coords)
+    F = Molly.box_deformation(ref.boundary, sys.boundary, T)
+    allowance = Molly.neighbor_allowance(sys.boundary, F, nf.dist_cutoff,
+                                tile_inters_sqdist(sys, pairwise_inters), dist_unit, T)
+    if isnothing(allowance) || length(ref.coords) != length(sys.coords)
+        return nothing
+    end
+    # Rebuilt without checking, see above
+    tile_check_expected_to_fail(ref, allowance) && return nothing
+    nf.tracker.n_checks += 1
+    return launch_reorder_check!(buffers, sys, nf.tracker, ref.coords, F, dist_unit,
+                                 allowance)
+end
+
+# Record that the tile list held in `buffers` was built from the current coordinates,
+#   reusing the memory of the previous reference `ref` if possible
+function record_tile_reference!(ref, buffers, sys)
+    if !isnothing(ref) && length(ref.coords) == length(sys.coords)
+        copyto!(ref.coords, sys.coords)
+        ref.boundary = sys.boundary
+        ref.moved_last = zero(ref.moved_last)
+        ref.moved_prev = zero(ref.moved_prev)
+        ref.pending_check = nothing
+    else
+        T = Molly.coords_float_type(sys.coords)
+        buffers.neighbor_reference[] = TileReference(copy(sys.coords), sys.boundary,
+                                                     zero(T), zero(T), nothing)
+    end
+    return buffers
+end
+
+function record_gpu_tiles!(buffers, sys, nf::GPUNeighborFinder, pairwise_inters)
+    nf.tracker.n_builds += 1
+    nf.auto_update || return buffers
+    if Molly.neighbors_trackable(sys.boundary, sys.coords, nf.dist_cutoff,
+                                 tile_inters_sqdist(sys, pairwise_inters))
+        record_tile_reference!(tile_reference(buffers, sys), buffers, sys)
+    else
+        # The tile list has to be rebuilt every time, so no reference is needed
+        buffers.neighbor_reference[] = nothing
+    end
+    return buffers
+end
+
 # find_neighbors increases the rebuild counts of the neighbor finder when the Morton order
 #   or the tile list is due to be rebuilt, so the cache follows the same rebuild points as
 #   the lists of the other neighbor finders
-@inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder)
+# `moved` is whether the atoms have moved far enough to invalidate the tile list, in which
+#   case the tile list and Morton order are rebuilt
+@inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, moved::Bool)
     first_preprocess = (buffers.step_n_preprocessed == -1)
-    needs_morton_refresh = (first_preprocess ||
+    needs_morton_refresh = (first_preprocess || moved ||
                             buffers.reorder_generation != nf.reorder_generation)
     sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
     needs_reorder = true # Coordinates can be changed at any point
@@ -864,6 +1236,125 @@ function record_neighbor_refresh!(buffers, nf::GPUNeighborFinder, step_n)
     buffers.tile_generation = nf.tile_generation
     buffers.step_n_preprocessed = step_n
     return buffers
+end
+
+# Bring the Morton order, the exception data, the reordered arrays and the tile list up to
+#   date as required by the flags
+function refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n, flags,
+                            sync_reorder::Bool)
+    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh = flags
+    N = length(sys.coords)
+    if needs_reorder || needs_sparse_refresh || needs_tile_refresh
+        if needs_morton_refresh
+            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+        end
+
+        if needs_sparse_refresh
+            refresh_tile_exceptions!(buffers, nf, Val(N))
+            nf.initialized = true
+            buffers.sparse_pair_generation = nf.cache_generation
+        end
+
+        if needs_reorder
+            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
+            sync_reorder && KernelAbstractions.synchronize(get_backend(sys.coords))
+        end
+
+        if needs_tile_refresh
+            refresh_interacting_tiles!(buffers, sys, N)
+            record_gpu_tiles!(buffers, sys, nf, pairwise_inters)
+        end
+        record_neighbor_refresh!(buffers, nf, step_n)
+    end
+    return buffers
+end
+
+# Wait for the check pending on `ref` and record its result, returning whether the atoms
+#   have moved too far for the tile list
+function resolve_tile_check!(ref::TileReference, check::CUDADisplacementScratch)
+    ref.pending_check = nothing
+    max_sq_1, max_sq_2, moved = wait_displacement_check(check)
+    record_tile_check!(ref, max_sq_1, max_sq_2)
+    return moved
+end
+
+#=
+Run `launch_kernel!()`, which launches the tiled force or energy kernel, with a tile list
+that is up to date.
+With `auto_update`, when no rebuild is due for other reasons, the displacement check is
+made by the kernel that reorders the coordinates, and the kernel is launched speculatively
+with the current tile list. If the check finds that the atoms have moved too far the
+kernel returns straight away, and the tile list is rebuilt and the kernel launched again.
+Otherwise the host only waits for the check once the kernel is queued, so the device does
+not wait for the host. When the last checks show that the next one is likely to fail, the
+tile list is rebuilt straight away instead.
+With `defer`, the host does not wait for the check here but leaves it pending in the
+reference, and `finish_tile_check!` must be called before the results of the kernel are
+used. A check left pending, for example by an error before it was finished, is finished
+at the next call.
+=#
+# Inlined so that the closure is not allocated
+@inline function run_tiled_kernel!(launch_kernel!::K, buffers, sys, nf::GPUNeighborFinder,
+                                   pairwise_inters, step_n, sync_reorder::Bool,
+                                   defer::Bool=false) where K
+    # Whether the atoms have moved too far for the tile list, the only reason to rebuild it
+    #   that is not recorded by the generation counts
+    moved = false
+    ref = tile_reference(buffers, sys)
+    if !isnothing(ref)
+        stale_check = ref.pending_check
+        if !isnothing(stale_check)
+            moved = resolve_tile_check!(ref, stale_check)
+        end
+    end
+    if nf.auto_update && !moved && !tile_refresh_due(buffers, nf)
+        if isnothing(ref)
+            # There is no reference to check against
+            moved = true
+        else
+            check = start_tile_check!(ref, buffers, sys, nf, pairwise_inters)
+            if isnothing(check)
+                # The check could not be made or is expected to fail
+                moved = true
+            else
+                # The coordinates were reordered by the check
+                sync_reorder && KernelAbstractions.synchronize(get_backend(sys.coords))
+                launch_kernel!()
+                if defer
+                    ref.pending_check = check
+                    return buffers
+                end
+                moved = resolve_tile_check!(ref, check)
+                # Otherwise the kernel did nothing, so it is run again below once the tile
+                #   list is rebuilt, which also clears the overflow flag
+                moved || return buffers
+            end
+        end
+    end
+    refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n,
+                       gpu_neighbor_refresh_flags(buffers, nf, moved), sync_reorder)
+    launch_kernel!()
+    return buffers
+end
+
+#=
+Wait for a check left pending by `run_tiled_kernel!` with `defer`. If the atoms have moved
+too far the kernel launched before the check did nothing, so the tile list is rebuilt and
+`launch_kernel!()` called again. Returns whether this was done.
+=#
+@inline function finish_tile_check!(launch_kernel!::K, buffers, sys, nf::GPUNeighborFinder,
+                                    pairwise_inters, step_n, sync_reorder::Bool) where K
+    ref = tile_reference(buffers, sys)
+    isnothing(ref) && return false
+    check = ref.pending_check
+    isnothing(check) && return false
+    moved = resolve_tile_check!(ref, check)
+    if moved
+        refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n,
+                           gpu_neighbor_refresh_flags(buffers, nf, true), sync_reorder)
+        launch_kernel!()
+    end
+    return moved
 end
 
 function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray}, N::Int) where D
@@ -1027,9 +1518,10 @@ end
 Maintainer entry point for the CUDA tiled pairwise force path.
 
 Pipeline:
-1. Rebuild the Morton ordering and the Morton-ordered exception data when
-   [`find_neighbors`](@ref) has marked them as due, every `n_steps` steps of the
-   [`GPUNeighborFinder`](@ref).
+1. Rebuild the Morton ordering and the Morton-ordered exception data when the
+   atoms have moved far enough since the last rebuild to invalidate the tile list
+   with `auto_update=true`, or when [`find_neighbors`](@ref) has marked them as due
+   every `n_steps` steps of the [`GPUNeighborFinder`](@ref) with `auto_update=false`.
 2. Reorder coordinates, velocities, and atoms into Morton order.
 3. Recompute the compact list of interacting 32x32 tiles when the order changed
    or [`find_neighbors`](@ref) forced a rebuild, growing it if it overflows.
@@ -1038,7 +1530,14 @@ Pipeline:
 Cache contract:
 - The Morton order and tile list are rebuilt when [`find_neighbors`](@ref) has
   increased the rebuild counts of the [`GPUNeighborFinder`](@ref) since they were
-  last built, or when `buffers.step_n_preprocessed` is `-1` for new buffers.
+  last built, when `buffers.step_n_preprocessed` is `-1` for new buffers, or with
+  `auto_update=true` when the displacement check against `buffers.neighbor_reference`
+  fails. The force kernel is then launched before the result of the check is known,
+  and the check sets `buffers.interacting_tiles_overflow` when it fails so that the
+  kernel returns straight away, see `run_tiled_kernel!`.
+- `gpu_forces!` calls `start_pairwise_forces_gpu!` instead, which does not wait for
+  the check, and `finish_pairwise_forces_gpu!` once the specific forces are launched,
+  which waits for it and calculates the forces again if it failed.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
 - `sys.neighbor_finder.initialized` only indicates whether the Morton-ordered
@@ -1046,34 +1545,51 @@ Cache contract:
 """
 function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
                          nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
-    N = length(sys.coords)
+    return tiled_pairwise_forces!(buffers, sys, pairwise_inters, Val(needs_vir), step_n,
+                                  false)
+end
+
+# As above, but the host does not wait for the check of the tile list, which is left to
+#   `finish_pairwise_forces_gpu!` once `gpu_forces!` has launched the specific forces
+function Molly.start_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T, TH},
+                                          pairwise_inters, nbs::Nothing, ::Val{needs_vir},
+                                          step_n) where {D, T, TH, needs_vir}
+    return tiled_pairwise_forces!(buffers, sys, pairwise_inters, Val(needs_vir), step_n,
+                                  true)
+end
+
+# The forces are added to fs_mat when the force kernel is relaunched, since the reverse
+#   reorder adds to it and the kernel launched before the failed check added nothing
+function Molly.finish_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T, TH},
+                                           pairwise_inters, nbs::Nothing, ::Val{needs_vir},
+                                           step_n) where {D, T, TH, needs_vir}
+    r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
+    launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
+                                                Val(needs_vir), step_n)
+    if finish_tile_check!(launch_kernel!, buffers, sys, sys.neighbor_finder, pairwise_inters,
+                          step_n, false)
+        reverse_reorder_forces_gpu!(buffers, sys)
+    end
+    return buffers
+end
+
+function tiled_pairwise_forces!(buffers, sys, pairwise_inters, ::Val{needs_vir}, step_n,
+                                defer::Bool) where needs_vir
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     nf = sys.neighbor_finder
+    launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
+                                                Val(needs_vir), step_n)
+    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, false, defer)
+    reverse_reorder_forces_gpu!(buffers, sys)
+    return buffers
+end
 
-    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
-        gpu_neighbor_refresh_flags(buffers, nf)
-    if needs_reorder || needs_sparse_refresh || needs_tile_refresh
-        if needs_morton_refresh
-            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
-        end
-
-        if needs_sparse_refresh
-            refresh_tile_exceptions!(buffers, nf, Val(N))
-            nf.initialized = true
-            buffers.sparse_pair_generation = nf.cache_generation
-        end
-
-        if needs_reorder
-            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
-        end
-
-        if needs_tile_refresh
-            refresh_interacting_tiles!(buffers, sys, N)
-        end
-        record_neighbor_refresh!(buffers, nf, step_n)
-    end
-    
-    # Execute force kernel over the list of interacting tiles
+# Launch the force kernel over the list of interacting tiles
+# `r_cut2` is a value rather than a `Val` so that the call to this function is not a
+#   dynamic dispatch, as the call to `@cuda` inside it is anyway
+function launch_force_kernel!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
+                              r_cut2, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
+    N = length(sys.coords)
     auto_kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
         buffers.fs_mat_reordered,
         buffers.virial_nounits,
@@ -1122,9 +1638,6 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
             threads=(32, block_y), blocks=n_blocks_launch, shmem=shmem
         )
     end
-
-    reverse_reorder_forces_gpu!(buffers, sys)
-
     return buffers
 end
 
@@ -1134,43 +1647,27 @@ end
 Maintainer entry point for the CUDA tiled pairwise energy path.
 
 This follows the same Morton reorder -> exception translation -> tile search
-pipeline as `pairwise_forces_loop_gpu!`, but launches `energy_kernel!` instead
-of the force kernel. Energy evaluation reuses any preprocessing already performed
-since the last rebuild, so forces and energies share the same cached tile metadata.
+pipeline as `pairwise_forces_loop_gpu!`, including the displacement check, but launches
+`energy_kernel!` instead of the force kernel. Energy evaluation reuses any preprocessing
+already performed since the last rebuild, so forces and energies share the same cached
+tile metadata.
 """
 function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T, TH},
                                       pairwise_inters, nbs::Nothing,
                                       step_n) where {D, T, TH}
     # The ordering and tiles are reused if they are current
-    N = length(sys.coords)
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
-    backend = get_backend(sys.coords)
     nf = sys.neighbor_finder
+    launch_kernel! = () -> launch_energy_kernel!(pe_vec_nounits, buffers, sys, pairwise_inters,
+                                                 r_cut2, step_n)
+    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, true)
+    return pe_vec_nounits
+end
 
-    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh =
-        gpu_neighbor_refresh_flags(buffers, nf)
-    if needs_reorder || needs_sparse_refresh || needs_tile_refresh
-        if needs_morton_refresh
-            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
-        end
-
-        if needs_sparse_refresh
-            refresh_tile_exceptions!(buffers, nf, Val(N))
-            nf.initialized = true
-            buffers.sparse_pair_generation = nf.cache_generation
-        end
-
-        if needs_reorder
-            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
-            KernelAbstractions.synchronize(backend)
-        end
-
-        if needs_tile_refresh
-            refresh_interacting_tiles!(buffers, sys, N)
-        end
-        record_neighbor_refresh!(buffers, nf, step_n)
-    end
-
+# Launch the energy kernel over the list of interacting tiles
+function launch_energy_kernel!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T, TH},
+                               pairwise_inters, r_cut2, step_n) where {D, T, TH}
+    N = length(sys.coords)
     kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
@@ -1197,8 +1694,8 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
                 buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
                 blocks=n_blocks_launch, threads=(32, block_y), shmem=shmem)
     end
-     return pe_vec_nounits
- end
+    return pe_vec_nounits
+end
 
 function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary) where {D, T}
     va = vector(r2_max, r1_min, boundary)

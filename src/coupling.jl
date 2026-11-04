@@ -797,9 +797,11 @@ The barostat assumes that the simulation is being run at a constant temperature 
 does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
-By default the neighbor list is not updated when calculating the energy of trial moves,
-which assumes that the volume changes are small; set `trial_find_neighbors` to `true` to
-update it.
+With a neighbor finder with `auto_update=true`, the default, the neighbor list is checked
+at the trial coordinates and rebuilt if the trial move could have invalidated it.
+Otherwise by default the neighbor list is not updated when calculating the energy of
+trial moves, which assumes that the volume changes are small.
+Set `trial_find_neighbors` to `true` to rebuild it for every trial move.
 Note that the barostat can change the bounding box of the system.
 Does not work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.
@@ -938,6 +940,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
@@ -955,9 +958,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
                                          zero(T) zero(T) l_scale])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -978,8 +984,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
-            if barostat.trial_find_neighbors
-                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
@@ -990,6 +998,11 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
             recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end
@@ -1002,6 +1015,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
@@ -1029,9 +1043,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
                                          zero(T) zero(T) l_scale_z])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -1053,8 +1070,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
-            if barostat.trial_find_neighbors
-                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
@@ -1065,6 +1084,11 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
             recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end
@@ -1077,6 +1101,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
@@ -1106,9 +1131,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
                                          zero(T)   zero(T)   l_scale_z])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -1129,8 +1157,10 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
-            if barostat.trial_find_neighbors
-                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
                                            n_threads=n_threads)
             end
             for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
@@ -1141,6 +1171,11 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
             recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end

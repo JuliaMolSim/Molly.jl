@@ -961,6 +961,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
     #   `isa`, since the finders are parametric
     nf_A = sysA.neighbor_finder
+    # How often the list is rebuilt is kept, custom neighbor finders may not have auto_update
+    update = (hasproperty(nf_A, :auto_update) ?
+              (auto_update=nf_A.auto_update, n_steps=nf_A.n_steps) :
+              (n_steps=(hasproperty(nf_A, :n_steps) ? nf_A.n_steps : 10),))
     if isnothing(nf_A)
         # Without a neighbor finder every pair interacts, including the A and B sides
         if !isempty(excluded_hybrid) || !isempty(special_hybrid)
@@ -971,27 +975,27 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
         nf = nothing
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
-        nf = GPUNeighborFinder(eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
-                               n_steps=nf_A.n_steps, array_type=AT)
+        nf = GPUNeighborFinder(; eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
+                               update..., array_type=AT)
     elseif nf_A isa DistanceNeighborFinder &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
-        nf = DistanceNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+        nf = DistanceNeighborFinder(; eligible=eligible, special=special, update...,
                                     dist_cutoff=nf_A.dist_cutoff, array_type=AT)
     elseif nf_A isa CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
-        nf = CellListMapNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+        nf = CellListMapNeighborFinder(; eligible=eligible, special=special, update...,
                                        boundary=Boundary, x0=Coords, dist_cutoff=nf_A.dist_cutoff)
     elseif nf_A isa GPUCellListNeighborFinder && AT <: AbstractGPUArray
         # The default output, since the hybrid needs the exclusions applied even if an end
         #   state did not
-        nf = GPUCellListNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
+        nf = GPUCellListNeighborFinder(; eligible=eligible, special=special, update...,
                                        dist_cutoff=nf_A.dist_cutoff, array_type=AT,
                                        max_neighbors=nf_A.max_neighbors, ragged=nf_A.ragged)
     else
         # Another finder, or one that does not suit the device, keeps the masks and the settings
-        nf = typeof(nf_A).name.wrapper(
+        nf = typeof(nf_A).name.wrapper(;
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
-            n_steps=nf_A.n_steps,
+            update...,
             dist_cutoff=nf_A.dist_cutoff,
         )
     end

@@ -59,6 +59,10 @@ struct ANIPotential{M, PV, SV, SP, P, SE, D} <: AbstractMLPotential
     buffers::Ref{Any} # lazily-initialized AEVBuffers for zero-allocation AEV computation
 end
 
+# The AEVs read the pairs of the neighbor list when there is one, out to the cutoff, so
+#   that a neighbor finder with `auto_update` knows when to rebuild the list
+neighbor_cutoff(inter::ANIPotential) = inter.cutoff * u"Å"
+
 # Fallback constructor. The real `AbstractString` method is in ext/MollyLuxExt.jl (needs Lux +
 # HDF5); `path` is left untyped here so that method is strictly more specific and does not
 # overwrite this one (method overwriting is an error during extension precompilation).

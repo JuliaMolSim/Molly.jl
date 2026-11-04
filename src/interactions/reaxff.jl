@@ -477,9 +477,9 @@ end
 """
     System(coord_file_path::AbstractString, reaxff::ReaxFF; eem_tolerance=1e-6,
            eem_max_iterations=200, eem_float_type=Float64, initial_charges=nothing,
-           neighbor_skin=0.0, neighbor_refresh_n_steps=1, boundary=nothing,
-           array_type=Array, velocities=nothing, units=true, loggers=(),
-           strictness=:warn)
+           neighbor_skin=0.0, neighbor_auto_update=true, neighbor_refresh_n_steps=1,
+           boundary=nothing, array_type=Array, velocities=nothing, units=true,
+           loggers=(), strictness=:warn)
 
 Construct a ReaxFF system from a coordinate file supported by Chemfiles.jl.
 The file must identify each atom's element, and every element must be present in
@@ -494,7 +494,11 @@ the total system charge that is conserved by charge equilibration.
 
 `neighbor_skin` is a non-negative distance added to the largest ReaxFF distance
 cutoff. It accepts lengths with units; unitless values are interpreted as
-nanometers, regardless of `units`. `neighbor_refresh_n_steps`
+nanometers, regardless of `units`. Without a skin, the default, the neighbor list is
+rebuilt every step. With a positive skin and `neighbor_auto_update=true`, the list is
+rebuilt only when the atoms have moved far enough since the last rebuild that a pair
+within the ReaxFF cutoffs could be missing from it, see the [Neighbor finders](@ref)
+documentation. With `neighbor_auto_update=false`, `neighbor_refresh_n_steps`
 sets the scheduled neighbor finder rebuild interval and must be at least one. An interval
 greater than one requires a positive skin distance. Select a skin large enough to cover
 atomic motion between rebuilds.
@@ -520,6 +524,7 @@ function System(coord_file_path::AbstractString,
                 eem_float_type::Type{QT}=Float64,
                 initial_charges=nothing,
                 neighbor_skin=0.0,
+                neighbor_auto_update::Bool=true,
                 neighbor_refresh_n_steps::Integer=1,
                 boundary=nothing,
                 array_type::Type{AT}=Array,
@@ -681,6 +686,8 @@ function System(coord_file_path::AbstractString,
         strictness,
     )
     neighbor_list_cutoff = required_cutoff + T(neighbor_skin_angstrom)
+    # Without a skin the list is rebuilt every step, so the displacements are not tracked
+    auto_update = neighbor_auto_update && neighbor_skin_angstrom > zero(neighbor_skin_angstrom)
 
     if units
         far_dist_cutoff = uconvert(u"nm", neighbor_list_cutoff*u"Å")
@@ -693,6 +700,7 @@ function System(coord_file_path::AbstractString,
     
     nf = if backend isa KernelAbstractions.GPU && gpu_cell_list_suitable(boundary_used, far_dist_cutoff; force_float32=true)
         GPUCellListNeighborFinder(
+            auto_update = auto_update,
             n_steps = neighbor_refresh_n_steps,
             force_float32 = true,
             dist_cutoff = far_dist_cutoff,
@@ -703,6 +711,7 @@ function System(coord_file_path::AbstractString,
         DistanceNeighborFinder(
             n_atoms = n_atoms,
             array_type = AT,
+            auto_update = auto_update,
             n_steps = neighbor_refresh_n_steps,
             dist_cutoff = far_dist_cutoff,
             strictness = strictness,
@@ -716,6 +725,7 @@ function System(coord_file_path::AbstractString,
         if minimum(cell_list_box_widths(boundary_used)) > 2 * far_dist_cutoff
             CellListMapNeighborFinder(
                 n_atoms = n_atoms,
+                auto_update = auto_update,
                 n_steps = neighbor_refresh_n_steps,
                 dist_cutoff = far_dist_cutoff,
                 boundary = boundary_used,
@@ -725,6 +735,7 @@ function System(coord_file_path::AbstractString,
         else
             DistanceNeighborFinder(
                 n_atoms = n_atoms,
+                auto_update = auto_update,
                 n_steps = neighbor_refresh_n_steps,
                 dist_cutoff = far_dist_cutoff,
                 strictness = strictness,
@@ -4529,6 +4540,19 @@ end
 # units of r passed into eem_hij should be Angstroms
 function eem_length_unit(::ReaxFFTaperedCoulomb)
     return u"Å"
+end
+
+# eem_hij is zero beyond the cutoff, so charge equilibration only needs the pairs of the
+#   neighbor list within it, which a neighbor finder with auto_update uses to decide when
+#   to rebuild the list
+eem_coupling_cutoff(coupling::ReaxFFTaperedCoulomb) = coupling.cutoff * u"Å"
+
+# The ReaxFF terms read the pairs of the neighbor list out to the largest ReaxFF cutoff,
+#   which is stored in Å
+function neighbor_cutoff(inter::ReaxFF)
+    dp = inter.device_params
+    return max(dp.global_parameters.bond_dist_cutoff, dp.global_parameters.hbond_dist_cutoff,
+               dp.general_parameters.upper_taper_radius) * u"Å"
 end
 
 function eem_energy_conversion(energy_eV, sys, coupling::ReaxFFTaperedCoulomb{T}) where T

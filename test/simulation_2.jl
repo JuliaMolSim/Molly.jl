@@ -132,7 +132,9 @@ end
 @testset "Neighbor lists match the coordinates" begin
     # The neighbor finders have no skin and rebuild every step, so any list that is used
     #   after the atoms move without being rebuilt is detected
-    function neighbor_check_system(AT, inter_nc, logger_nc; nf_steps=1)
+    # Without a skin, auto_update=true rebuilds the list every time without tracking the
+    #   displacements, and auto_update=false rebuilds it every nf_steps steps
+    function neighbor_check_system(AT, inter_nc, logger_nc; nf_steps=1, auto_update=true)
         rng = Xoshiro(10)
         n_atoms = 100
         boundary = CubicBoundary(2.2u"nm")
@@ -142,7 +144,7 @@ end
         velocities = [random_velocity(10.0u"g/mol", 300.0u"K"; rng=rng) for _ in 1:n_atoms]
         if AT <: CuArray
             nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.0u"nm", n_steps=nf_steps,
-                                   array_type=AT)
+                                   auto_update=auto_update, array_type=AT)
             logger_func = function (s, nbs, step_n, buffers; current_potential_energy=nothing,
                                     kwargs...)
                 pe = (isnothing(current_potential_energy) ?
@@ -156,7 +158,7 @@ end
             general_inters = ()
         else
             nf = DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.0u"nm",
-                                        n_steps=nf_steps)
+                                        n_steps=nf_steps, auto_update=auto_update)
             logger_func = function (s, nbs, step_n, buffers; kwargs...)
                 check_neighbors!(logger_nc, s, nbs, step_n)
                 return true
@@ -252,7 +254,8 @@ end
             # Rebuilding every 10 steps, a coupler that moves the atoms forces a rebuild
             #   that the loggers see
             logger_nc = NeighborCheck()
-            sys = neighbor_check_system(CuArray, nothing, logger_nc; nf_steps=10)
+            sys = neighbor_check_system(CuArray, nothing, logger_nc; nf_steps=10,
+                                        auto_update=false)
             simulate!(sys, make_sim((JiggleCoupler(Xoshiro(3)),)), 20; n_threads=1,
                       rng=Xoshiro(7))
             @test logger_nc.n_checks == 21
@@ -856,6 +859,7 @@ end
             nonbonded_method=SetupCoulombReactionField(),
             center_coords=false,
             dist_buffer=0.0u"nm",
+            neighbor_finder_auto_update=false,
         )
         nf = sys.neighbor_finder
         coords_start, velocities_start = copy(sys.coords), copy(sys.velocities)
@@ -883,6 +887,13 @@ end
         coords_no_isn = run_mts(false, 10^9)
         @test maximum(norm.(coords_isn .- coords_isn_10)) < 1e-10u"nm"
         @test maximum(norm.(coords_isn .- coords_no_isn)) > 1e-3u"nm"
+        # With auto_update the neighbors are checked before every force calculation, which
+        #   with no buffer rebuilds them every time, giving the same dynamics as
+        #   inner_step_neighbors
+        nf.auto_update = true
+        coords_auto = run_mts(false, 10^9)
+        @test maximum(norm.(coords_isn .- coords_auto)) < 1e-10u"nm"
+        nf.auto_update = false
     end
 end
 

@@ -12,7 +12,9 @@ export
     CellListMapNeighborFinder
 
 @public has_ragged_neighbors,
-    ragged_counts
+    ragged_counts,
+    neighbor_update_counts,
+    neighbor_cutoff
 
 """
     use_neighbors(inter)
@@ -27,6 +29,10 @@ Custom pairwise interactions can define a method for this function.
 For built-in interactions such as [`LennardJones`](@ref) this function accesses
 the `use_neighbors` field of the struct, set with the `use_neighbors` keyword
 argument, which is `true` by default.
+
+Neighbor finders with `auto_update=true` read the cutoff of the pairwise interactions
+for which this is `true`, from their `cutoff` or `dist_cutoff` property, to decide when
+to rebuild the neighbor list, see the [Neighbor finders](@ref) documentation.
 """
 use_neighbors(inter) = true
 
@@ -228,9 +234,19 @@ Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 
 For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
 and energy kernels build and cache their interacting tile list internally from
-the neighbor-finder metadata, and this call marks when that list is rebuilt.
+the neighbor-finder metadata, and with `auto_update=false` this call marks when that
+list is rebuilt.
 It also returns `nothing` when the neighbor finder is `nothing`, meaning that no
 neighbor finder is used.
+
+`current_neighbors` is returned unchanged when it is still valid, and a new list is
+built otherwise or when `force_recompute` is `true`.
+For the built-in neighbor finders with `auto_update=true`, the default, the list is
+valid until the atoms have moved far enough since it was built that a pair within the
+cutoff of the interactions that use it could be missing, see the
+[Neighbor finders](@ref) documentation.
+With `auto_update=false` the list is rebuilt when `step_n` is a multiple of the
+`n_steps` of the neighbor finder.
 
 A neighbor finder may reuse the device buffers behind `current_neighbors` for the
 list it returns, as [`GPUCellListNeighborFinder`](@ref) does, so the list passed in
@@ -239,6 +255,562 @@ should not be used afterwards.
 find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
 find_neighbors(sys::System, ::Nothing, args...; kwargs...) = nothing
+
+#=
+Displacement tracking
+
+A neighbor finder with `auto_update=true` keeps the coordinates and boundary that its
+last list was built from, along with the list itself, and only builds a new list when
+the atoms have moved far enough since then that a pair within the interaction cutoff
+could be missing from it. `n_steps` is then ignored.
+
+Let the list hold every eligible pair within r_l, the `dist_cutoff` of the neighbor
+finder, at the reference coordinates x⁰ in the box with basis vectors H⁰, and let the
+box now be H = F H⁰. The displacement of atom i relative to the box is
+e_i = x_i - F x⁰_i, up to a lattice vector, which is the distance the atom has moved
+when the box has not changed. For any periodic image of a pair (i, j),
+    x_j - x_i + H n = F (x⁰_j - x⁰_i + H⁰ n') + e_j - e_i
+for an integer vector n', so a pair that is not in the list, being further than r_l
+apart in every image at the reference, is now further apart than
+σ_min(F) r_l - |e_i| - |e_j|, where σ_min(F) is the smallest singular value of F.
+Hence no pair within the cutoff r_c of the interactions using the list can be missing
+as long as
+    d_1 + d_2 <= σ_min(F) r_l - r_c,
+where d_1 and d_2 are the two largest values of |e_i|. A small margin for rounding in
+the distances computed when building and using the list is subtracted from the right
+hand side.
+
+For an unchanged box the right hand side is the skin r_l - r_c, so this is less strict
+than the common criterion of rebuilding when any atom has moved more than half the
+skin, which it reduces to when the two largest displacements are equal. Measuring the
+displacements relative to the box deformation means that a barostat scaling the
+coordinates only counts towards the displacements through the small change in the
+separation of nearby atoms, rather than through the movement of atoms far from the
+origin. The bound holds whichever lattice vector the displacement of an atom is taken
+over, so it holds for a TriclinicBoundary and does not need the minimum image of a
+displacement to be found exactly.
+
+When the skin is not positive, or the cutoff of an interaction using the list is not
+known, the list has to be rebuilt every time, so no reference is kept and no
+displacements are calculated.
+
+The reference coordinates only describe the list that was built from them, so a list
+passed in that is not the one built last is rebuilt. This keeps the check correct when
+a neighbor finder is shared between systems, as `System(sys; ...)` does, at the cost of
+rebuilding when they are used in turn. A list built from scratch, without a current list
+being given and without being forced, as by `find_neighbors(sys)`, does not replace the
+tracked list, since it does not reuse the memory of that list, so that analysis during a
+simulation does not cause extra rebuilds. A shared neighbor finder should not be used by
+systems that are simulated at the same time on different threads.
+
+GPUNeighborFinder builds its tile list in the CUDA force and energy kernels rather than
+in find_neighbors, so it makes the same check there against coordinates stored in the
+GPU buffers, see the CUDA extension.
+=#
+
+# State of a neighbor finder that tracks displacements, mutable so that neighbor finders
+#   that are themselves immutable can update it
+mutable struct DisplacementTracker
+    # Coordinates and boundary that the tracked list was built from, the coordinates are
+    #   kept when the list is not tracked so that their memory can be reused
+    coords::Any
+    boundary::Any
+    # The list built from them, `current_neighbors` is only reused if it is this list,
+    #   nothing when no list is tracked
+    neighbors::Any
+    # The number of lists built and of displacement checks made, for information
+    n_builds::Int
+    n_checks::Int
+    # Buffers reused by the GPU displacement check
+    scratch::Any
+end
+
+DisplacementTracker() = DisplacementTracker(nothing, nothing, nothing, 0, 0, nothing)
+
+# Compared by value so that copies of a neighbor finder compare equal
+function Base.:(==)(t1::DisplacementTracker, t2::DisplacementTracker)
+    return t1.coords == t2.coords && t1.boundary == t2.boundary &&
+           t1.neighbors == t2.neighbors && t1.n_builds == t2.n_builds &&
+           t1.n_checks == t2.n_checks
+end
+
+Base.hash(t::DisplacementTracker, h::UInt) = hash(t.n_checks, hash(t.n_builds,
+                                                  hash(:DisplacementTracker, h)))
+
+#=
+Whether a neighbor finder only rebuilds the neighbor list when the atoms have moved far
+enough to invalidate it, rather than every `n_steps` steps. Simulators use this to check
+the list, rather than force a rebuild, when the coordinates change other than through a
+step, for example when a barostat scales them. Custom neighbor finders can define a
+method.
+=#
+tracks_displacements(nf) = false
+
+"""
+    neighbor_update_counts(neighbor_finder)
+
+The number of times a neighbor finder has built a neighbor list, `n_builds`, and the
+number of times it has checked whether the atoms have moved far enough to need a new one,
+`n_checks`, as a named tuple.
+
+This can be used to see how often the list is rebuilt during a simulation, for example to
+choose the buffer distance.
+For [`GPUNeighborFinder`](@ref) these count the refreshes and checks of the tile list made
+by the force and energy kernels.
+"""
+function neighbor_update_counts(nf)
+    tracker = nf.tracker
+    return (n_builds=tracker.n_builds, n_checks=tracker.n_checks)
+end
+
+# Reset the counts of a neighbor finder
+function reset_neighbor_update_counts!(nf)
+    nf.tracker.n_builds = 0
+    nf.tracker.n_checks = 0
+    return nf
+end
+
+#=
+Make the next call to `find_neighbors` build a new list rather than reusing the current
+one, for example after the excluded or special pairs of the neighbor finder change,
+which the displacements do not show.
+=#
+function invalidate_tracked_neighbors!(nf)
+    if hasproperty(nf, :tracker)
+        nf.tracker.neighbors = nothing
+    end
+    return nf
+end
+
+"""
+    neighbor_cutoff(inter)
+
+The distance within which a general interaction needs every eligible pair of atoms to be
+in the neighbor list it is given, or `missing` if it does not read the neighbor list.
+
+Neighbor finders with `auto_update=true` use this, along with the cutoffs of the pairwise
+interactions that use the neighbor list, to decide when to rebuild the list.
+The default is `missing`, so custom general interactions that read the pairs of the
+neighbor list should define a method, returning `nothing` if the distance is not known,
+in which case the list is rebuilt every time.
+The distance can be given with units, in which case it is converted to nm for systems
+without units, or without units for systems without units.
+"""
+neighbor_cutoff(inter) = missing
+
+# A cutoff in the length unit of the coordinates, with lengths without units in nm
+function cutoff_in_length_unit(cutoff, dist_unit)
+    if dimension(cutoff) == dimension(u"nm")
+        return (dist_unit == NoUnits ? ustrip(u"nm", cutoff) : uconvert(dist_unit, cutoff))
+    else
+        return cutoff
+    end
+end
+
+# The squared distance within which an interaction needs the pairs of the neighbor list,
+#   nothing if it is not known and missing if the interaction does not use the list
+neighbor_sqdist(inter, ::Val{:pairwise}, dist_unit) = (use_neighbors(inter) ?
+                                                       pairwise_zero_beyond(inter) : missing)
+
+function neighbor_sqdist(inter, ::Val{:general}, dist_unit)
+    cutoff = neighbor_cutoff(inter)
+    (ismissing(cutoff) || isnothing(cutoff)) && return cutoff
+    return cutoff_in_length_unit(cutoff, dist_unit)^2
+end
+
+# `acc` is missing when no interaction using the neighbor list has been seen, nothing
+#   when one of them has an unknown cutoff and the largest squared cutoff otherwise
+@inline function combine_neighbor_sqdist(acc, sqdist)
+    ismissing(sqdist) && return acc
+    (isnothing(sqdist) || isnothing(acc)) && return nothing
+    ismissing(acc) && return sqdist
+    # A cutoff in other units can not be compared, so is treated as unknown
+    dimension(acc) == dimension(sqdist) || return nothing
+    return max(acc, sqdist)
+end
+
+# Walked recursively to keep the result type stable for tuples of interactions
+# Folded from the right, which combine_neighbor_sqdist allows since the order does not
+#   matter to it, so that only the tuple changes between the recursive calls. Passing the
+#   value accumulated so far changes its type between the calls, from missing to a squared
+#   distance, which stops inference and makes the check every step slower.
+@inline fold_neighbor_sqdist(::Union{Tuple{}, @NamedTuple{}}, kind, dist_unit) = missing
+
+@inline function fold_neighbor_sqdist(inters::Union{Tuple, NamedTuple}, kind, dist_unit)
+    return combine_neighbor_sqdist(fold_neighbor_sqdist(Base.tail(inters), kind, dist_unit),
+                                   neighbor_sqdist(first(inters), kind, dist_unit))
+end
+
+#=
+The squared distance within which the interactions of a system that use the neighbor
+list need every eligible pair of atoms to be in it, or `nothing` if this is not known,
+including when no interaction is known to use the neighbor list.
+These are the pairwise interactions for which `use_neighbors` is `true`, along with the
+general interactions for which `neighbor_cutoff` is not `missing`.
+=#
+neighbor_inters_sqdist(sys) = neighbor_inters_sqdist(sys.pairwise_inters, sys.general_inters,
+                                                     coords_length_unit(sys.coords))
+
+function neighbor_inters_sqdist(pairwise_inters, general_inters, dist_unit)
+    acc = combine_neighbor_sqdist(
+            fold_neighbor_sqdist(values(pairwise_inters), Val(:pairwise), dist_unit),
+            fold_neighbor_sqdist(values(general_inters), Val(:general), dist_unit))
+    return (ismissing(acc) ? nothing : acc)
+end
+
+# Whether any of the interactions read the neighbor list, in the sense used above
+# Walked recursively rather than with `any`, which is not inferred to return a `Bool` for
+#   tuples since it allows for `missing`
+@inline any_inter(f::F, ::Union{Tuple{}, @NamedTuple{}}) where {F} = false
+@inline any_inter(f::F, inters::Union{Tuple, NamedTuple}) where {F} =
+            (f(first(inters))::Bool || any_inter(f, Base.tail(inters)))
+
+reads_neighbor_list(inter) = !ismissing(neighbor_cutoff(inter))
+
+function uses_neighbor_list(pairwise_inters, general_inters)
+    return any_inter(use_neighbors, pairwise_inters) ||
+           any_inter(reads_neighbor_list, general_inters)
+end
+
+#=
+The deformation F of the box from `ref_boundary` to `boundary`, such that the basis
+vectors are F times the reference basis vectors, in float type T: `nothing` if the box is
+unchanged, the scaling along each axis for a CubicBoundary or RectangularBoundary and a
+matrix for a TriclinicBoundary. `missing` when the boxes are not related by a
+deformation, for example when an infinite boundary has changed, in which case the list
+is rebuilt.
+=#
+box_deformation(ref_boundary, boundary, ::Type{T}) where {T} = missing
+
+function box_deformation(ref_boundary::B1, boundary::B2,
+                         ::Type{T}) where {B1 <: Union{CubicBoundary, RectangularBoundary},
+                                           B2 <: Union{CubicBoundary, RectangularBoundary},
+                                           T}
+    ref_boundary == boundary && return nothing
+    if length(ref_boundary.side_lengths) != length(boundary.side_lengths) ||
+            has_infinite_boundary(ref_boundary) || has_infinite_boundary(boundary)
+        return missing
+    end
+    return T.(uconvert.(NoUnits, boundary.side_lengths ./ ref_boundary.side_lengths))
+end
+
+function box_deformation(ref_boundary::TriclinicBoundary, boundary::TriclinicBoundary,
+                         ::Type{T}) where {T}
+    ref_boundary == boundary && return nothing
+    dist_unit = unit(boundary.basis_vectors[1][1])
+    H_ref = ustrip.(dist_unit, box_matrix(ref_boundary))
+    H = ustrip.(dist_unit, box_matrix(boundary))
+    return SMatrix{3, 3, T}(H * inv(H_ref))
+end
+
+# The smallest singular value of the deformation, the factor by which it can shorten the
+#   separation of two atoms
+deformation_min_stretch(::Nothing, ::Type{T}) where {T} = one(T)
+deformation_min_stretch(F::SVector, ::Type{T}) where {T} = T(minimum(abs, F))
+deformation_min_stretch(F::SMatrix, ::Type{T}) where {T} = T(minimum(svdvals(F)))
+
+@inline deform_coord(::Nothing, c) = c
+@inline deform_coord(F::SVector, c) = F .* c
+@inline deform_coord(F::SMatrix, c) = F * c
+
+# Squared displacement of an atom relative to the box deformation since the reference,
+#   without units. A NaN is returned as infinity, which survives taking the maximum, so
+#   that NaN coordinates give a rebuild
+@inline function sq_displacement(c, c_ref, boundary, F, dist_unit, ::Type{T}) where {T}
+    dr = vector(deform_coord(F, c_ref), c, boundary)
+    d2 = T(ustrip(dist_unit^2, sum(abs2, dr)))
+    return ifelse(isnan(d2), T(Inf), d2)
+end
+
+# The two largest values of two pairs of the two largest values, largest first
+@inline merge_top2(a, b) = (max(a[1], b[1]), max(min(a[1], b[1]), max(a[2], b[2])))
+
+@inline function push_top2(max_1, max_2, d2)
+    if d2 > max_1
+        return d2, max_1
+    elseif d2 > max_2
+        return max_1, d2
+    else
+        return max_1, max_2
+    end
+end
+
+# Atoms per chunk of the threaded CPU displacement check, below which starting a task
+#   costs more than it saves
+const displacement_chunk_n_atoms = 4_096
+
+function max_sq_displacements_range(coords, ref_coords, boundary, F, dist_unit,
+                                    ::Type{T}, i_start, i_end) where {T}
+    max_1, max_2 = zero(T), zero(T)
+    @inbounds for i in i_start:i_end
+        d2 = sq_displacement(coords[i], ref_coords[i], boundary, F, dist_unit, T)
+        max_1, max_2 = push_top2(max_1, max_2, d2)
+    end
+    return (max_1, max_2)
+end
+
+#=
+The two largest squared displacements of the atoms relative to the box deformation `F`
+since the reference coordinates, largest first and without units.
+`tracker` is a DisplacementTracker holding buffers for the GPU version, or `nothing`.
+=#
+function max_sq_displacements(coords, ref_coords, boundary, F, dist_unit, ::Type{T},
+                              n_threads::Integer, tracker=nothing) where {T}
+    n_atoms = length(coords)
+    n_chunks = min(n_threads, cld(n_atoms, displacement_chunk_n_atoms))
+    if n_chunks > 1
+        chunk_maxs = Vector{Tuple{T, T}}(undef, n_chunks)
+        Threads.@threads for chunk_i in 1:n_chunks
+            i_start = ((chunk_i - 1) * n_atoms) ÷ n_chunks + 1
+            i_end = (chunk_i * n_atoms) ÷ n_chunks
+            chunk_maxs[chunk_i] = max_sq_displacements_range(coords, ref_coords, boundary,
+                                                F, dist_unit, T, i_start, i_end)
+        end
+        return reduce(merge_top2, chunk_maxs)
+    else
+        return max_sq_displacements_range(coords, ref_coords, boundary, F, dist_unit, T,
+                                          1, n_atoms)
+    end
+end
+
+# Threads per group in the GPU displacement check, a power of two for the reduction, and
+#   the largest number of groups, whose results are reduced on the host
+const displacement_group_size = 256
+const displacement_max_n_groups = 256
+
+#=
+Each group finds the two largest squared displacements of the atoms it covers, which are
+then reduced on the host. One kernel and one small transfer takes about a third of the
+time of the equivalent mapreduce for a system of tens of thousands of atoms.
+The CUDA extension has a faster version.
+=#
+@kernel inbounds=true function max_sq_displacements_kernel!(group_maxs, @Const(coords),
+                                    @Const(ref_coords), boundary, F, dist_unit, n_atoms,
+                                    ::Val{T}, ::Val{group_size}) where {T, group_size}
+    local_i = @index(Local, Linear)
+    group_i = @index(Group, Linear)
+    group_max_1 = @localmem T (group_size,)
+    group_max_2 = @localmem T (group_size,)
+
+    max_1, max_2 = zero(T), zero(T)
+    stride = length(group_maxs) * group_size
+    i = (group_i - 1) * group_size + local_i
+    while i <= n_atoms
+        d2 = sq_displacement(coords[i], ref_coords[i], boundary, F, dist_unit, T)
+        max_1, max_2 = push_top2(max_1, max_2, d2)
+        i += stride
+    end
+    group_max_1[local_i] = max_1
+    group_max_2[local_i] = max_2
+    @synchronize
+
+    n_active = group_size ÷ 2
+    while n_active > 0
+        if local_i <= n_active
+            a_1, a_2 = group_max_1[local_i], group_max_2[local_i]
+            b_1, b_2 = group_max_1[local_i + n_active], group_max_2[local_i + n_active]
+            group_max_1[local_i], group_max_2[local_i] = merge_top2((a_1, a_2), (b_1, b_2))
+        end
+        @synchronize
+        n_active ÷= 2
+    end
+    if local_i == 1
+        group_maxs[group_i] = (group_max_1[1], group_max_2[1])
+    end
+end
+
+# Device and host buffers for the group maxima of the generic GPU check, kept by the
+#   tracker so that the check, which is made every step, does not allocate
+mutable struct GPUDisplacementScratch{D, H}
+    group_maxs::D
+    group_maxs_host::H
+end
+
+function displacement_scratch(tracker, coords, ::Type{T}, n_groups) where {T}
+    scratch = (isnothing(tracker) ? nothing : tracker.scratch)
+    if scratch isa GPUDisplacementScratch && eltype(scratch.group_maxs) == Tuple{T, T} &&
+            length(scratch.group_maxs) == n_groups &&
+            get_backend(scratch.group_maxs) == get_backend(coords)
+        return scratch
+    end
+    scratch = GPUDisplacementScratch(similar(coords, Tuple{T, T}, n_groups),
+                                     Vector{Tuple{T, T}}(undef, n_groups))
+    if !isnothing(tracker)
+        tracker.scratch = scratch
+    end
+    return scratch
+end
+
+function max_sq_displacements(coords::AbstractGPUArray, ref_coords, boundary, F, dist_unit,
+                              ::Type{T}, n_threads::Integer, tracker=nothing) where {T}
+    n_atoms = length(coords)
+    iszero(n_atoms) && return (zero(T), zero(T))
+    n_groups = min(cld(n_atoms, displacement_group_size), displacement_max_n_groups)
+    scratch = displacement_scratch(tracker, coords, T, n_groups)
+    kernel! = max_sq_displacements_kernel!(get_backend(coords), displacement_group_size)
+    kernel!(scratch.group_maxs, coords, ref_coords, boundary, F, dist_unit, n_atoms, Val(T),
+            Val(displacement_group_size); ndrange=(n_groups * displacement_group_size))
+    copyto!(scratch.group_maxs_host, scratch.group_maxs)
+    return reduce(merge_top2, scratch.group_maxs_host)
+end
+
+#=
+Slack for rounding in the distances calculated when a list is built and when it is used,
+which are found from coordinates that can be as large as the box.
+=#
+function neighbor_rounding_margin(boundary, dist_cutoff_nounits::T, dist_unit) where {T}
+    box_extent = zero(T)
+    for side in box_sides(boundary)
+        if isfinite(side)
+            box_extent += T(ustrip(dist_unit, side))
+        end
+    end
+    return 16 * eps(T) * (dist_cutoff_nounits + box_extent)
+end
+
+#=
+How far, without units, the two atoms that have moved furthest since the reference can
+move in total before the list is invalid, or `nothing` if the list can not be reused
+whatever the displacements are. This is when the interaction cutoff is not known, or the
+box has changed in a way that is not a deformation, or the allowance is not positive.
+`F` is the box deformation since the reference.
+=#
+function neighbor_allowance(boundary, F, dist_cutoff, inter_sqdist, dist_unit, ::Type{T}) where {T}
+    isnothing(inter_sqdist) && return nothing
+    ismissing(F) && return nothing
+    inter_cutoff = sqrt(inter_sqdist)
+    if dimension(inter_cutoff) != dimension(dist_cutoff) ||
+            dimension(dist_cutoff) != dimension(dist_unit)
+        return nothing
+    end
+    dist_cutoff_nounits = T(ustrip(dist_unit, dist_cutoff))
+    allowance = deformation_min_stretch(F, T) * dist_cutoff_nounits -
+                T(ustrip(dist_unit, inter_cutoff)) -
+                neighbor_rounding_margin(boundary, dist_cutoff_nounits, dist_unit)
+    return (allowance > zero(T) ? allowance : nothing)
+end
+
+# The float type and length unit of coordinates
+coords_float_type(coords) = typeof(ustrip(zero(eltype(eltype(coords)))))
+coords_length_unit(coords) = unit(eltype(eltype(coords)))
+
+# Whether a list built from the current coordinates of `sys` can be reused at all, i.e.
+#   whether tracking the displacements is worth it
+function neighbors_trackable(boundary, coords, dist_cutoff, inter_sqdist)
+    T = coords_float_type(coords)
+    allowance = neighbor_allowance(boundary, nothing, dist_cutoff, inter_sqdist,
+                                   coords_length_unit(coords), T)
+    return !isnothing(allowance)
+end
+
+#=
+Whether the atoms at `coords` in `boundary` may have moved far enough since `ref_coords`
+in `ref_boundary`, where a neighbor list was built with cutoff `dist_cutoff`, that a pair
+within the squared interaction cutoff `inter_sqdist` could be missing from the list. See
+the description of displacement tracking above.
+This is always true when `inter_sqdist` is `nothing`, i.e. when the interaction cutoff
+is not known, so a list is not reused for interactions without a cutoff.
+=#
+function neighbors_invalidated(coords, boundary, ref_coords, ref_boundary, dist_cutoff,
+                               inter_sqdist; n_threads::Integer=Threads.nthreads(),
+                               tracker=nothing)
+    if isnothing(ref_coords) || length(ref_coords) != length(coords)
+        return true
+    end
+    T = coords_float_type(coords)
+    dist_unit = coords_length_unit(coords)
+    F = box_deformation(ref_boundary, boundary, T)
+    allowance = neighbor_allowance(boundary, F, dist_cutoff, inter_sqdist, dist_unit, T)
+    isnothing(allowance) && return true
+    max_sq_1, max_sq_2 = max_sq_displacements(coords, ref_coords, boundary, F, dist_unit, T,
+                                              n_threads, tracker)
+    return !(sqrt(max_sq_1) + sqrt(max_sq_2) <= allowance)
+end
+
+# Copy coordinates into the reference coordinates, reusing their memory if possible
+copy_reference_coords(::Nothing, coords) = copy(coords)
+
+function copy_reference_coords(ref_coords, coords)
+    if typeof(ref_coords) == typeof(coords) && size(ref_coords) == size(coords)
+        return copyto!(ref_coords, coords)
+    else
+        return copy(coords)
+    end
+end
+
+#=
+Whether `find_neighbors` should build a new list for a neighbor finder with
+`auto_update`, `n_steps`, `dist_cutoff` and `tracker` fields, rather than returning
+`current_neighbors`. Called at the start of each `find_neighbors` method, with the list
+built recorded by `record_neighbors!`.
+=#
+function rebuild_neighbors(sys, nf, current_neighbors, step_n::Integer,
+                           force_recompute::Bool; n_threads::Integer=Threads.nthreads())
+    force_recompute && return true
+    nf.auto_update || return iszero(step_n % nf.n_steps)
+    tracker = nf.tracker
+    if isnothing(current_neighbors) || isnothing(tracker.neighbors) ||
+            current_neighbors !== tracker.neighbors
+        return true
+    end
+    tracker.n_checks += 1
+    return neighbors_invalidated(sys.coords, sys.boundary, tracker.coords, tracker.boundary,
+                                 nf.dist_cutoff, neighbor_inters_sqdist(sys);
+                                 n_threads=n_threads, tracker=tracker)
+end
+
+#=
+Record that `neighbors` was built from the current coordinates of `sys`, returning it.
+`current_neighbors` and `force_recompute` are the arguments `find_neighbors` was called
+with. The list becomes the tracked list unless it was built from scratch without being
+asked to be, as by `find_neighbors(sys)`, while another list is tracked, since such a list
+leaves the memory of the tracked list alone. `builds_in_place` is whether the neighbor
+finder always updates the same list, as CellListMapNeighborFinder does, in which case the
+list is always tracked.
+=#
+function record_neighbors!(sys, nf, neighbors, current_neighbors, force_recompute::Bool;
+                           builds_in_place::Bool=false)
+    tracker = nf.tracker
+    tracker.n_builds += 1
+    nf.auto_update || return neighbors
+    if !builds_in_place && isnothing(current_neighbors) && !force_recompute &&
+            !isnothing(tracker.neighbors)
+        return neighbors
+    end
+    if neighbors_trackable(sys.boundary, sys.coords, nf.dist_cutoff,
+                           neighbor_inters_sqdist(sys))
+        tracker.coords = copy_reference_coords(tracker.coords, sys.coords)
+        tracker.boundary = sys.boundary
+        tracker.neighbors = neighbors
+    else
+        # The list has to be rebuilt every time, so no reference is needed
+        tracker.neighbors = nothing
+    end
+    return neighbors
+end
+
+#=
+Find the neighbors again after the coordinates have been changed other than by a step of
+the simulator, for example by a coupler such as a barostat scaling them or by restoring
+the coordinates after a rejected trial move.
+For a neighbor finder that tracks displacements the list is checked, which accounts for a
+change in the box, and only rebuilt if needed. Otherwise it is rebuilt.
+If a trial list was built from the list given, which some neighbor finders reuse the
+buffers of, the list given is no longer the last one built and is rebuilt either way.
+=#
+function refind_neighbors(sys, neighbors, step_n::Integer;
+                          n_threads::Integer=Threads.nthreads())
+    nf = sys.neighbor_finder
+    return find_neighbors(sys, nf, neighbors, step_n, !tracks_displacements(nf);
+                          n_threads=n_threads)
+end
+
+# Shown by the neighbor finders that track displacements
+function show_update_settings(io::IO, nf)
+    println(io, "  auto_update = ", nf.auto_update)
+    println(io, "  n_steps = ", nf.n_steps, (nf.auto_update ? " (unused)" : ""))
+    println(io, "  n_builds = ", nf.tracker.n_builds)
+end
 
 #=
     uses_gpu_neighbor_finder(AT)
@@ -252,9 +824,10 @@ uses_gpu_neighbor_finder(AT) = false
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
-                      n_steps=10, array_type, initialized=false, strictness=:warn)
-    GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
-                      array_type=nothing, initialized=false, strictness=:warn)
+                      auto_update=true, n_steps=10, array_type, initialized=false,
+                      strictness=:warn)
+    GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
+                      n_steps=10, array_type=nothing, initialized=false, strictness=:warn)
 
 Neighbor finder for CUDA systems that uses tiled pairwise kernels.
 
@@ -267,9 +840,14 @@ tiles that contain them, so the memory used grows linearly with the number of
 atoms.
 For that reason, [`find_neighbors`](@ref) returns `nothing` for this neighbor
 finder.
-It should still be called at the same points as for the other neighbor finders, since
-the tile list is rebuilt at the next force or energy evaluation after `find_neighbors`
-is called on a step that is a multiple of `n_steps` or with `force_recompute=true`.
+With `auto_update=true`, the default, the force and energy kernels check each time they
+run whether the atoms have moved far enough since the tile list was built that a pair
+within the cutoff of the pairwise interactions could be missing, and refresh the tile
+list if so.
+With `auto_update=false`, [`find_neighbors`](@ref) should still be called at the same
+points as for the other neighbor finders, since the tile list is rebuilt at the next
+force or energy evaluation after `find_neighbors` is called on a step that is a multiple
+of `n_steps` or with `force_recompute=true`.
 
 This is the recommended neighbor finder for `CuArray` systems. On other GPUs use
 [`GPUCellListNeighborFinder`](@ref).
@@ -281,15 +859,20 @@ The exceptions are stored in the `eligible` and `special` fields as
 - `n_atoms`: the number of atoms in the system.
 - `dist_cutoff`: the neighbor search distance used by the pairwise kernels.
   This should be the interaction cutoff distance plus a buffer distance, since
-  the tile list is only refreshed every `n_steps` steps. The buffer should be
-  larger than the distance an atom can move in that time.
+  the tile list is reused until it is refreshed.
 - `excluded_pairs`: an iterable of `(i, j)` pairs, or a sparse matrix, of the pairs
   that are excluded from the pairwise interactions, for example bonded atoms.
 - `special_pairs`: an iterable of `(i, j)` pairs, or a sparse matrix, of the pairs
   that use the special interaction path, for example 1-4 atoms.
-- `n_steps`: the number of steps between Morton reorder and tile-list refresh
-  passes. A forced rebuild, for example after a barostat changes the coordinates,
-  refreshes the tile list without changing the Morton order.
+- `auto_update=true`: whether to refresh the tile list only when the atoms have moved
+  far enough since the last refresh that a pair within the cutoff of the pairwise
+  interactions could be missing, in which case `n_steps` is ignored. The Morton order
+  is recomputed at the same time. See the [Neighbor finders](@ref) documentation.
+- `n_steps=10`: with `auto_update=false`, the number of steps between Morton reorder
+  and tile-list refresh passes. A forced rebuild, for example after a barostat changes
+  the coordinates, refreshes the tile list without changing the Morton order. The
+  buffer distance should then be larger than the distance an atom can move in that
+  time.
 - `array_type`: the array type used to store the excluded and special pairs on
   the GPU, for example `CuArray`. It is required unless `eligible` is given on
   the GPU, in which case its array type is used.
@@ -307,6 +890,7 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     n_atoms::B
     dist_cutoff::D
     dist_cutoff_2::D2
+    auto_update::Bool
     n_steps::Int
     initialized::Bool
     cache_generation::UInt64
@@ -314,7 +898,12 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     tile_generation::UInt64
     eligible::E
     special::E
+    # Counts the tile list refreshes and checks, and holds the buffers of the check, the
+    #   coordinates the tile list was built from are kept in the GPU buffers that hold it
+    tracker::DisplacementTracker
 end
+
+tracks_displacements(nf::GPUNeighborFinder) = nf.auto_update
 
 #=
 The array type used to store the sparse lists of a GPUNeighborFinder: `AT` if it is
@@ -402,6 +991,7 @@ function GPUNeighborFinder(;
                             dist_cutoff,
                             excluded_pairs=(),
                             special_pairs=(),
+                            auto_update::Bool=true,
                             n_steps=10,
                             array_type=nothing,
                             eligible=nothing,
@@ -420,23 +1010,27 @@ function GPUNeighborFinder(;
     eligible_sparse = sparse_eligible(eligible_given, n_atoms_used, AT)
     special_sparse = sparse_special(special_given, n_atoms_used, AT)
     dist_cutoff_2 = dist_cutoff^2
+    n_steps > 0 || throw(ArgumentError("n_steps must be positive, got $n_steps"))
     return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(dist_cutoff_2), typeof(eligible_sparse)}(
-                Int(n_atoms_used), dist_cutoff, dist_cutoff_2, n_steps, initialized, 0, 0, 0,
-                eligible_sparse, special_sparse)
+                Int(n_atoms_used), dist_cutoff, dist_cutoff_2, auto_update, Int(n_steps),
+                initialized, 0, 0, 0, eligible_sparse, special_sparse, DisplacementTracker())
 end
 
 # The interacting tile list is built within the CUDA pairwise kernels, so this only records
 #   that it is due to be rebuilt, at the same points as the other neighbor finders rebuild
 #   their lists
-# Every `n_steps` steps the Morton order is recomputed as well, whereas a forced rebuild
-#   only refreshes the tiles since the order is still close to optimal
+# With auto_update=false the Morton order is recomputed as well every `n_steps` steps,
+#   whereas a forced rebuild only refreshes the tiles since the order is still close to
+#   optimal
+# With auto_update=true the kernels decide when to rebuild by checking the displacements,
+#   so only a forced rebuild is recorded
 function find_neighbors(sys::System,
                         nf::GPUNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         kwargs...)
-    if iszero(step_n % nf.n_steps)
+    if !nf.auto_update && iszero(step_n % nf.n_steps)
         nf.reorder_generation += one(UInt64)
         nf.tile_generation += one(UInt64)
     elseif force_recompute
@@ -447,11 +1041,13 @@ end
 
 """
     GPUCellListNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
-                              n_steps=10, force_float32=false, array_type, max_neighbors=nothing,
-                              output=:molly_pairs, ragged=true, strictness=:warn)
-    GPUCellListNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
-                              force_float32=false, array_type=nothing, max_neighbors=nothing,
-                              output=:molly_pairs, ragged=true, strictness=:warn)
+                              auto_update=true, n_steps=10, force_float32=false, array_type,
+                              max_neighbors=nothing, output=:molly_pairs, ragged=true,
+                              strictness=:warn)
+    GPUCellListNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
+                              n_steps=10, force_float32=false, array_type=nothing,
+                              max_neighbors=nothing, output=:molly_pairs, ragged=true,
+                              strictness=:warn)
 
 Neighbor finder for GPU systems that bins atoms into a uniform grid of cells and
 searches the 3x3x3 stencil of cells around each atom.
@@ -465,7 +1061,12 @@ the internally padded search cutoff apart. For a [`TriclinicBoundary`](@ref), th
 distance is smaller than the length of the corresponding basis vector.
 
 `dist_cutoff` is the neighbor search distance, which should be the interaction cutoff
-distance plus a buffer distance since the list is only updated every `n_steps` steps.
+distance plus a buffer distance since the list is reused until it is rebuilt.
+With `auto_update=true`, the default, the list is rebuilt when the atoms have moved far
+enough since the last rebuild that a pair within the cutoff of the interactions could be
+missing, and `n_steps` is ignored, see the [Neighbor finders](@ref) documentation.
+With `auto_update=false` the list is rebuilt every `n_steps` steps, so the buffer
+distance should be larger than the distance an atom can move in that time.
 
 Neighbor finding uses the system's floating-point type by default.
 Set `force_float32=true` to use `Float32` for neighbor finding.
@@ -525,6 +1126,7 @@ trial list, would see the new neighbors with a stale pair count.
 """
 mutable struct GPUCellListNeighborFinder{D, B, S}
     dist_cutoff::D
+    auto_update::Bool
     n_steps::Int
     force_float32::Bool
     max_neighbors::Union{Nothing, Int}
@@ -535,18 +1137,23 @@ mutable struct GPUCellListNeighborFinder{D, B, S}
     #   output modes that ignore the exceptions
     eligible::B
     special::S
+    tracker::DisplacementTracker
 end
+
+tracks_displacements(nf::GPUCellListNeighborFinder) = nf.auto_update
 
 # Replace the exceptions of a neighbor finder with excluded and special pairs
 function update_sparse_pairs!(nf::GPUCellListNeighborFinder, excluded_pairs, special_pairs)
     ET = typeof(nf.eligible.starts)
     nf.eligible = SparsePairMatrix(nf.n_atoms, excluded_pairs; listed=false, array_type=ET)
     nf.special = SparsePairMatrix(nf.n_atoms, special_pairs; listed=true, array_type=ET)
+    invalidate_tracked_neighbors!(nf)
     return nf
 end
 
 function append_excluded_pairs!(nf::GPUCellListNeighborFinder, pairs)
     exclude_pairs!(nf.eligible, pairs)
+    invalidate_tracked_neighbors!(nf)
     return nf
 end
 
@@ -555,6 +1162,7 @@ function GPUCellListNeighborFinder(;
     dist_cutoff,
     excluded_pairs=(),
     special_pairs=(),
+    auto_update::Bool=true,
     n_steps=10,
     force_float32::Bool=false,
     array_type=nothing,
@@ -603,8 +1211,9 @@ function GPUCellListNeighborFinder(;
     if output !== :molly_pairs
         # The other modes ignore the exceptions, so nothing is stored for them
         return GPUCellListNeighborFinder{typeof(dist_cutoff), Nothing, Nothing}(
-            dist_cutoff, n_steps_int, force_float32, max_neighbors_int, output, ragged,
-            (isnothing(n_atoms) ? 0 : Int(n_atoms)), nothing, nothing,
+            dist_cutoff, auto_update, n_steps_int, force_float32, max_neighbors_int, output,
+            ragged, (isnothing(n_atoms) ? 0 : Int(n_atoms)), nothing, nothing,
+            DisplacementTracker(),
         )
     end
 
@@ -626,8 +1235,8 @@ function GPUCellListNeighborFinder(;
 
     return GPUCellListNeighborFinder{typeof(dist_cutoff), typeof(eligible_sparse),
                                      typeof(special_sparse)}(
-        dist_cutoff, n_steps_int, force_float32, max_neighbors_int, output, ragged, n_atoms_used,
-        eligible_sparse, special_sparse,
+        dist_cutoff, auto_update, n_steps_int, force_float32, max_neighbors_int, output,
+        ragged, n_atoms_used, eligible_sparse, special_sparse, DisplacementTracker(),
     )
 end
 
@@ -1687,8 +2296,10 @@ function find_neighbors(sys::System{3, AT},
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
+                        n_threads::Integer=Threads.nthreads(),
                         kwargs...) where {AT <: AbstractGPUArray}
-    if !force_recompute && !iszero(step_n % nf.n_steps)
+    if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
+                          n_threads=n_threads)
         return current_neighbors
     end
 
@@ -1724,13 +2335,14 @@ function find_neighbors(sys::System{3, AT},
         # Still validated so that the box is reported the same way as for a system that
         #   does have atoms
         gpu_cell_list_grid(widths, cutoff)
-        return GPUCellListNeighborList(
+        neighbors_empty = GPUCellListNeighborList(
             (store_ragged ? similar(sys.coords, Int32, 0) : nothing),
             (store_ragged ? similar(sys.coords, Int32, max_neighbors, 0) : nothing),
             0,
             (build_pairs ? similar(sys.coords, Tuple{Int32, Int32, Bool}, 0) : nothing),
             nothing,
         )
+        return record_neighbors!(sys, nf, neighbors_empty, current_neighbors, force_recompute)
     end
 
     state = reusable_gpu_cell_list_state(current_neighbors, n_atoms, T, build_pairs,
@@ -1748,9 +2360,10 @@ function find_neighbors(sys::System{3, AT},
 
     n_pairs = rebuild_gpu_cell_list!(state, pair_mode, nf, build_pairs)
 
-    return GPUCellListNeighborList((store_ragged ? state.neighbor_counts : nothing),
-                                   (store_ragged ? state.neighbors : nothing), n_pairs,
-                                   (build_pairs ? state.pair_list : nothing), state)
+    neighbors = GPUCellListNeighborList((store_ragged ? state.neighbor_counts : nothing),
+                                        (store_ragged ? state.neighbors : nothing), n_pairs,
+                                        (build_pairs ? state.pair_list : nothing), state)
+    return record_neighbors!(sys, nf, neighbors, current_neighbors, force_recompute)
 end
 
 #=
@@ -1805,15 +2418,16 @@ function Base.show(io::IO, neighbor_finder::GPUCellListNeighborFinder)
         println(io, "  n_excluded = ", n_excluded)
         println(io, "  n_special = ", n_true_pairs(neighbor_finder.special))
     end
-    println(io, "  n_steps = ", neighbor_finder.n_steps)
+    show_update_settings(io, neighbor_finder)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
 """
     DistanceNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
+                           auto_update=true, n_steps=10, array_type=nothing,
+                           strictness=:warn)
+    DistanceNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
                            n_steps=10, array_type=nothing, strictness=:warn)
-    DistanceNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
-                           array_type=nothing, strictness=:warn)
 
 Find close atoms by distance.
 
@@ -1822,8 +2436,14 @@ This is the recommended neighbor finder on non-NVIDIA GPUs when the box is too s
 grows with the square of the number of atoms.
 
 `dist_cutoff` is the neighbor search distance, which should be the interaction
-cutoff distance plus a buffer distance since the list is only updated every
-`n_steps` steps.
+cutoff distance plus a buffer distance since the list is reused until it is rebuilt.
+With `auto_update=true`, the default, the list is rebuilt when the atoms have moved far
+enough since the last rebuild that a pair within the cutoff of the interactions that use
+the list could be missing from it, and `n_steps` is ignored, see the
+[Neighbor finders](@ref) documentation.
+With `auto_update=false` the list is rebuilt every `n_steps` steps, so the buffer
+distance should be larger than the distance an atom can move in that time, or every
+step with `n_steps=1`.
 
 The pairs of atoms that can interact are described by `n_atoms`, the number of atoms,
 along with `excluded_pairs`, the pairs excluded from the pairwise interactions such as
@@ -1851,7 +2471,9 @@ struct DistanceNeighborFinder{B, D, S}
     eligible::B
     dist_cutoff::D
     special::S
+    auto_update::Bool
     n_steps::Int
+    tracker::DisplacementTracker
 end
 
 function DistanceNeighborFinder(;
@@ -1859,6 +2481,7 @@ function DistanceNeighborFinder(;
                                 dist_cutoff,
                                 excluded_pairs=(),
                                 special_pairs=(),
+                                auto_update::Bool=true,
                                 n_steps=10,
                                 array_type=nothing,
                                 eligible=nothing,
@@ -1868,8 +2491,11 @@ function DistanceNeighborFinder(;
                                     excluded_pairs, special_pairs, array_type, strictness)
     return DistanceNeighborFinder{typeof(eligible_used), typeof(dist_cutoff),
                                   typeof(special_used)}(
-                eligible_used, dist_cutoff, special_used, n_steps)
+                eligible_used, dist_cutoff, special_used, auto_update, n_steps,
+                DisplacementTracker())
 end
+
+tracks_displacements(nf::DistanceNeighborFinder) = nf.auto_update
 
 #=
 The neighbor search for `DistanceNeighborFinder` is done in two passes on both CPU and
@@ -2011,7 +2637,8 @@ function find_neighbors(sys::System{D},
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where D
-    if !force_recompute && !iszero(step_n % nf.n_steps)
+    if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
+                          n_threads=n_threads)
         return current_neighbors
     end
 
@@ -2061,7 +2688,8 @@ function find_neighbors(sys::System{D},
         end
     end
 
-    return NeighborList(n_neighbors, neighbors_list)
+    return record_neighbors!(sys, nf, NeighborList(n_neighbors, neighbors_list),
+                             current_neighbors, force_recompute)
 end
 
 function gpu_threads_dnf(n_inters)
@@ -2160,14 +2788,18 @@ function find_neighbors(sys::System{D, AT},
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
+                        n_threads::Integer=Threads.nthreads(),
                         kwargs...) where {D, AT <: AbstractGPUArray}
-    if !force_recompute && !iszero(step_n % nf.n_steps)
+    if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
+                          n_threads=n_threads)
         return current_neighbors
     end
 
     n_inters = n_atoms_to_n_pairs(length(sys))
     if iszero(n_inters)
-        return NeighborList(0, similar(sys.coords, Tuple{Int32, Int32, Bool}, 0))
+        return record_neighbors!(sys, nf,
+                    NeighborList(0, similar(sys.coords, Tuple{Int32, Int32, Bool}, 0)),
+                    current_neighbors, force_recompute)
     end
     n_threads_gpu = gpu_threads_dnf(n_inters)
     backend = get_backend(sys.coords)
@@ -2194,20 +2826,22 @@ function find_neighbors(sys::System{D, AT},
                      ndrange=n_masks)
     end
 
-    return NeighborList(n_neighbors, neighbors_list)
+    return record_neighbors!(sys, nf, NeighborList(n_neighbors, neighbors_list),
+                             current_neighbors, force_recompute)
 end
 
 """
     TreeNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
+                       auto_update=true, n_steps=10, strictness=:warn)
+    TreeNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
                        n_steps=10, strictness=:warn)
-    TreeNeighborFinder(; eligible, dist_cutoff, special=nothing, n_steps=10,
-                       strictness=:warn)
 
 Find close atoms by distance using a tree search.
 
 `dist_cutoff` is the neighbor search distance, which should be the interaction
-cutoff distance plus a buffer distance since the list is only updated every
-`n_steps` steps.
+cutoff distance plus a buffer distance since the list is reused until it is rebuilt.
+`auto_update` and `n_steps` determine when the list is rebuilt, as for
+[`DistanceNeighborFinder`](@ref).
 The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` and
 `special_pairs`, or by the `eligible` and `special` matrices, as for
 [`DistanceNeighborFinder`](@ref).
@@ -2220,8 +2854,12 @@ struct TreeNeighborFinder{D, B, S}
     eligible::B
     dist_cutoff::D
     special::S
+    auto_update::Bool
     n_steps::Int
+    tracker::DisplacementTracker
 end
+
+tracks_displacements(nf::TreeNeighborFinder) = nf.auto_update
 
 # The neighbor finders that run on the CPU store dense matrices as a BitMatrix
 cpu_neighbor_matrix(m::SparsePairMatrix) = from_device(m)
@@ -2232,6 +2870,7 @@ function TreeNeighborFinder(;
                             dist_cutoff,
                             excluded_pairs=(),
                             special_pairs=(),
+                            auto_update::Bool=true,
                             n_steps=10,
                             eligible=nothing,
                             special=nothing,
@@ -2239,7 +2878,8 @@ function TreeNeighborFinder(;
     eligible_used, special_used = neighbor_matrices(eligible, special, n_atoms,
                                     excluded_pairs, special_pairs, nothing, strictness)
     return TreeNeighborFinder(cpu_neighbor_matrix(eligible_used), dist_cutoff,
-                              cpu_neighbor_matrix(special_used), n_steps)
+                              cpu_neighbor_matrix(special_used), auto_update, n_steps,
+                              DisplacementTracker())
 end
 
 function find_neighbors(sys::System{<:Any, AT},
@@ -2248,7 +2888,8 @@ function find_neighbors(sys::System{<:Any, AT},
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where AT
-    if !force_recompute && !iszero(step_n % nf.n_steps)
+    if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
+                          n_threads=n_threads)
         return current_neighbors
     end
     if sys.boundary isa TriclinicBoundary
@@ -2279,23 +2920,26 @@ function find_neighbors(sys::System{<:Any, AT},
         append!(neighbors_list, nl)
     end
 
-    return NeighborList(length(neighbors_list), to_device(neighbors_list, AT))
+    return record_neighbors!(sys, nf, NeighborList(length(neighbors_list),
+                                                   to_device(neighbors_list, AT)),
+                             current_neighbors, force_recompute)
 end
 
 """
     CellListMapNeighborFinder(; n_atoms, dist_cutoff, boundary, excluded_pairs=(),
-                                special_pairs=(), n_steps=10, x0=nothing,
-                                number_of_batches=(0, 0), strictness=:warn)
+                                special_pairs=(), auto_update=true, n_steps=10,
+                                x0=nothing, number_of_batches=(0, 0), strictness=:warn)
     CellListMapNeighborFinder(; eligible, dist_cutoff, boundary, special=nothing,
-                                n_steps=10, x0=nothing, number_of_batches=(0, 0),
-                                strictness=:warn)
+                                auto_update=true, n_steps=10, x0=nothing,
+                                number_of_batches=(0, 0), strictness=:warn)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
 `dist_cutoff` is the neighbor search distance, which should be the interaction
-cutoff distance plus a buffer distance since the list is only updated every
-`n_steps` steps.
+cutoff distance plus a buffer distance since the list is reused until it is rebuilt.
+`auto_update` and `n_steps` determine when the list is rebuilt, as for
+[`DistanceNeighborFinder`](@ref).
 The pairs of atoms that can interact are given by `n_atoms`, `excluded_pairs` and
 `special_pairs`, or by the `eligible` and `special` matrices, as for
 [`DistanceNeighborFinder`](@ref).
@@ -2319,10 +2963,15 @@ mutable struct CellListMapNeighborFinder{N, T, S, B, SP}
     eligible::B
     dist_cutoff::T
     special::SP
+    auto_update::Bool
     n_steps::Int
-    # The CellListMap.ParticleSystem object
+    # The CellListMap.ParticleSystem object, which holds the neighbor list that is
+    #   returned and updated in place
     clm_particlesystem::S
+    tracker::DisplacementTracker
 end
+
+tracks_displacements(nf::CellListMapNeighborFinder) = nf.auto_update
 
 function clm_unitcell_arg(b::Union{CubicBoundary, RectangularBoundary}) 
     uc = b.side_lengths
@@ -2351,6 +3000,7 @@ function CellListMapNeighborFinder(;
                                    boundary::AbstractBoundary,
                                    excluded_pairs=(),
                                    special_pairs=(),
+                                   auto_update::Bool=true,
                                    n_steps=10,
                                    x0=nothing,
                                    number_of_batches=(0, 0),
@@ -2375,7 +3025,8 @@ function CellListMapNeighborFinder(;
 
     return CellListMapNeighborFinder{D, T, typeof(clm_system), typeof(eligible_cpu),
                                      typeof(special_cpu)}(
-                eligible_cpu, dist_cutoff, special_cpu, n_steps, clm_system)
+                eligible_cpu, dist_cutoff, special_cpu, auto_update, n_steps, clm_system,
+                DisplacementTracker())
 end
 
 # Add a pair to the pair list
@@ -2474,7 +3125,8 @@ function find_neighbors(sys::System{D, AT},
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where {D, AT}
-    if !force_recompute && !iszero(step_n % nf.n_steps)
+    if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
+                          n_threads=n_threads)
         return current_neighbors
     end
 
@@ -2507,10 +3159,14 @@ function find_neighbors(sys::System{D, AT},
         )
     end
 
+    # The list on the CPU is the one held by the ParticleSystem, which is updated in place
     if AT <: AbstractGPUArray
-        return NeighborList(neighbors.n, to_device(neighbors.list, AT))
+        return record_neighbors!(sys, nf, NeighborList(neighbors.n,
+                                                       to_device(neighbors.list, AT)),
+                                 current_neighbors, force_recompute)
     else
-        return neighbors
+        return record_neighbors!(sys, nf, neighbors, current_neighbors, force_recompute;
+                                 builds_in_place=true)
     end
 end
 
@@ -2529,7 +3185,7 @@ function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder, DistanceNei
     println(io, "  n_atoms = " , n_atoms)
     println(io, "  n_excluded = " , n_excluded)
     println(io, "  n_special = " , n_true_pairs(neighbor_finder.special))
-    println(io, "  n_steps = " , neighbor_finder.n_steps)
+    show_update_settings(io, neighbor_finder)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
@@ -2551,42 +3207,43 @@ function convert_component(c::SystemConversion{<:Any, AT},
     else
         matrices = (eligible=from_device(nf.eligible), special=from_device(nf.special))
     end
+    # How often the list is rebuilt is kept, the record of the last list is not
+    update = (auto_update=nf.auto_update, n_steps=nf.n_steps)
     on_gpu = AT <: AbstractGPUArray
     gpu_nf_allowed = on_gpu && uses_gpu_neighbor_finder(AT) && !c.grad_safe
     if c.same_device
         if nf isa GPUNeighborFinder && gpu_nf_allowed
-            return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                     n_steps=nf.n_steps, array_type=AT)
+            return GPUNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
+                                     array_type=AT)
         elseif nf isa GPUCellListNeighborFinder && on_gpu
-            return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                             n_steps=nf.n_steps, array_type=AT,
+            return GPUCellListNeighborFinder(; matrices..., update...,
+                                             dist_cutoff=dist_cutoff, array_type=AT,
+                                             force_float32=nf.force_float32,
                                              max_neighbors=nf.max_neighbors,
                                              output=nf.output, ragged=nf.ragged)
         elseif nf isa TreeNeighborFinder && !on_gpu
-            return TreeNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                      n_steps=nf.n_steps)
+            return TreeNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff)
         elseif nf isa CellListMapNeighborFinder && !on_gpu
-            return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                             n_steps=nf.n_steps, x0=c.coords,
+            return CellListMapNeighborFinder(; matrices..., update...,
+                                             dist_cutoff=dist_cutoff, x0=c.coords,
                                              boundary=c.boundary)
         elseif nf isa DistanceNeighborFinder
-            return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                          n_steps=nf.n_steps, array_type=AT)
+            return DistanceNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
+                                          array_type=AT)
         end
     end
     # The choice made by system setup
     if gpu_nf_allowed
-        return GPUNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+        return GPUNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
                                  array_type=AT)
     elseif on_gpu && gpu_cell_list_suitable(c.boundary, dist_cutoff)
-        return GPUCellListNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                         n_steps=nf.n_steps, array_type=AT, ragged=false)
+        return GPUCellListNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
+                                         array_type=AT, ragged=false)
     elseif !on_gpu && !has_infinite_boundary(c.boundary) &&
                 minimum(box_sides(c.boundary)) >= 2 * dist_cutoff
-        return CellListMapNeighborFinder(; matrices..., dist_cutoff=dist_cutoff,
-                                         n_steps=nf.n_steps, x0=c.coords,
-                                         boundary=c.boundary)
+        return CellListMapNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
+                                         x0=c.coords, boundary=c.boundary)
     end
-    return DistanceNeighborFinder(; matrices..., dist_cutoff=dist_cutoff, n_steps=nf.n_steps,
+    return DistanceNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
                                   array_type=AT)
 end

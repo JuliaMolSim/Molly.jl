@@ -1070,8 +1070,11 @@ end
                     for i in 1:n_atoms
                 ], AT)
 
+                # The lists are reused on the schedule of n_steps, which some of the tests
+                #   rely on
                 finder = GPUCellListNeighborFinder(
                     dist_cutoff=cutoff,
+                    auto_update=false,
                     n_steps=10,
                     max_neighbors=max_neighbors,
                     output=output,

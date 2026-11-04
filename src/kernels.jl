@@ -171,6 +171,23 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
     return buffers
 end
 
+#=
+Launch the pairwise forces of the interactions that use the neighbor list, possibly
+leaving work to `finish_pairwise_forces_gpu!`, which `gpu_forces!` calls once the specific
+forces are launched. Together they add the forces to `buffers.fs_mat` as
+`pairwise_forces_loop_gpu!` does. The CUDA tiled path uses this to wait for the check of
+its tile list as late as possible, so that the host launches the specific forces rather
+than waiting for the device to catch up.
+=#
+function start_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                                    step_n)
+    return pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                                     step_n)
+end
+
+finish_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                            step_n) = buffers
+
 @kernel inbounds=true function pairwise_force_kernel_nl!(fs_mat, vir, @Const(coords),
                                            @Const(velocities), @Const(atoms),
                                            boundary, inters, @Const(neighbors), step_n,
