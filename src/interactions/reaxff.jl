@@ -497,11 +497,10 @@ cutoff. It accepts lengths with units; unitless values are interpreted as
 nanometers, regardless of `units`. Without a skin, the default, the neighbor list is
 rebuilt every step. With a positive skin and `neighbor_auto_update=true`, the list is
 rebuilt only when the atoms have moved far enough since the last rebuild that a pair
-within the ReaxFF cutoffs could be missing from it, see the [Neighbor finders](@ref)
-documentation. With `neighbor_auto_update=false`, `neighbor_refresh_n_steps`
-sets the scheduled neighbor finder rebuild interval and must be at least one. An interval
-greater than one requires a positive skin distance. Select a skin large enough to cover
-atomic motion between rebuilds.
+within the ReaxFF cutoffs could be missing from it. With `neighbor_auto_update=false`,
+`neighbor_refresh_n_steps` sets the scheduled neighbor finder rebuild interval and must
+be at least one. An interval greater than one requires a positive skin distance. Select
+a skin large enough to cover atomic motion between rebuilds.
 
 `array_type` must match that specified in the ReaxFF instance. The boundary is read from the file
 unless `boundary` is supplied, and velocities default to zero. Supplied boundaries

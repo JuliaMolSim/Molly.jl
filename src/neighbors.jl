@@ -32,7 +32,7 @@ argument, which is `true` by default.
 
 Neighbor finders with `auto_update=true` read the cutoff of the pairwise interactions
 for which this is `true`, from their `cutoff` or `dist_cutoff` property, to decide when
-to rebuild the neighbor list, see the [Neighbor finders](@ref) documentation.
+to rebuild the neighbor list.
 """
 use_neighbors(inter) = true
 
@@ -243,8 +243,7 @@ neighbor finder is used.
 built otherwise or when `force_recompute` is `true`.
 For the built-in neighbor finders with `auto_update=true`, the default, the list is
 valid until the atoms have moved far enough since it was built that a pair within the
-cutoff of the interactions that use it could be missing, see the
-[Neighbor finders](@ref) documentation.
+cutoff of the interactions that use it could be missing.
 With `auto_update=false` the list is rebuilt when `step_n` is a multiple of the
 `n_steps` of the neighbor finder.
 
@@ -327,7 +326,6 @@ end
 
 DisplacementTracker() = DisplacementTracker(nothing, nothing, nothing, 0, 0, nothing)
 
-# Compared by value so that copies of a neighbor finder compare equal
 function Base.:(==)(t1::DisplacementTracker, t2::DisplacementTracker)
     return t1.coords == t2.coords && t1.boundary == t2.boundary &&
            t1.neighbors == t2.neighbors && t1.n_builds == t2.n_builds &&
@@ -867,7 +865,7 @@ The exceptions are stored in the `eligible` and `special` fields as
 - `auto_update=true`: whether to refresh the tile list only when the atoms have moved
   far enough since the last refresh that a pair within the cutoff of the pairwise
   interactions could be missing, in which case `n_steps` is ignored. The Morton order
-  is recomputed at the same time. See the [Neighbor finders](@ref) documentation.
+  is recomputed at the same time.
 - `n_steps=10`: with `auto_update=false`, the number of steps between Morton reorder
   and tile-list refresh passes. A forced rebuild, for example after a barostat changes
   the coordinates, refreshes the tile list without changing the Morton order. The
@@ -1064,7 +1062,7 @@ distance is smaller than the length of the corresponding basis vector.
 distance plus a buffer distance since the list is reused until it is rebuilt.
 With `auto_update=true`, the default, the list is rebuilt when the atoms have moved far
 enough since the last rebuild that a pair within the cutoff of the interactions could be
-missing, and `n_steps` is ignored, see the [Neighbor finders](@ref) documentation.
+missing, and `n_steps` is ignored.
 With `auto_update=false` the list is rebuilt every `n_steps` steps, so the buffer
 distance should be larger than the distance an atom can move in that time.
 
@@ -2439,8 +2437,7 @@ grows with the square of the number of atoms.
 cutoff distance plus a buffer distance since the list is reused until it is rebuilt.
 With `auto_update=true`, the default, the list is rebuilt when the atoms have moved far
 enough since the last rebuild that a pair within the cutoff of the interactions that use
-the list could be missing from it, and `n_steps` is ignored, see the
-[Neighbor finders](@ref) documentation.
+the list could be missing from it, and `n_steps` is ignored.
 With `auto_update=false` the list is rebuilt every `n_steps` steps, so the buffer
 distance should be larger than the distance an atom can move in that time, or every
 step with `n_steps=1`.

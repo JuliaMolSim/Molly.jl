@@ -2194,10 +2194,8 @@ The matrix can be left out with `ragged=false` when only the pairs are needed, a
 
 The built-in neighbor finders have three ways of deciding when to rebuild the neighbor list:
 - `auto_update=true`, the default: the list is rebuilt only when the atoms have moved far enough since it was built that a pair within the interaction cutoff could be missing from it, so no interacting pairs are missed whatever the buffer distance. `n_steps` is ignored.
-- `auto_update=false` with `n_steps` greater than one: the list is rebuilt every `n_steps` steps. This was the behavior of earlier versions. Interacting pairs are missed if an atom moves further than about half the buffer distance in that time, which nothing checks.
 - `auto_update=false` with `n_steps=1`: the list is rebuilt every step without tracking how far the atoms have moved, which is suitable when there is no buffer, as for ReaxFF by default.
-
-`System` setup from a file takes `neighbor_finder_auto_update` and `neighbor_finder_n_steps` keyword arguments for these.
+- `auto_update=false` with `n_steps` greater than one: the list is rebuilt every `n_steps` steps. Interacting pairs are missed if an atom moves further than about half the buffer distance in that time, which nothing checks, so the buffer distance must be chosen carefully.
 
 With `auto_update=true`, the neighbor finder stores the coordinates that the list was built from.
 Each time it is called, the two largest displacements `d₁` and `d₂` of the atoms since then are found, and the list is rebuilt if `d₁ + d₂` is larger than the buffer distance `dist_cutoff - r_c`, where `r_c` is the largest cutoff of the interactions that use the list.
@@ -2208,18 +2206,9 @@ The interaction cutoff `r_c` is read from the `cutoff` or `dist_cutoff` property
 If one of these interactions has no cutoff or its cutoff is not known, or if the buffer distance is zero, the list is rebuilt every time without tracking the displacements.
 Custom general interactions that read the pairs of the neighbor list should define [`Molly.neighbor_cutoff`](@ref).
 
-The simulators find the neighbors after the coordinates change and before anything else uses them, so that every force calculation sees a valid list.
-This includes the trial moves of [`MonteCarloBarostat`](@ref) and [`MetropolisMonteCarlo`](@ref), the line search of [`LBFGSMinimizer`](@ref) and the inner steps of the multiple time step integrators.
-Custom simulators should do the same.
-[`GPUNeighborFinder`](@ref) makes the check in the force and energy kernels each time they run.
-
-The check takes much less time than a force calculation, but on the GPU it means waiting for the device once per step.
-[`GPUNeighborFinder`](@ref) waits once the force kernels have been launched, so that the device is kept busy.
-For a solvated protein of 16,000 atoms with a 1 nm cutoff, a step took about 1-2% longer with the default `dist_buffer` of 0.2 nm than with the list rebuilt every 10 steps.
-
-Since no interacting pairs are missed whatever the buffer distance, it can be chosen for speed alone: a larger buffer means fewer rebuilds but more pairs in the list.
+Since no interacting pairs are missed with `auto_update=true` whatever the buffer distance, it can be chosen for speed alone: a larger buffer means fewer rebuilds but more pairs in the list.
 [`Molly.neighbor_update_counts`](@ref) gives the number of times a neighbor finder has built a list and checked the displacements, which helps to choose it.
-For that protein with a 4 fs time step, the fastest buffer distances were about 0.4 nm for [`GPUNeighborFinder`](@ref), which is not slowed down much by more pairs, 0.075-0.1 nm for [`GPUCellListNeighborFinder`](@ref), which is, and 0.125-0.2 nm for [`CellListMapNeighborFinder`](@ref) on the CPU.
+[`GPUNeighborFinder`](@ref) makes the check in the force and energy kernels each time they run.
 
 ## Analysis
 

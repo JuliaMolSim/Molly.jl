@@ -529,8 +529,7 @@ Each residue is matched to a residue template of the force field, and a
 - `neighbor_finder_auto_update=true`: whether the neighbor finder rebuilds the
     neighbor list only when the atoms have moved far enough since the last rebuild
     that a pair within `dist_cutoff` could be missing from it, given the buffer
-    distance `dist_buffer`. If `true`, `neighbor_finder_n_steps` is ignored, see the
-    [Neighbor finders](@ref) documentation.
+    distance `dist_buffer`. If `true`, `neighbor_finder_n_steps` is ignored.
 - `neighbor_finder_n_steps=10`: with `neighbor_finder_auto_update=false`, the
     number of steps between neighbor finder updates. Can be tuned along with
     `dist_buffer` to ensure that particles do not cross the buffer distance during
@@ -1681,11 +1680,11 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
                 AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
         neighbor_finder = GPUCellListNeighborFinder(
+            dist_cutoff=T(dist_neighbors),
             eligible=eligible,
             special=special,
             auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
             array_type=AT,
             ragged=false,
             strictness=strictness,
@@ -1693,11 +1692,11 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
         neighbor_finder = DistanceNeighborFinder(
+            dist_cutoff=T(dist_neighbors),
             eligible=eligible,
             special=special,
             auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
             array_type=AT,
             strictness=strictness,
         )
@@ -1712,9 +1711,9 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                     "neighbor_finder_type=DistanceNeighborFinder."))
         end
         neighbor_finder = CellListMapNeighborFinder(
-            eligible=eligible,
             dist_cutoff=T(dist_neighbors),
             boundary=boundary,
+            eligible=eligible,
             special=special,
             auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
@@ -1722,17 +1721,12 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             strictness=strictness,
         )
     else
-        # Custom neighbor finders may not take auto_update
-        builtin_nf = (neighbor_finder_type isa Type && neighbor_finder_type <: Union{
-                            DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder,
-                            GPUNeighborFinder, GPUCellListNeighborFinder})
-        update_kwargs = (builtin_nf ? (auto_update=neighbor_finder_auto_update,) : (;))
         neighbor_finder = neighbor_finder_type(;
+            dist_cutoff=T(dist_neighbors),
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
-            update_kwargs...,
         )
     end
 

@@ -246,7 +246,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
         return DistanceNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special   = special,
+            special = special,
             auto_update = false,
             n_steps = 1,
             strictness = :nowarn,
