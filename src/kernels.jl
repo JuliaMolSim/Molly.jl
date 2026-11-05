@@ -117,9 +117,65 @@ function gpu_threads_env(name, default)
     return haskey(ENV, name) ? parse(Int, ENV[name]) : default
 end
 
+#=
+Launch a KernelAbstractions kernel, as `kernel!(args...; ndrange=ndrange)` does.
+The CUDA extension has a faster method for kernels with a static workgroup size, which
+keeps the compiled kernel rather than looking it up at every launch. The kernels of a
+simulation step are small enough that the host time to launch them is often what limits
+the speed, so this is used for the kernels that run every step.
+=#
+@inline launch_kernel!(kernel!, args...; ndrange) = kernel!(args...; ndrange=ndrange)
+
+#=
+Work launched with `run_side_work!` can run on the device at the same time as the work
+launched after it, which the CUDA extension does with a second stream. `forces!` uses this
+to calculate the specific and general interactions during the pairwise force kernel, as
+they launch kernels too small to fill the device.
+`side_work_start(backend)` returns a handle, `run_side_work!(f, side, shared)` launches the
+work of `f()` to start once the work launched before `side_work_start` is done, and
+`side_work_finish!(side)` makes the work launched after it wait for the side work.
+`shared` are the arrays that both the side work and the work launched between
+`side_work_start` and `side_work_finish!` use, which they may only both write to with
+atomic operations. Without a method for the backend the side work is run in order.
+=#
+side_work_start(backend) = nothing
+
+function run_side_work!(f, side, shared)
+    f()
+    return side
+end
+
+side_work_finish!(side) = side
+
+const default_threads_specific = 32
+const default_threads_copy = 256
+
 gpu_threads_pairwise(n_neighbors) = gpu_threads_env("MOLLY_GPUNTHREADS_PAIRWISE", 512)
-gpu_threads_specific(n_inters) = gpu_threads_env("MOLLY_GPUNTHREADS_SPECIFIC", 32)
-gpu_threads_copy(n_items) = gpu_threads_env("MOLLY_GPUNTHREADS_COPY", 256)
+gpu_threads_specific(n_inters) = gpu_threads_env("MOLLY_GPUNTHREADS_SPECIFIC",
+                                                 default_threads_specific)
+gpu_threads_copy(n_items) = gpu_threads_env("MOLLY_GPUNTHREADS_COPY", default_threads_copy)
+
+#=
+KernelAbstractions makes the workgroup size part of the type of a kernel, so a size only
+known at run time, such as one that can be set with an environment variable, makes the
+launch a dynamic dispatch that takes microseconds on the host. The kernel is made with the
+size as a constant when it is the default.
+=#
+@inline function ka_kernel(kernel_fn::F, backend, n_threads::Integer,
+                           ::Val{default}) where {F, default}
+    return (n_threads == default ? kernel_fn(backend, default) :
+                                   kernel_fn(backend, n_threads))
+end
+
+# Set GPU forces to zero with a memory set, which `fill!` does not use for arrays of
+#   static vectors
+function zero_forces_gpu!(fs::AbstractArray{SVector{D, F}}) where {D, F}
+    T = typeof(ustrip(zero(F)))
+    fill!(reinterpret(T, fs), zero(T))
+    return fs
+end
+
+zero_forces_gpu!(fs) = fill!(fs, zero(eltype(fs)))
 
 @inline apply_force_units_gpu(f, ::Val{force_units}) where {force_units} = f .* force_units
 @inline apply_force_units_gpu(f, ::Val{NoUnits}) = f
@@ -129,9 +185,10 @@ function apply_force_units_gpu!(fs::AbstractGPUArray, fs_mat, force_units,
                                 ::Val{accumulate}=Val(false)) where {D, T, accumulate}
     backend = get_backend(fs)
     n_threads_gpu = gpu_threads_copy(length(fs))
-    kernel! = apply_force_units_kernel!(backend, n_threads_gpu)
-    kernel!(fs, fs_mat, Val(force_units), Val(D), Val(T), Val(accumulate);
-            ndrange=length(fs))
+    kernel! = ka_kernel(apply_force_units_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_copy))
+    launch_kernel!(kernel!, fs, fs_mat, Val(force_units), Val(D), Val(T), Val(accumulate);
+                   ndrange=length(fs))
     return fs
 end
 
@@ -217,14 +274,31 @@ finish_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
     end
 end
 
+#=
+The forces of a tuple of interaction lists, with a kernel for each list. A single kernel
+for every list was tried, which saves launches, but took longer on the device than the
+kernels for the lists together, as each thread then needs the registers and instruction
+cache of every type of interaction.
+=#
+function specific_forces_gpu!(fs_mat, vir, inter_lists::Tuple, coords, velocities, atoms,
+                              boundary, needs_vir, step_n, force_units, float_type)
+    for inter_list in inter_lists
+        specific_forces_gpu!(fs_mat, vir, inter_list, coords, velocities, atoms, boundary,
+                             needs_vir, step_n, force_units, float_type)
+    end
+    return fs_mat
+end
+
 function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList1Atoms,
                               coords::AbstractArray{SVector{D, C}}, velocities, atoms, boundary,
                               ::Val{needs_vir}, step_n, force_units,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_1_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.inters, inter_list.data, Val(needs_vir), Val(D), Val(force_units);
             ndrange=length(inter_list))
     return fs_mat
@@ -236,8 +310,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList2Atoms,
                               ::Val{T}) where {D, C, T, needs_vir}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_2_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.inters, inter_list.data, Val(needs_vir), Val(D),
             Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -249,8 +325,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList3Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_3_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.inters, inter_list.data, Val(needs_vir),
             Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -262,8 +340,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList4Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_4_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, inter_list.data,
             Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -275,8 +355,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList5Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_5_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_5_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.ms, inter_list.inters,
             inter_list.data, Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -451,6 +533,20 @@ end
             end
         end
     end
+end
+
+#=
+Whether a kernel may be compiled with fast math for arguments `args`, which back-ends that
+support it can read when launching it. As with the CUDA pairwise force kernel, and OpenMM,
+the specific force kernels are compiled with approximate division, square roots and
+reciprocal square roots in Float32, which changes the forces by about the rounding error of
+Float32.
+=#
+kernel_fastmath(kernel_fn, args) = false
+
+for n in 1:5
+    kernel_fn = Symbol("gpu_specific_force_", n, "_atoms_kernel!")
+    @eval kernel_fastmath(::typeof($kernel_fn), args::Tuple) = (eltype(first(args)) == Float32)
 end
 
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
@@ -889,5 +985,71 @@ end
     @inbounds if i<= length(vels)
         noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
+    end
+end
+
+# `vels .+= calc_accels.(forces, masses) .* dt` as a kernel, which is launched faster, see
+#   `launch_kernel!`
+function velocity_force_step!(vels, forces, masses, dt)
+    backend = get_backend(vels)
+    kernel! = velocity_force_step_kernel!(backend, 256)
+    launch_kernel!(kernel!, vels, forces, masses, dt; ndrange=length(vels))
+    return vels
+end
+
+@kernel inbounds=true function velocity_force_step_kernel!(vels, @Const(forces), @Const(masses),
+                                                           dt)
+    i = @index(Global, Linear)
+    if i <= length(vels)
+        vels[i] = vels[i] + calc_accels(forces[i], masses[i]) * dt
+    end
+end
+
+#=
+The A, O and A steps of the Langevin integrator in one pass over the atoms on the GPU,
+doing what the coordinate updates and `langevin_o_step!` do between the velocity and
+position constraints. With `store` the coordinates before the step are stored in
+`coord_storage` and minus the coordinates after the step divided by `dt` in `vel_storage`,
+for `apply_position_constraints_wrap!`. Without `store` the coordinates are wrapped into
+the box, as there are no constraints to apply first.
+Each step of the host launching work costs about as much as a small kernel takes to run,
+so this is one launch rather than five.
+=#
+function langevin_aoa_step!(coords, vels, coord_storage, vel_storage, vel_scales,
+                            noise_scales, dt_div2, dt, philox_ctr1::UInt64,
+                            philox_key::UInt64, boundary, ::Type{FT},
+                            ::Val{store}) where {FT, store}
+    backend = get_backend(vels)
+    kernel! = langevin_aoa_kernel!(backend, 256)
+    launch_kernel!(kernel!, coords, vels, coord_storage, vel_storage, vel_scales,
+                   noise_scales, dt_div2, dt, philox_ctr1, philox_key, boundary, Val(FT),
+                   Val(store); ndrange=length(vels))
+    return vels
+end
+
+@kernel inbounds=true function langevin_aoa_kernel!(coords,
+                    vels::AbstractVector{SVector{D, C}}, coord_storage, vel_storage,
+                    @Const(vel_scales), @Const(noise_scales), dt_div2, dt,
+                    philox_ctr1::UInt64, philox_key::UInt64, boundary, ::Val{FT},
+                    ::Val{store}) where {D, C, FT, store}
+    i = @index(Global, Linear)
+    natoms = length(vels) % UInt64
+    if i <= length(vels)
+        x = coords[i]
+        if store
+            coord_storage[i] = x
+        end
+        v = vels[i]
+        x = muladd(dt_div2, v, x)
+        noise = randn_svec(SVector{D, FT}, i % UInt64, philox_ctr1, philox_key, natoms)
+        v = muladd(vel_scales[i], v, noise * noise_scales[i])
+        vels[i] = v
+        x = muladd(dt_div2, v, x)
+        if store
+            coords[i] = x
+            vel_storage[i] = -x / dt
+        else
+            coords[i] = wrap_coords(x, boundary)
+        end
     end
 end

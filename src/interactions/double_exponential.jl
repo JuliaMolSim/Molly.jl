@@ -102,14 +102,16 @@ const two_power_sixth = 2 ^ (1 / 6)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return zero_pairwise_force(dr, force_units)
     end
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     σ = σ_mixing(inter.σ_mixing, atom_i, atom_j)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
     rm = σ * T(two_power_sixth)
     α, β = inter.α, inter.β
     params = (α, β, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -119,7 +121,7 @@ end
 
 @inline function pairwise_force(::DoubleExponential, r, (α, β, rm, ϵ))
     x = 1 - r / rm
-    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
+    return ϵ * α * β * (fast_exp(α * x) - fast_exp(β * x)) / (rm * (α - β))
 end
 
 @inline function potential_energy(
@@ -151,7 +153,7 @@ end
 
 @inline function pairwise_pe(::DoubleExponential, r, (α, β, rm, ϵ))
     x = 1 - r / rm
-    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
+    return ϵ * (β * fast_exp(α * x) - α * fast_exp(β * x)) / (α - β)
 end
 
 @doc raw"""
@@ -301,10 +303,12 @@ end
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return zero_pairwise_force(dr, force_units)
     end
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
+    inv_r = inv(r)
 
     rm = σ * T(two_power_sixth)
     # Following  https://doi.org/10.1039/d3dd00070b
@@ -313,7 +317,7 @@ end
     β_s = T(1 + λ_soft * (inter.β - 1))
     params = (α_s, β_s, rm, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = (λ * f / r) * dr
+    fdr = (λ * f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -323,7 +327,7 @@ end
 
 @inline function pairwise_force(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
     x = 1 - r / rm
-    return ϵ * α * β * (exp(α * x) - exp(β * x)) / (rm * (α - β))
+    return ϵ * α * β * (fast_exp(α * x) - fast_exp(β * x)) / (rm * (α - β))
 end
 
 @inline function potential_energy(
@@ -360,7 +364,7 @@ end
 
 @inline function pairwise_pe(::DoubleExponentialSoftCore, r, (α, β, rm, ϵ))
     x = 1 - r / rm
-    return ϵ * (β * exp(α * x) - α * exp(β * x)) / (α - β)
+    return ϵ * (β * fast_exp(α * x) - α * fast_exp(β * x)) / (α - β)
 end
 
 @doc raw"""

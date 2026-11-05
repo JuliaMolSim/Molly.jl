@@ -761,7 +761,8 @@ function grid_placement_gpu!(grid_indices, grid_fractions, coords, recip_box, me
     backend = get_backend(parent(grid_indices))
     n_threads_gpu = 128
     kernel! = grid_placement_kernel!(backend, n_threads_gpu)
-    kernel!(grid_indices, grid_fractions, coords, recip_box, mesh_dims; ndrange=length(coords))
+    launch_kernel!(kernel!, grid_indices, grid_fractions, coords, recip_box, mesh_dims;
+                   ndrange=length(coords))
     return nothing
 end
 
@@ -834,7 +835,7 @@ function update_bsplines_gpu!(bsplines_θ, bsplines_dθ, grid_fractions, order)
     backend = get_backend(parent(bsplines_θ))
     n_threads_gpu = 128
     kernel! = update_bsplines_kernel!(backend, n_threads_gpu)
-    kernel!(bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=n_atoms)
+    launch_kernel!(kernel!, bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=n_atoms)
     return nothing
 end
 
@@ -971,19 +972,128 @@ function spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, o
     backend = get_backend(charge_grid)
     n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
-    charge_grid .= zero(T)
-    kernel!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms, scheduler, Val(T);
-            ndrange=length(atoms)*order)
+    fill!(charge_grid, zero(T))
+    launch_kernel!(kernel!, charge_grid, grid_indices, bsplines_θ, mesh_dims, Val(order),
+                   atoms, scheduler, Val(T); ndrange=length(atoms)*order)
+    return nothing
+end
+
+# The atom and slice of a thread of the spreading and interpolation kernels, which have
+#   `order` threads for each atom, found with a 32-bit division by a constant
+@inline function pme_thread_atom_slice(ti, ::Val{order}) where order
+    t = (ti - 1) % Int32
+    i = t ÷ Int32(order)
+    return Int(i) + 1, Int(t - i * Int32(order))
+end
+
+# The grid placement and B-spline coefficients are calculated by one kernel on the GPU,
+#   rather than by a kernel each, unless the calculation has to be differentiable with
+#   Enzyme, which has rules for the separate kernels
+fuse_pme_spread(inter, coords) = is_on_gpu(coords) && !inter.grad_safe
+
+#=
+The grid point below an atom along each dimension and the fraction of the way to the next
+one, as `grid_placement_inner!` stores them. The fraction is converted to the float type
+`T` of the arrays it would be stored in, so that the values are the same.
+=#
+@inline function grid_placement_atom(c, recip_box, mesh_dims, ::Type{T}) where T
+    return ntuple(Val(3)) do d
+        t = sum(c .* SVector(recip_box[1][d], recip_box[2][d], recip_box[3][d]))
+        t = (t - floor(t)) * mesh_dims[d]
+        ti = floor(Int, t)
+        (convert(T, t - ti), wrap_grid_index(ti, mesh_dims[d]))
+    end
+end
+
+#=
+The B-spline coefficients and their derivatives for one dimension, the same values that
+`update_bsplines_inner!` stores, calculated in registers.
+=#
+@inline function bspline_coefficients(dr::T, ::Val{order}) where {T, order}
+    θ = MVector{order, T}(undef)
+    dθ = MVector{order, T}(undef)
+    @inbounds begin
+        θ[order] = zero(T)
+        θ[2] = dr
+        θ[1] = 1 - dr
+        for k in 3:(order-1)
+            d = inv(k - one(T))
+            θ[k] = d * dr * θ[k - 1]
+            for l in 1:(k-2)
+                θ[k - l] = d * ((dr + l) * θ[k - l - 1] + (k - l - dr) * θ[k - l])
+            end
+            θ[1] *= d * (1 - dr)
+        end
+        dθ[1] = -θ[1]
+        for k in 1:(order-1)
+            dθ[k + 1] = θ[k] - θ[k + 1]
+        end
+        d = inv(order - one(T))
+        θ[order] = d * dr * θ[order - 1]
+        for l in 1:(order-2)
+            θ[order - l] = d * ((dr + l) * θ[order - l - 1] + (order - l - dr) * θ[order - l])
+        end
+        θ[1] *= d * (1 - dr)
+    end
+    return SVector(θ), SVector(dθ)
+end
+
+#=
+`grid_placement!` and `update_bsplines!` in one kernel on the GPU, with the same results,
+one thread per atom with the B-spline recursion in registers. The charge is then spread
+by `spread_charge_gpu!`. Spreading in the same kernel, with each of the threads of an atom
+calculating its coefficients, took longer than the two kernels.
+=#
+function place_bsplines_gpu!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, coords,
+                             recip_box, mesh_dims, order)
+    backend = get_backend(parent(grid_indices))
+    kernel! = place_bsplines_kernel!(backend, 128)
+    launch_kernel!(kernel!, grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, coords,
+                   recip_box, mesh_dims, Val(order); ndrange=length(coords))
+    return nothing
+end
+
+@kernel inbounds=true function place_bsplines_kernel!(grid_indices, grid_fractions,
+                        bsplines_θ, bsplines_dθ, @Const(coords), recip_box, mesh_dims,
+                        ::Val{order}) where order
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        TF = eltype(grid_fractions)
+        placement = grid_placement_atom(coords[i], recip_box, mesh_dims, TF)
+        # Each dimension separately rather than in a loop over the tuple, which would be
+        #   kept in local memory to index it
+        place_bsplines_dim!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
+                            placement[1], i, 1, Val(order))
+        place_bsplines_dim!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
+                            placement[2], i, 2, Val(order))
+        place_bsplines_dim!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
+                            placement[3], i, 3, Val(order))
+    end
+end
+
+@inline function place_bsplines_dim!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
+                                     (f, g), i, d, ::Val{order}) where order
+    @inbounds begin
+        grid_indices[d, i] = g
+        grid_fractions[d, i] = f
+        θ, dθ = bspline_coefficients(f, Val(order))
+        o = (d - 1) * order
+        for k in 1:order
+            bsplines_θ[o + k, i] = θ[k]
+            bsplines_dθ[o + k, i] = dθ[k]
+        end
+    end
     return nothing
 end
 
 @kernel function spread_charge_kernel!(charge_grid_real, @Const(grid_indices), @Const(bsplines_θ),
-                                       mesh_dims, order, atoms, scheduler, ::Val{T}) where T
+                                       mesh_dims, ::Val{order}, atoms, scheduler,
+                                       ::Val{T}) where {order, T}
     ti = @index(Global, Linear)
     if ti <= length(atoms)*order
-        i, iz1 = fldmod1(ti, order)
+        i, iz = pme_thread_atom_slice(ti, Val(order))
         spread_charge_slice!(charge_grid_real, grid_indices, bsplines_θ, mesh_dims, order, atoms,
-                             scheduler, i, iz1-1, Val(T))
+                             scheduler, i, iz, Val(T))
     end
 end
 
@@ -1128,9 +1238,9 @@ function recip_conv_gpu!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z,
     backend = get_backend(recip_grid)
     n_threads_gpu = 256
     kernel! = recip_conv_kernel!(backend, n_threads_gpu)
-    kernel!(buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
-            energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir), Val(needs_pe);
-            ndrange=length(recip_grid))
+    launch_kernel!(kernel!, buffer_virial, buffer, recip_grid, bsm_x, bsm_y, bsm_z,
+                   recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                   Val(needs_vir), Val(needs_pe); ndrange=length(recip_grid))
     return nothing
 end
 
@@ -1267,21 +1377,22 @@ function interpolate_force_gpu!(Fs, charge_grid, grid_indices, bsplines_θ, bspl
     n_threads_gpu = 128
     Fs_flat = reinterpret(T, Fs)
     kernel! = interpolate_force_kernel!(backend, n_threads_gpu)
-    kernel!(Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box,
-            mesh_dims, order, unit_scale, atoms, scheduler, Val(T);
-            ndrange=length(atoms)*order)
+    launch_kernel!(kernel!, Fs_flat, charge_grid, grid_indices, bsplines_θ, bsplines_dθ,
+                   recip_box, mesh_dims, Val(order), unit_scale, atoms, scheduler, Val(T);
+                   ndrange=length(atoms)*order)
     return nothing
 end
 
 @kernel function interpolate_force_kernel!(Fs_flat, @Const(charge_grid), @Const(grid_indices),
-                        @Const(bsplines_θ), @Const(bsplines_dθ), recip_box, mesh_dims, order,
-                        unit_scale, @Const(atoms), scheduler, ::Val{T}) where T
+                        @Const(bsplines_θ), @Const(bsplines_dθ), recip_box, mesh_dims,
+                        ::Val{order}, unit_scale, @Const(atoms), scheduler,
+                        ::Val{T}) where {order, T}
     ti = @index(Global, Linear)
     if ti <= length(atoms)*order
-        i, iz1 = fldmod1(ti, order)
+        i, iz = pme_thread_atom_slice(ti, Val(order))
         interpolate_force_slice!(Fs_flat, charge_grid, grid_indices, bsplines_θ,
                     bsplines_dθ, recip_box, mesh_dims, order, unit_scale, atoms, scheduler,
-                    Val(T), i, iz1-1)
+                    Val(T), i, iz)
     end
 end
 
@@ -1306,11 +1417,18 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     recip_box = invert_box_vectors(boundary)
     grid_indices, grid_fractions = atom_last(inter.grid_indices), atom_last(inter.grid_fractions)
     bsplines_θ, bsplines_dθ = atom_last(inter.bsplines_θ), atom_last(inter.bsplines_dθ)
-    grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_thr)
-    update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order, n_thr)
-    spread_charge!(inter.charge_grid, inter.charge_grid_buffer, grid_indices,
-                   bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
-                   n_spread_threads(n_thr))
+    if fuse_pme_spread(inter, coords)
+        place_bsplines_gpu!(grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, coords,
+                            recip_box, mesh_dims, order)
+        spread_charge_gpu!(inter.charge_grid, grid_indices, bsplines_θ, mesh_dims, order,
+                           atoms, inter.scheduler, Val(T))
+    else
+        grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims, n_thr)
+        update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order, n_thr)
+        spread_charge!(inter.charge_grid, inter.charge_grid_buffer, grid_indices,
+                       bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
+                       n_spread_threads(n_thr))
+    end
     grad_safe_fft!(inter.charge_grid, inter.recip_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.recip_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
@@ -1507,15 +1625,17 @@ to_device(x::EwaldExclusionData, ::Type{AT}) where AT = x
                        force_units, velocities_i, velocities_j, step_n,
                        data::EwaldExclusionData{T}) where T
     vec_ij = vector(coord_i, coord_j, boundary)
-    r = sqrt(sum(abs2, vec_ij))
+    r2 = sum(abs2, vec_ij)
     scheduler, α, f_div_ϵr = data.scheduler, data.α, data.f_div_ϵr
     qq = ewald_pair_qq(scheduler, atom_i, atom_j, Val(T))
 
+    r = sqrt(r2)
+    inv_r = inv(r)
     αr = α * r
     erf_αr = erf(αr)
     if erf_αr > T(1e-6)
-        inv_r = inv(r)
-        F = f_div_ϵr * qq * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt(T(π))) * vec_ij
+        F = (f_div_ϵr * qq * inv_r^3 *
+                (erf_αr - T(two_over_sqrt_π) * αr * fast_exp(-αr^2))) * vec_ij
         return SpecificForce2Atoms(F, -F)
     else
         zf = zero(SVector{3, T}) * force_units

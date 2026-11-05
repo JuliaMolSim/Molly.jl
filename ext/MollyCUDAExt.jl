@@ -45,6 +45,169 @@ const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDACore : CUDA
 pairwise_fastmath(::Type{Float32}) = true
 pairwise_fastmath(::Type) = false
 
+#=
+`@cuda` finds the compiled kernel from the device types of the arguments at every launch,
+which converts the arguments, builds a tuple type at run time and looks it up under a lock.
+For the kernels launched every step that is often longer than the kernel takes to run, and
+the simulation step is limited by the host launching work. Those kernels are kept in a
+slot for each function, argument types on the host and compilation options instead, from
+`kernel_slot`, which is found when the calling code is compiled. The kernel is looked up
+again for another context, or once methods have been defined as CUDA.jl would then check
+whether it has to be compiled again.
+=#
+@generated kernel_slot(f, options, args...) = :($(Ref{Any}(nothing)))
+
+struct CachedKernel{K}
+    ctx::CuContext
+    world::UInt
+    kernel::K
+end
+
+# The compiled kernel of `f(args...)` with the compilation options of `cufunction` in the
+#   named tuple of `Val(options)`
+function cached_cufunction(f::F, args::Tuple, ::Val{options}) where {F, options}
+    slot = kernel_slot(f, Val(options), args...)
+    entry = slot[]
+    ctx = CUDA.context()
+    world = Base.get_world_counter()
+    if !(entry isa CachedKernel) || entry.ctx != ctx || entry.world != world
+        tt = Tuple{map(a -> Core.Typeof(cudaconvert(a)), args)...}
+        entry = CachedKernel(ctx, world, cufunction(f, tt; options...))
+        slot[] = entry
+    end
+    return entry.kernel
+end
+
+#=
+Faster launches of KernelAbstractions kernels with a static workgroup size, see
+`Molly.launch_kernel!`.
+The CUDA backend of KernelAbstractions converts the arguments to find their device types,
+looks up the compiled kernel under a lock, then converts the arguments again to launch it,
+at every launch. Here the compiled kernel is kept as above, so that the arguments are only
+converted for the launch. The launch configuration is found as the backend finds it.
+=#
+function Molly.launch_kernel!(obj::KernelAbstractions.Kernel{CUDABackend,
+                                        <:KernelAbstractions.NDIteration.StaticSize},
+                              args...; ndrange)
+    KA = KernelAbstractions
+    ndrange_, workgroupsize, iterspace, dynamic = KA.launch_config(obj, ndrange, nothing)
+    ctx = KA.mkcontext(obj, ndrange_, iterspace)
+    blocks = length(KA.blocks(iterspace))
+    blocks == 0 && return nothing
+    threads = length(KA.workitems(iterspace))
+    maxthreads = prod(KA.get(KA.workgroupsize(obj)))
+    always_inline = KA.backend(obj).always_inline
+    # Known from the types, so the options are constant apart from `always_inline`
+    fastmath = Molly.kernel_fastmath(obj.f, args)
+    kernel = (always_inline ?
+        cached_cufunction(obj.f, (ctx, args...),
+                          Val((always_inline=true, maxthreads=maxthreads, fastmath=fastmath))) :
+        cached_cufunction(obj.f, (ctx, args...),
+                          Val((always_inline=false, maxthreads=maxthreads, fastmath=fastmath))))
+    kernel(ctx, args...; threads=threads, blocks=blocks)
+    return nothing
+end
+
+#=
+The stream for the work launched by `Molly.run_side_work!`, with the events that order it
+with the stream of the task. It has the highest priority, so that the blocks of its kernels
+are run as soon as there is room on a multiprocessor rather than after the blocks of the
+pairwise force kernel launched before them, which would leave little time to run at once.
+Kept per task and device, as each task has its own stream.
+=#
+struct SideStream
+    stream::CuStream
+    started::CuEvent
+    finished::CuEvent
+end
+
+function side_stream()
+    key = (:molly_side_stream, CUDA.device())
+    return get!(task_local_storage(), key) do
+        SideStream(CuStream(; priority=last(CUDA.priority_range())),
+                   CuEvent(CUDA.EVENT_DISABLE_TIMING), CuEvent(CUDA.EVENT_DISABLE_TIMING))
+    end::SideStream
+end
+
+struct SideWork
+    main::CuStream
+    side::SideStream
+end
+
+function Molly.side_work_start(::CUDABackend)
+    side = side_stream()
+    main = CUDA.stream()
+    CUDA.record(side.started, main)
+    return SideWork(main, side)
+end
+
+#=
+CUDA.jl makes the host wait for the stream that an array was last used on when it is used
+on another, which here would wait for the pairwise force kernel. The events order the
+streams instead, so the shared arrays are used without that and left marked as used on the
+main stream. Other arrays used by the side work, such as those of the interactions, are
+then marked as used on the side stream.
+=#
+function Molly.run_side_work!(f, w::SideWork, shared)
+    s = w.side
+    CUDA.wait(s.started, s.stream)
+    synchronizing = map(unsynchronize!, shared)
+    try
+        CUDA.stream!(f, s.stream)
+    finally
+        foreach((x, sync) -> resynchronize!(x, sync, w.main), shared, synchronizing)
+    end
+    CUDA.record(s.finished, s.stream)
+    return w
+end
+
+function Molly.side_work_finish!(w::SideWork)
+    CUDA.wait(w.side.finished, w.main)
+    return w
+end
+
+function unsynchronize!(x::CuArray)
+    managed = x.data[]
+    synchronizing = managed.synchronizing
+    managed.synchronizing = false
+    return synchronizing
+end
+
+unsynchronize!(x) = false
+
+function resynchronize!(x::CuArray, synchronizing, stream)
+    managed = x.data[]
+    managed.synchronizing = synchronizing
+    managed.stream = stream
+    return x
+end
+
+resynchronize!(x, synchronizing, stream) = x
+
+# The gradients of the forces are found without the side stream
+Molly.concurrent_gpu_forces(sys::System{<:Any, <:CuArray}) = !sys.grad_safe
+
+#=
+The accumulator in shared memory of the forces on the atoms of block j in `force_kernel!`,
+indexed as an array of size (32, D, block_y). The components of each atom are held together
+as one aligned vector, of four values for three dimensions, so that adding the force of a
+pair, which reads and writes every component, is one vector load and store rather than one
+of each for every component once the compiler has merged the accesses.
+=#
+struct JForceAccumulator{A}
+    data::A
+end
+
+@inline jforce_eltype(::Type{T}, ::Val{D}) where {T, D} = NTuple{(D == 3 ? 4 : D), VecElement{T}}
+
+@inline Base.getindex(acc::JForceAccumulator, slot, k, w) = @inbounds acc.data[slot, w][k].value
+
+@inline function Base.setindex!(acc::JForceAccumulator, val, slot, k, w)
+    v = @inbounds acc.data[slot, w]
+    @inbounds acc.data[slot, w] = Base.setindex(v, VecElement(val), k)
+    return acc
+end
+
 # Per-j-atom data staged in shared memory by force_kernel!'s Part 1 inner loop.
 # Only the Atom fields the active interactions actually read are staged (`P` is the
 # narrow payload tuple type from `atom_shuffle_payload`/`resolve_atom_fields`)
@@ -337,7 +500,7 @@ function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) wher
     n_blocks = cld(N, Int(WARPSIZE))
     # Also grows the tile list to fit, so that the candidates below do not overflow it
     find_interacting_tiles!(buffers, sys, n_blocks)
-    if use_tile_tree(sys, n_blocks, buffers.num_pairs)
+    if use_tile_tree(sys, n_blocks, buffers.num_tile_candidates)
         # The tree search has no block shape to tune
         return nothing
     end
@@ -373,6 +536,7 @@ function autotune_tile_threads!(buffers, sys::System{D, <:CuArray}, N::Int) wher
     CUDA.synchronize()
     throw_if_interacting_tiles_overflowed(buffers)
     buffers.num_pairs = Int(only(from_device(buffers.num_interacting_tiles)))
+    buffers.num_tile_candidates = buffers.num_pairs
     return best_threads
 end
 
@@ -448,7 +612,7 @@ function force_kernel_dynamic_shmem(buffers, ::Val{D}, ::Type{T}, uses_vel::Bool
     shuf_syms = resolved_atom_shuffle_syms(pairwise_inters, A)
     P = atom_payload_type(A, shuf_syms)
     JT = JStage{eltype(buffers.coords_reordered), P}
-    bytes = nslot * D * sizeof(T) + nslot * sizeof(JT)
+    bytes = nslot * sizeof(jforce_eltype(T, Val(D))) + nslot * sizeof(JT)
     if uses_vel
         bytes += nslot * sizeof(eltype(buffers.velocities_reordered))
     end
@@ -477,9 +641,33 @@ end
 # more (opt-in max is ~100 KiB on Ampere+). The j-atom staging in force_kernel!/
 # energy_kernel! routinely needs more than 48 KiB for large `block_y` in Float64,
 # so every launch site using dynamic shmem must opt in before calling the kernel.
+# The limit is set with a call to the driver, so it is kept for each kernel and only set
+#   when it changes
+const kernel_dynamic_shmem = IdDict{Any, Int}()
+const kernel_dynamic_shmem_lock = ReentrantLock()
+
 function set_max_dynamic_shmem!(kernel, shmem::Integer)
-    CUDA.attributes(kernel.fun)[CUDA.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = shmem
+    lock(kernel_dynamic_shmem_lock) do
+        if get(kernel_dynamic_shmem, kernel, -1) != shmem
+            CUDA.attributes(kernel.fun)[CUDA.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = shmem
+            kernel_dynamic_shmem[kernel] = shmem
+        end
+    end
     return nothing
+end
+
+# The number of threads per block that gives the most warps on a multiprocessor and the most
+#   threads per block of a kernel, which take calls to the driver to find, kept for each
+#   kernel
+const kernel_thread_limits = IdDict{Any, Tuple{Int, Int}}()
+const kernel_thread_limits_lock = ReentrantLock()
+
+function thread_limits(kernel)
+    return lock(kernel_thread_limits_lock) do
+        get!(kernel_thread_limits, kernel) do
+            (launch_configuration(kernel.fun).threads, CUDA.maxthreads(kernel))
+        end
+    end
 end
 
 """
@@ -730,14 +918,13 @@ function force_launch_params(sys, kernel)
     block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
     maxregs_override === nothing || maxregs_override > 0 || error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs_override)")
 
-    conf = launch_configuration(kernel.fun)
+    conf_threads, max_threads = thread_limits(kernel)
     # Ensure block_y does not exceed physical kernel limits
-    max_threads = CUDA.maxthreads(kernel)
     max_block_y = fld(max_threads, Int(WARPSIZE))
-    
-    block_y = something(block_y_override, min(Int(WARPSIZE), 4, choose_block_y(conf.threads)))
+
+    block_y = something(block_y_override, min(Int(WARPSIZE), 4, choose_block_y(conf_threads)))
     block_y = min(block_y, max_block_y)
-    
+
     return (block_y, maxregs_override)
 end
 
@@ -1035,12 +1222,13 @@ function launch_reorder_check!(buffers, sys, tracker, ref_coords, F, dist_unit,
     N = length(sys.coords)
     n_blocks = max(cld(N, displacement_threads), 1)
     scratch = cuda_displacement_scratch(tracker, T, n_blocks)
-    @cuda threads=displacement_threads blocks=n_blocks reorder_check_kernel!(
-            buffers.coords_reordered, buffers.velocities_reordered, sys.coords,
+    args = (buffers.coords_reordered, buffers.velocities_reordered, sys.coords,
             sys.velocities, buffers.morton_seq, ref_coords, scratch.result,
             scratch.block_maxs_1, scratch.block_maxs_2, scratch.counter,
             buffers.interacting_tiles_overflow, sys.boundary, F, dist_unit, allowance,
             Val(N), Val(T))
+    kernel = cached_cufunction(reorder_check_kernel!, args, Val(NamedTuple()))
+    kernel(args...; threads=displacement_threads, blocks=n_blocks)
     CUDA.record(scratch.event, CUDA.stream())
     return scratch
 end
@@ -1369,7 +1557,7 @@ function refresh_interacting_tiles!(buffers, sys::System{D, <:CuArray}, N::Int) 
 end
 
 # Refine the bounding-box candidates with an exact atom-pair test, which also decides which
-#   tiles hold exclusions or special pairs
+#   tiles hold exclusions or special pairs, and remove the tiles without an in-range pair
 function prune_interacting_tiles!(buffers, sys, N::Int)
     n_blocks = cld(N, WARPSIZE)
     if buffers.num_pairs > 0
@@ -1380,8 +1568,73 @@ function prune_interacting_tiles!(buffers, sys, N::Int)
             buffers.num_interacting_tiles,
             buffers.coords_reordered, Val(N), Val(sys.neighbor_finder.dist_cutoff_2),
             Val(n_blocks), sys.boundary, tile_exceptions(buffers, sys.neighbor_finder))
+        compact_interacting_tiles!(buffers)
     end
     return buffers
+end
+
+#=
+Remove the tiles marked `TILE_DEAD` by `prune_interacting_tiles_kernel!` from the list,
+keeping the order of the others, and set the tile counts to the number left.
+The force and energy kernels run more than one tile in a thread block, which keeps its
+place on a multiprocessor until its last warp finishes. The warp of a dead tile returns
+straight away but is not replaced until the other tiles of its block are done, so with
+dead tiles in the list fewer warps run at once. About a third of the candidate tiles of a
+solvated protein are dead.
+This runs when the list is rebuilt, and waits for the device to get the number of tiles.
+=#
+function compact_interacting_tiles!(buffers)
+    n_tiles = buffers.num_pairs
+    n_tiles == 0 && return buffers
+    # The tiles are copied so that the compacted list can be written over the original
+    tiles_i = buffers.interacting_tiles_i[1:n_tiles]
+    tiles_j = buffers.interacting_tiles_j[1:n_tiles]
+    tiles_type = buffers.interacting_tiles_type[1:n_tiles]
+    tiles_diag = buffers.interacting_tiles_diag[1:n_tiles]
+    positions = similar(buffers.interacting_tiles_i, Int32, n_tiles)
+    n_threads = 256
+    n_launch_blocks = cld(n_tiles, n_threads)
+    @cuda threads=n_threads blocks=n_launch_blocks live_tile_flags_kernel!(
+            positions, tiles_type, Int32(n_tiles))
+    # The inclusive prefix sum of the flags is the place of each live tile in the list
+    Molly.AcceleratedKernels.accumulate!(+, positions, get_backend(positions);
+                                         init=Int32(0))
+    @cuda threads=n_threads blocks=n_launch_blocks compact_tiles_kernel!(
+            buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+            buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
+            buffers.num_interacting_tiles, tiles_i, tiles_j, tiles_type, tiles_diag,
+            positions, Int32(n_tiles))
+    buffers.num_pairs = Int(only(from_device(view(positions, n_tiles:n_tiles))))
+    foreach(CUDA.unsafe_free!, (tiles_i, tiles_j, tiles_type, tiles_diag, positions))
+    return buffers
+end
+
+function live_tile_flags_kernel!(flags, tiles_type, n_tiles)
+    t = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    @inbounds if t <= n_tiles
+        flags[t] = (tiles_type[t] == TILE_DEAD ? Int32(0) : Int32(1))
+    end
+    return nothing
+end
+
+function compact_tiles_kernel!(tiles_i_out, tiles_j_out, tiles_type_out, tiles_diag_out,
+                               num_interacting_tiles, tiles_i, tiles_j, tiles_type,
+                               tiles_diag, positions, n_tiles)
+    t = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    @inbounds if t <= n_tiles
+        type = tiles_type[t]
+        if type != TILE_DEAD
+            p = positions[t]
+            tiles_i_out[p] = tiles_i[t]
+            tiles_j_out[p] = tiles_j[t]
+            tiles_type_out[p] = type
+            tiles_diag_out[p] = tiles_diag[t]
+        end
+        if t == n_tiles
+            num_interacting_tiles[1] = positions[t]
+        end
+    end
+    return nothing
 end
 
 #=
@@ -1392,7 +1645,7 @@ repeated. The vectors start at a size that is enough for typical systems, see
 `init_buffers!`, and are kept for later searches.
 =#
 function find_interacting_tiles!(buffers, sys, n_blocks)
-    use_tree = use_tile_tree(sys, n_blocks, buffers.num_pairs)
+    use_tree = use_tile_tree(sys, n_blocks, buffers.num_tile_candidates)
     search! = use_tree ? find_interacting_tiles_tree! : find_interacting_tiles_all_pairs!
     reset_interacting_tile_state!(buffers)
     search!(buffers, sys, n_blocks)
@@ -1405,6 +1658,7 @@ function find_interacting_tiles!(buffers, sys, n_blocks)
         throw_if_interacting_tiles_overflowed(buffers)
     end
     buffers.num_pairs = n_tiles
+    buffers.num_tile_candidates = n_tiles
     use_tree && sort_interacting_tiles!(buffers, n_tiles)
     return buffers
 end
@@ -1537,7 +1791,7 @@ Cache contract:
   kernel returns straight away, see `run_tiled_kernel!`.
 - `gpu_forces!` calls `start_pairwise_forces_gpu!` instead, which does not wait for
   the check, and `finish_pairwise_forces_gpu!` once the specific forces are launched,
-  which waits for it and calculates the forces again if it failed.
+  which waits for it, calculates the forces again if it failed and reverses the reorder.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
 - `sys.neighbor_finder.initialized` only indicates whether the Morton-ordered
@@ -1550,7 +1804,9 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T, T
 end
 
 # As above, but the host does not wait for the check of the tile list, which is left to
-#   `finish_pairwise_forces_gpu!` once `gpu_forces!` has launched the specific forces
+#   `finish_pairwise_forces_gpu!` once `gpu_forces!` has launched the specific forces.
+#   The forces are added to fs_mat by `finish_pairwise_forces_gpu!`, so that the specific
+#   forces can be added to it in the meantime, see `Molly.gpu_forces_concurrent!`.
 function Molly.start_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T, TH},
                                           pairwise_inters, nbs::Nothing, ::Val{needs_vir},
                                           step_n) where {D, T, TH, needs_vir}
@@ -1558,21 +1814,20 @@ function Molly.start_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T, 
                                   true)
 end
 
-# The forces are added to fs_mat when the force kernel is relaunched, since the reverse
-#   reorder adds to it and the kernel launched before the failed check added nothing
+# If the check failed the kernel launched before it did nothing, and it is launched again
 function Molly.finish_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T, TH},
                                            pairwise_inters, nbs::Nothing, ::Val{needs_vir},
                                            step_n) where {D, T, TH, needs_vir}
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
     launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
                                                 Val(needs_vir), step_n)
-    if finish_tile_check!(launch_kernel!, buffers, sys, sys.neighbor_finder, pairwise_inters,
-                          step_n, false)
-        reverse_reorder_forces_gpu!(buffers, sys)
-    end
+    finish_tile_check!(launch_kernel!, buffers, sys, sys.neighbor_finder, pairwise_inters,
+                       step_n, false)
+    reverse_reorder_forces_gpu!(buffers, sys)
     return buffers
 end
 
+# With `defer` the forces are left in the reordered buffer, see above
 function tiled_pairwise_forces!(buffers, sys, pairwise_inters, ::Val{needs_vir}, step_n,
                                 defer::Bool) where needs_vir
     r_cut2 = kernel_pair_cutoff_2(sys, pairwise_inters)
@@ -1580,64 +1835,40 @@ function tiled_pairwise_forces!(buffers, sys, pairwise_inters, ::Val{needs_vir},
     launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
                                                 Val(needs_vir), step_n)
     run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, false, defer)
-    reverse_reorder_forces_gpu!(buffers, sys)
+    defer || reverse_reorder_forces_gpu!(buffers, sys)
     return buffers
 end
 
 # Launch the force kernel over the list of interacting tiles
 # `r_cut2` is a value rather than a `Val` so that the call to this function is not a
-#   dynamic dispatch, as the call to `@cuda` inside it is anyway
+#   dynamic dispatch, as the launch inside it is anyway
 function launch_force_kernel!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
                               r_cut2, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
     N = length(sys.coords)
-    auto_kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
-        buffers.fs_mat_reordered,
-        buffers.virial_nounits,
-        buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-        Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-        sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
-        Val(needs_vir), Val(T), Val(TH), Val(D),
-        buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-        buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
-        buffers.interacting_tiles_overflow)
-    block_y, maxregs = force_launch_params(sys, auto_kernel)
-    
+    args = (buffers.fs_mat_reordered, buffers.virial_nounits, buffers.coords_reordered,
+            buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2),
+            Val(sys.force_units), pairwise_inters, sys.boundary, step_n,
+            tile_exceptions(buffers, sys.neighbor_finder), Val(needs_vir), Val(T), Val(TH),
+            Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
+            buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
     num_pairs = buffers.num_pairs
-    n_blocks_launch = num_pairs > 0 ? cld(num_pairs, block_y) : 1
+    num_pairs > 0 || return buffers
+    auto_kernel = cached_cufunction(force_kernel!, args,
+                                    Val((always_inline=true, fastmath=pairwise_fastmath(T))))
+    block_y, maxregs = force_launch_params(sys, auto_kernel)
+    n_blocks_launch = cld(num_pairs, block_y)
 
     kernel = if maxregs === nothing
         auto_kernel
     else
-        @cuda launch=false maxregs=maxregs always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
-            buffers.fs_mat_reordered,
-            buffers.virial_nounits,
-            buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-            Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-            sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
-            Val(needs_vir), Val(T), Val(TH), Val(D),
-            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow)
+        @cuda launch=false maxregs=maxregs always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(args...)
     end
 
     uses_vel = Molly.any_uses_velocity(pairwise_inters)
     shmem = force_kernel_dynamic_shmem(buffers, Val(D), T, uses_vel, block_y, pairwise_inters)
     set_max_dynamic_shmem!(kernel, shmem)
-
-    if num_pairs > 0
-        kernel(
-            buffers.fs_mat_reordered,
-            buffers.virial_nounits,
-            buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-            Val(N), Val(r_cut2), Val(sys.force_units), pairwise_inters,
-            sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
-            Val(needs_vir), Val(T), Val(TH), Val(D),
-            buffers.interacting_tiles_i, buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow;
-            threads=(32, block_y), blocks=n_blocks_launch, shmem=shmem
-        )
-    end
+    kernel(args...; threads=(32, block_y), blocks=n_blocks_launch, shmem=shmem)
     return buffers
 end
 
@@ -1824,7 +2055,7 @@ function reverse_reorder_forces_gpu!(buffers, sys::System{D, <:CuArray, T}) wher
     
     # fs_mat is D x N. We need to reverse reorder each dimension or use a specialized kernel.
     # Let's use a specialized kernel for D x N matrix reverse reordering.
-    Molly.reverse_reorder_forces_kernel!(backend, n_threads)(
+    Molly.launch_kernel!(Molly.reverse_reorder_forces_kernel!(backend, n_threads),
         buffers.fs_mat, buffers.fs_mat_reordered, buffers.morton_seq, Val(D); ndrange=N)
     
     return nothing
@@ -2444,8 +2675,8 @@ recording which of the 32 inner-loop iterations of `force_kernel!`/`energy_kerne
 contain at least one in-range pair. Iteration `m` of those kernels evaluates the pairs
 `(lane, slot)` with `slot - lane == m (mod 32)`, so a hit between the `l`-th atom of
 block `i` and the `s`-th atom of block `j` sets bit `(s - l) & 31`. Tiles with no
-in-range pair at all get an empty mask and are marked `TILE_DEAD` so the kernels drop
-them immediately.
+in-range pair at all get an empty mask and are marked `TILE_DEAD`, and are then removed
+from the list by `compact_interacting_tiles!`.
 
 This only runs on a neighbor list rebuild, so its cost is amortised over the `n_steps`
 steps of the neighbor finder. Only full off-diagonal tiles (`i < j < n_blocks`) are
@@ -2489,17 +2720,16 @@ function prune_interacting_tiles_kernel!(
     @inbounds coords_j = coords[(j - a) * warpsize() + lane]
     i_0_tile = (i - a) * warpsize()
 
-    # This lane holds the `lane`-th atom of block j, so a hit against the m-th atom of
-    # block i lands on inner-loop iteration `(lane - m) & 31`
-    lane_mask = UInt32(0)
-    @inbounds for m in a:warpsize()
-        coords_i = coords[i_0_tile + m]
-        dr = vector(coords_i, coords_j, boundary)
-        r2 = sum(abs2, dr)
-        if r2 <= r_cut2
-            lane_mask |= UInt32(1) << ((lane - m) & Int32(31))
-        end
-    end
+    # The displacements are found from the image of atom j closest to the first atom of
+    #   block i when that gives the minimum image of every pair within the cutoff, see
+    #   `tile_single_image`
+    @inbounds single_image, coords_j_image = tile_single_image(coords_j,
+                    coords[i_0_tile + lane], coords[i_0_tile + a], boundary, Val(r_cut2))
+    lane_mask = (single_image ?
+        prune_lane_mask(coords, i_0_tile, coords_j, coords_j_image, lane, boundary,
+                        Val(r_cut2), Val(true)) :
+        prune_lane_mask(coords, i_0_tile, coords_j, coords_j_image, lane, boundary,
+                        Val(r_cut2), Val(false)))
 
     offset = Int32(16)
     while offset > 0
@@ -2524,6 +2754,150 @@ function prune_interacting_tiles_kernel!(
         end
     end
     return nothing
+end
+
+#=
+For the boundaries with a rectangular box, the displacements of the pairs of a tile can
+be found by subtracting the coordinates of atom i from those of atom j once the image of
+atom i closest to a reference point is taken, rather than by finding the minimum image of
+each pair, which takes several times as many instructions as the subtraction. With the
+reference point the first atom of block j, this gives the minimum image of every pair
+within the cutoff if the other atoms of block j are within `d` of it, with `d` plus the
+cutoff less than half the shortest side of the box. The nearer image of a pair beyond the
+cutoff can be missed, but the image used is then beyond the cutoff too.
+Returns whether this holds for the warp, `coords_j` being the atom of block j of this lane
+and `ref_j` the first one, and the image of atom i to use if so.
+The other boundaries use the minimum image of each pair.
+=#
+@inline function tile_single_image(coords_i, coords_j, ref_j,
+                                   boundary::Union{CubicBoundary, RectangularBoundary},
+                                   ::Val{r_cut2}) where r_cut2
+    d2 = ustrip(sum(abs2, coords_j - ref_j))
+    offset = Int32(16)
+    while offset > Int32(0)
+        d2 = max(d2, CUDA.shfl_xor_sync(0xFFFFFFFF, d2, offset))
+        offset ÷= Int32(2)
+    end
+    # A plain comparison rather than `minimum`, which handles NaN and signed zeros with
+    #   several instructions per element on every tile
+    min_side = reduce((a, b) -> ifelse(a < b, a, b), boundary.side_lengths)
+    max_d = min_side / 2 - sqrt(r_cut2)
+    valid = max_d > zero(max_d) && d2 < ustrip(max_d^2)
+    return valid, image_closest(coords_i, ref_j, boundary)
+end
+
+@inline tile_single_image(coords_i, coords_j, ref_j, boundary, r_cut2) = (false, coords_i)
+
+# The image of `c` closest to `p` in a rectangular box, which is `c` unless they are more
+#   than half a box side apart in a dimension
+@inline function image_closest(c, p, boundary::Union{CubicBoundary, RectangularBoundary})
+    return image_closest_1D.(c, p, boundary.side_lengths)
+end
+
+@inline function image_closest_1D(c, p, side_length)
+    v = c - p
+    half_sl = side_length / 2
+    return ifelse(v > half_sl, c - side_length, ifelse(v < -half_sl, c + side_length, c))
+end
+
+#=
+The forces of the pairs of a full tile, from the iterations in `diag_mask` (see
+`prune_interacting_tiles_kernel!`), added to the accumulators `acc` of atom i and the
+virial, which are returned, and to `opposites_sum` for the atoms of block j.
+Only iterations marked as holding an in-range pair are walked. Bit b covers the pairs with
+`slot - lane == b (mod 32)`, so it selects the same slot permutation as `m == b`. Testing
+all 32 bits with a branch instead costs a loop header and a divergent branch per skipped
+iteration, which the SASS shows dominating the loop.
+With `has_exceptions` the bitmasks of the tile give the excluded and special pairs, and
+otherwise there are none. With `single_image` the displacements are found from
+`coords_i_image`, see `tile_single_image`.
+=#
+@inline function tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
+                        eligible_bitmask, special_bitmask, ::Val{has_exceptions},
+                        ::Val{single_image}, lane, warpid, coords_i, coords_i_image, atoms_i,
+                        vel_i, ::Type{A}, shuf_syms, uses_vel, inters_tuple, boundary, step_n,
+                        ::Val{r_cut2}, ::Val{force_units}, ::Val{needs_vir},
+                        ::Val{D}) where {has_exceptions, single_image, A, r_cut2, force_units,
+                                         needs_vir, D}
+    a = Int32(1)
+    (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
+     vir_yx, vir_zx, vir_zy) = acc
+    active = diag_mask
+    @inbounds while active != UInt32(0)
+        m = Int32(trailing_zeros(active))
+        active &= active - UInt32(1)
+        slot = ((lane - a + m) & Int32(31)) + a
+        js = sh_stage[slot, warpid]
+        coords_j = js.coords
+        atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
+        vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
+
+        dr = (single_image ? coords_j - coords_i_image : vector(coords_i, coords_j, boundary))
+        r2 = sum(abs2, dr)
+        if has_exceptions
+            excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
+            spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
+            condition = (excl & 0x1) == true && r2 <= r_cut2
+            special = (spec & 0x1) == true
+        else
+            condition = r2 <= r_cut2
+            special = false
+        end
+        any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
+
+        if any_active
+            f = condition ? sum_pairwise_forces_gpu(
+                inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
+                special, coords_i, coords_j, boundary, vel_i, vel_j, step_n
+            ) : Molly.zero_pairwise_force(dr, force_units)
+
+            force_i_x += ustrip(f[1])
+            opposites_sum[slot, 1, warpid] -= ustrip(f[1])
+            if D >= 2
+                force_i_y += ustrip(f[2])
+                opposites_sum[slot, 2, warpid] -= ustrip(f[2])
+            end
+            if D >= 3
+                force_i_z += ustrip(f[3])
+                opposites_sum[slot, 3, warpid] -= ustrip(f[3])
+            end
+
+            if needs_vir
+                vir_xx += ustrip(dr[1]) * ustrip(f[1])
+                if D >= 2
+                    vir_yy += ustrip(dr[2]) * ustrip(f[2])
+                    vir_xy += ustrip(dr[1]) * ustrip(f[2])
+                    vir_yx += ustrip(dr[2]) * ustrip(f[1])
+                end
+                if D >= 3
+                    vir_zz += ustrip(dr[3]) * ustrip(f[3])
+                    vir_xz += ustrip(dr[1]) * ustrip(f[3])
+                    vir_zx += ustrip(dr[3]) * ustrip(f[1])
+                    vir_yz += ustrip(dr[2]) * ustrip(f[3])
+                    vir_zy += ustrip(dr[3]) * ustrip(f[2])
+                end
+            end
+        end
+    end
+    return (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
+            vir_yx, vir_zx, vir_zy)
+end
+
+# This lane holds the `lane`-th atom of block j, so a hit against the m-th atom of block i
+#   lands on inner-loop iteration `(lane - m) & 31`
+@inline function prune_lane_mask(coords, i_0_tile, coords_j, coords_j_image, lane, boundary,
+                                 ::Val{r_cut2}, ::Val{single_image}) where {r_cut2, single_image}
+    a = Int32(1)
+    lane_mask = UInt32(0)
+    @inbounds for m in a:warpsize()
+        coords_i = coords[i_0_tile + m]
+        dr = (single_image ? coords_j_image - coords_i : vector(coords_i, coords_j, boundary))
+        r2 = sum(abs2, dr)
+        if r2 <= r_cut2
+            lane_mask |= UInt32(1) << ((lane - m) & Int32(31))
+        end
+    end
+    return lane_mask
 end
 
 """
@@ -2627,8 +3001,9 @@ function force_kernel!(
     P = atom_payload_type(A, shuf_syms)
     by = Int(blockDim().y)
     JT = JStage{eltype(coords_var), P}
-    opposites_sum = @inbounds CuDynamicSharedArray(T, (32, D, by))
-    stage_off = 32 * D * by * sizeof(T)
+    opposites_sum = JForceAccumulator(
+                        @inbounds(CuDynamicSharedArray(jforce_eltype(T, Val(D)), (32, by))))
+    stage_off = 32 * by * sizeof(jforce_eltype(T, Val(D)))
     sh_stage = @inbounds CuDynamicSharedArray(JT, (32, by), stage_off)
     stage_off_v = stage_off + 32 * by * sizeof(JT)
     sh_vel = @inbounds CuDynamicSharedArray(eltype(velocities_var), (32, by), stage_off_v)
@@ -2665,124 +3040,47 @@ function force_kernel!(
         # the active interactions read are staged (`shuf_syms`/`P` above), matching
         # the old shuffle path's payload rather than the full 32 B Atom. sync_warp()
         # also publishes the opposites_sum zeroing above.
-        @inbounds sh_stage[lane, warpid] = JStage(coords[index_j], Molly.atom_shuffle_payload(atoms[index_j], shuf_syms))
+        @inbounds coords_j_lane = coords[index_j]
+        @inbounds sh_stage[lane, warpid] = JStage(coords_j_lane, Molly.atom_shuffle_payload(atoms[index_j], shuf_syms))
         if uses_vel
             @inbounds sh_vel[lane, warpid] = velocities[index_j]
         end
         sync_warp()
 
+        # The displacements are found from the image of atom i closest to the first atom
+        #   of block j when that gives the minimum image of every pair within the cutoff,
+        #   see `tile_single_image`
+        single_image, coords_i_image = tile_single_image(coords_i, coords_j_lane,
+                                    @inbounds(sh_stage[a, warpid].coords), boundary, Val(r_cut2))
+
+        acc = (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz,
+               vir_yz, vir_yx, vir_zx, vir_zy)
         if type == UInt8(0) # CLEAN
-            # Walk only the iterations `prune_interacting_tiles_kernel!` marked as holding
-            # an in-range pair. Bit b covers the pairs with `slot - lane == b (mod 32)`, so
-            # it selects the same slot permutation as `m == b`. Testing all 32 bits with a
-            # branch instead costs a loop header and a divergent branch per skipped
-            # iteration, which the SASS shows dominating the loop.
-            active = diag_mask
-            @inbounds while active != UInt32(0)
-                m = Int32(trailing_zeros(active))
-                active &= active - UInt32(1)
-                slot = ((lane - a + m) & Int32(31)) + a
-                js = sh_stage[slot, warpid]
-                coords_j = js.coords
-                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
-                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
-
-                dr = vector(coords_i, coords_j, boundary)
-                r2 = sum(abs2, dr)
-                condition = r2 <= r_cut2
-                any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-
-                if any_active
-                    f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
-                        false, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                    ) : Molly.zero_pairwise_force(dr, force_units)
-
-                    force_i_x += ustrip(f[1])
-                    opposites_sum[slot, 1, warpid] -= ustrip(f[1])
-                    if D >= 2
-                        force_i_y += ustrip(f[2])
-                        opposites_sum[slot, 2, warpid] -= ustrip(f[2])
-                    end
-                    if D >= 3
-                        force_i_z += ustrip(f[3])
-                        opposites_sum[slot, 3, warpid] -= ustrip(f[3])
-                    end
-
-                    if needs_vir
-                        vir_xx += ustrip(dr[1]) * ustrip(f[1])
-                        if D >= 2
-                            vir_yy += ustrip(dr[2]) * ustrip(f[2])
-                            vir_xy += ustrip(dr[1]) * ustrip(f[2])
-                            vir_yx += ustrip(dr[2]) * ustrip(f[1])
-                        end
-                        if D >= 3
-                            vir_zz += ustrip(dr[3]) * ustrip(f[3])
-                            vir_xz += ustrip(dr[1]) * ustrip(f[3])
-                            vir_zx += ustrip(dr[3]) * ustrip(f[1])
-                            vir_yz += ustrip(dr[2]) * ustrip(f[3])
-                            vir_zy += ustrip(dr[3]) * ustrip(f[2])
-                        end
-                    end
-                end
+            if single_image
+                acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
+                            UInt32(0), UInt32(0), Val(false), Val(true), lane, warpid,
+                            coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
+                            inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
+                            Val(needs_vir), Val(D))
+            else
+                acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
+                            UInt32(0), UInt32(0), Val(false), Val(false), lane, warpid,
+                            coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
+                            inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
+                            Val(needs_vir), Val(D))
             end
         else # EXCLUDED
+            # These tiles are few enough that the minimum image of each pair is used
             eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
                                                         lane, n_blocks, r, Val(N))
-
-            active = diag_mask
-            @inbounds while active != UInt32(0)
-                m = Int32(trailing_zeros(active))
-                active &= active - UInt32(1)
-                slot = ((lane - a + m) & Int32(31)) + a
-                js = sh_stage[slot, warpid]
-                coords_j = js.coords
-                atoms_j_stage = Molly.rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
-                vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
-
-                dr = vector(coords_i, coords_j, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
-                spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
-
-                condition = (excl & 0x1) == true && r2 <= r_cut2
-                any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
-
-                if any_active
-                    f = condition ? sum_pairwise_forces_gpu(
-                        inters_tuple, dr, atoms_i, atoms_j_stage, Val(force_units),
-                        (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
-                    ) : Molly.zero_pairwise_force(dr, force_units)
-
-                    force_i_x += ustrip(f[1])
-                    opposites_sum[slot, 1, warpid] -= ustrip(f[1])
-                    if D >= 2
-                        force_i_y += ustrip(f[2])
-                        opposites_sum[slot, 2, warpid] -= ustrip(f[2])
-                    end
-                    if D >= 3
-                        force_i_z += ustrip(f[3])
-                        opposites_sum[slot, 3, warpid] -= ustrip(f[3])
-                    end
-
-                    if needs_vir
-                        vir_xx += ustrip(dr[1]) * ustrip(f[1])
-                        if D >= 2
-                            vir_yy += ustrip(dr[2]) * ustrip(f[2])
-                            vir_xy += ustrip(dr[1]) * ustrip(f[2])
-                            vir_yx += ustrip(dr[2]) * ustrip(f[1])
-                        end
-                        if D >= 3
-                            vir_zz += ustrip(dr[3]) * ustrip(f[3])
-                            vir_xz += ustrip(dr[1]) * ustrip(f[3])
-                            vir_zx += ustrip(dr[3]) * ustrip(f[1])
-                            vir_yz += ustrip(dr[2]) * ustrip(f[3])
-                            vir_zy += ustrip(dr[3]) * ustrip(f[2])
-                        end
-                    end
-                end
-            end
+            acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
+                        eligible_bitmask, special_bitmask, Val(true), Val(false), lane, warpid,
+                        coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
+                        inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
+                        Val(needs_vir), Val(D))
         end
+        (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
+         vir_yx, vir_zx, vir_zy) = acc
 
         sync_warp()
         if index_j <= N
@@ -3439,19 +3737,51 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     return nothing
 end
 
+#=
+Two buffers for the center of mass momentum, used in turn by `remove_CM_motion!` so that it
+does not allocate and zero one each time it is called, which is every step by default.
+The kernel that removes the center of mass velocity zeroes the buffer that the next call
+accumulates into. They are kept per task, since each task has its own stream.
+=#
+mutable struct CMMomentumScratch{T}
+    buffers::NTuple{2, CuArray{T, 1, CUDA_CORE.DeviceMemory}}
+    current::Int
+    context::CuContext
+end
+
+function cm_momentum_scratch(::Type{T}) where T
+    tls = task_local_storage()
+    key = (:molly_cm_momentum_scratch, T)
+    scratch = get(tls, key, nothing)
+    if !(scratch isa CMMomentumScratch{T}) || scratch.context != CUDA.context()
+        buffers = (fill!(CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, 3), zero(T)),
+                   fill!(CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, 3), zero(T)))
+        scratch = CMMomentumScratch{T}(buffers, 1, CUDA.context())
+        tls[key] = scratch
+    end
+    return scratch
+end
+
 function Molly.remove_CM_motion!(sys::System{3, <:CuArray, T}) where T
     M = unit(zero(eltype(eltype(sys.velocities))) * zero(sys.total_mass))
     n_atoms = length(sys)
-    cm_momentum = CUDA.zeros(T, 3)
+    scratch = cm_momentum_scratch(T)
+    cm_momentum = scratch.buffers[scratch.current]
+    next_cm_momentum = scratch.buffers[3 - scratch.current]
+    scratch.current = 3 - scratch.current
     n_threads = 256
     n_blocks = cld(n_atoms, n_threads)
     shmem = 3 * n_threads * sizeof(T)
 
-    @cuda threads=n_threads blocks=n_blocks shmem=shmem cm_momentum_kernel_3d!(
-                    cm_momentum, sys.velocities, masses(sys), Val(n_atoms))
-    @cuda threads=n_threads blocks=n_blocks remove_cm_velocity_kernel_3d!(
-                    sys.velocities, cm_momentum, sys.virtual_site_flags, sys.total_mass,
-                    Val(M), Val(n_atoms), Val(!isempty(sys.virtual_sites)))
+    args_momentum = (cm_momentum, sys.velocities, masses(sys), Val(n_atoms))
+    kernel_momentum = cached_cufunction(cm_momentum_kernel_3d!, args_momentum,
+                                        Val(NamedTuple()))
+    kernel_momentum(args_momentum...; threads=n_threads, blocks=n_blocks, shmem=shmem)
+    args_remove = (sys.velocities, cm_momentum, next_cm_momentum, sys.virtual_site_flags,
+                   sys.total_mass, Val(M), Val(n_atoms), Val(!isempty(sys.virtual_sites)))
+    kernel_remove = cached_cufunction(remove_cm_velocity_kernel_3d!, args_remove,
+                                      Val(NamedTuple()))
+    kernel_remove(args_remove...; threads=n_threads, blocks=n_blocks)
     return sys
 end
 
@@ -3502,10 +3832,15 @@ function cm_momentum_kernel_3d!(cm_momentum::CuDeviceVector{T}, velocities, atom
     return nothing
 end
 
+# Also zeroes `next_cm_momentum`, the buffer the next call accumulates into
 function remove_cm_velocity_kernel_3d!(velocities, cm_momentum::CuDeviceVector{T},
-                            virtual_site_flags, total_mass, ::Val{momentum_unit}, ::Val{n_atoms},
+                            next_cm_momentum, virtual_site_flags, total_mass,
+                            ::Val{momentum_unit}, ::Val{n_atoms},
                             ::Val{has_vs}) where {T, momentum_unit, n_atoms, has_vs}
     idx = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    @inbounds if idx <= 3
+        next_cm_momentum[idx] = zero(T)
+    end
     @inbounds if idx <= n_atoms
         cm_velocity = SVector(
             cm_momentum[1] * momentum_unit / total_mass,

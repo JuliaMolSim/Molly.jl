@@ -55,11 +55,7 @@ parameter_fields(::Type{<:RBTorsion}) =
     # dV/dθ = dV/dψ = -sin(ψ) * dV/dcos(ψ)
     dEdθ = sin(θ) * (d.c1 + cos_ψ * (2 * d.c2 + cos_ψ * (3 * d.c3 +
                         cos_ψ * (4 * d.c4 + cos_ψ * 5 * d.c5))))
-    fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
-    fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
-    v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
-    fj =  v - fi
-    fk = -v - fl
+    fi, fj, fk, fl = torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
     return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 

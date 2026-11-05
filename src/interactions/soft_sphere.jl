@@ -45,17 +45,20 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     σ2 = σ^2
     params = (σ2, ϵ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    return (f / r) * dr
+    return (f * inv_r) * dr
 end
 
 function pairwise_force(::SoftSphere, r, (σ2, ϵ))
-    six_term = (σ2 / r^2) ^ 3
-    return (24ϵ / r) * 2 * six_term ^ 2
+    inv_r = inv(r)
+    six_term = (σ2 * inv_r^2) ^ 3
+    return (24ϵ * inv_r) * 2 * six_term ^ 2
 end
 
 @inline function potential_energy(inter::SoftSphere,

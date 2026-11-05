@@ -113,6 +113,12 @@ Base.showerror(io::IO, e::NaNSimulationError) = print(io, "NaNSimulationError: "
 default_check_nans(sys, sim) = true
 default_check_nans(::System{<:Any, <:AbstractGPUArray}, sim) = false
 
+# Whether an integrator fuses its updates of the coordinates and velocities into fewer
+#   kernels, which is done on the GPU where each kernel launch costs as much host time as
+#   a small kernel takes to run. The fused kernels have no Enzyme rules.
+fuse_integrator_steps(sys) = false
+fuse_integrator_steps(sys::System{<:Any, <:AbstractGPUArray}) = !sys.grad_safe
+
 isnan_svec(sv) = any(isnan, sv)
 isnan_svec_array(svs) = any(isnan_svec, svs) # On CPU this is faster than AcceleratedKernels
 isnan_svec_array(svs::AbstractGPUArray) = AcceleratedKernels.any(isnan_svec, svs)
@@ -1489,15 +1495,24 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    # On the GPU the updates between the force calculation and the constraints are fused
+    #   into fewer kernels, see `langevin_aoa_step!`, with the same results
+    fused = fuse_integrator_steps(sys)
+    # The accelerations are only stored when they are checked
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, visit_state=true, strictness=strictness)
-        accels_t .= calc_accels.(forces_t, masses(sys))
+        if store_accels
+            accels_t .= calc_accels.(forces_t, masses(sys))
+            sys.velocities .+= accels_t .* sim.dt
+        else
+            velocity_force_step!(sys.velocities, forces_t, masses(sys), sim.dt)
+        end
 
-        sys.velocities .+= accels_t .* sim.dt
         if using_constraints
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
@@ -1506,25 +1521,43 @@ end
                                         strictness=strictness)
         end
 
-        if using_constraints
-            cons_coord_storage .= sys.coords
+        if fused && using_constraints
+            langevin_aoa_step!(sys.coords, sys.velocities, cons_coord_storage,
+                               cons_vel_storage, vel_scales, noise_scales, dt_div2, sim.dt,
+                               philox_ctr1, philox_key, sys.boundary, T, Val(true))
+        elseif fused
+            langevin_aoa_step!(sys.coords, sys.velocities, nothing, nothing, vel_scales,
+                               noise_scales, dt_div2, sim.dt, philox_ctr1, philox_key,
+                               sys.boundary, T, Val(false))
+        else
+            if using_constraints
+                cons_coord_storage .= sys.coords
+            end
+            sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
+            langevin_o_step!(sys.velocities, vel_scales, noise_scales, philox_ctr1,
+                             philox_key, T)
+            sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
         end
-        sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
-
-        langevin_o_step!(sys.velocities, vel_scales, noise_scales, philox_ctr1, philox_key, T)
         philox_ctr1 += UInt64(1)
-
-        sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
 
         if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
-            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
-                                        context=pos_context, n_threads=n_threads,
-                                        strictness=strictness)
+            if fused
+                # Also wraps the coordinates
+                apply_position_constraints_wrap!(sys, cons_coord_storage, cons_vel_storage,
+                                                 sim.dt; context=pos_context,
+                                                 n_threads=n_threads, strictness=strictness)
+            else
+                apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
+                                            sim.dt; context=pos_context, n_threads=n_threads,
+                                            strictness=strictness)
+            end
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
-        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        if !fused
+            sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        end
         place_virtual_sites!(sys; n_threads=n_threads)
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)

@@ -431,7 +431,8 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
                                      context=nothing, n_threads::Integer=Threads.nthreads(),
                                      strictness=default_strictness())
     if length(sys.constraints) > 0
-        vel_storage .= -sys.coords ./ dt
+        # Broadcast so that no array is allocated for the negated coordinates
+        vel_storage .= .-sys.coords ./ dt
         for ca in sys.constraints
             apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads,
                                         strictness=strictness)
@@ -439,6 +440,50 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
         sys.velocities .+= vel_storage .+ sys.coords ./ dt
     end
     return sys
+end
+
+#=
+As `apply_position_constraints!` with a velocity storage, then wrapping the coordinates
+into the box, for when `vel_storage` already holds minus the unconstrained coordinates
+divided by `dt`, as the fused Langevin step on the GPU stores them. The velocity update
+and the wrapping are one kernel on the GPU.
+=#
+function apply_position_constraints_wrap!(sys, coord_storage, vel_storage, dt;
+                                          context=nothing,
+                                          n_threads::Integer=Threads.nthreads(),
+                                          strictness=default_strictness())
+    for ca in sys.constraints
+        apply_position_constraints!(sys, ca, coord_storage; context, n_threads=n_threads,
+                                    strictness=strictness)
+    end
+    constraint_velocities_wrap!(sys.velocities, sys.coords, vel_storage, dt, sys.boundary)
+    return sys
+end
+
+function constraint_velocities_wrap!(velocities, coords, vel_storage, dt, boundary)
+    velocities .+= vel_storage .+ coords ./ dt
+    coords .= wrap_coords.(coords, (boundary,))
+    return velocities
+end
+
+function constraint_velocities_wrap!(velocities::AbstractGPUArray, coords, vel_storage, dt,
+                                     boundary)
+    backend = get_backend(velocities)
+    kernel! = constraint_velocities_wrap_kernel!(backend, 256)
+    launch_kernel!(kernel!, velocities, coords, vel_storage, dt, boundary;
+                   ndrange=length(velocities))
+    return velocities
+end
+
+# The same operations as the broadcasts of the generic method, in one pass
+@kernel inbounds=true function constraint_velocities_wrap_kernel!(velocities, coords,
+                                                @Const(vel_storage), dt, boundary)
+    i = @index(Global, Linear)
+    if i <= length(velocities)
+        x = coords[i]
+        velocities[i] = velocities[i] + (vel_storage[i] + x / dt)
+        coords[i] = wrap_coords(x, boundary)
+    end
 end
 
 """

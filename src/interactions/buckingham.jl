@@ -74,11 +74,13 @@ parameter_fields(::Type{<:Buckingham}) = ((:weight_special, "weight_14"),)
     C = C_mixing(inter.C_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     params = (A, B, C)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -87,7 +89,7 @@ parameter_fields(::Type{<:Buckingham}) = ((:weight_special, "weight_14"),)
 end
 
 function pairwise_force(::Buckingham, r, (A, B, C))
-    return A * B * exp(-B * r) - 6 * C * inv(r)^7
+    return A * B * fast_exp(-B * r) - 6 * C * inv(r)^7
 end
 
 @inline function potential_energy(inter::Buckingham,
@@ -117,5 +119,5 @@ end
 end
 
 function pairwise_pe(::Buckingham, r, (A, B, C))
-    return A * exp(-B * r) - C * inv(r)^6
+    return A * fast_exp(-B * r) - C * inv(r)^6
 end

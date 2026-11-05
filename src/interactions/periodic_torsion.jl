@@ -89,32 +89,41 @@ parameter_values(inter::PeriodicTorsion) = (inter.phases..., inter.ks...)
 end
 
 
-function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
-                                bc_norm, θ)
-    dEdθ = -k * periodicity * sin((periodicity * θ) - phase)
-    fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
-    fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
-    v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
+# The derivative of the energy of one term with respect to the torsion angle
+@inline function periodic_torsion_dEdθ(periodicity, phase, k, θ)
+    return -k * periodicity * sin((periodicity * θ) - phase)
+end
+
+# The forces on the four atoms for a derivative of the energy with respect to the torsion
+#   angle, with the divisions done once for each vector rather than for each component
+@inline function torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    fi = ( dEdθ * bc_norm / dot(cross_ab_bc, cross_ab_bc)) * cross_ab_bc
+    fl = (-dEdθ * bc_norm / dot(cross_bc_cd, cross_bc_cd)) * cross_bc_cd
+    inv_bc_norm2 = inv(bc_norm^2)
+    v = (dot(-ab, bc) * inv_bc_norm2) * fi - (dot(-cd, bc) * inv_bc_norm2) * fl
     fj =  v - fi
     fk = -v - fl
     return fi, fj, fk, fl
+end
+
+function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                bc_norm, θ)
+    dEdθ = periodic_torsion_dEdθ(periodicity, phase, k, θ)
+    return torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
 end
 
 @inline function force(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
                        coords_l, boundary, args...) where N
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
-    fi_sum, fj_sum, fk_sum, fl_sum = periodic_torsion_force(d.periodicities[1], d.phases[1],
-                                        d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+    # The forces are linear in the derivative with respect to the angle, so the terms are
+    #   summed before the forces are found
+    dEdθ = periodic_torsion_dEdθ(d.periodicities[1], d.phases[1], d.ks[1], θ)
     for i in 2:N
-        fi, fj, fk, fl = periodic_torsion_force(d.periodicities[i], d.phases[i], d.ks[i], ab, bc,
-                                                cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-        fi_sum += fi
-        fj_sum += fj
-        fk_sum += fk
-        fl_sum += fl
+        dEdθ += periodic_torsion_dEdθ(d.periodicities[i], d.phases[i], d.ks[i], θ)
     end
-    return SpecificForce4Atoms(fi_sum, fj_sum, fk_sum, fl_sum)
+    fi, fj, fk, fl = torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
 @inline function potential_energy(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
@@ -309,18 +318,12 @@ end
 
 @inline function periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
                                           bc_norm, θ, ::Val{N}) where N
-    fi1, fj1, fk1, fl1 = periodic_torsion_force(d.periodicities[1], d.phases[1],
-                                        d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-    fi_sum, fj_sum, fk_sum, fl_sum = λs[1]*fi1, λs[1]*fj1, λs[1]*fk1, λs[1]*fl1
+    dEdθ = λs[1] * periodic_torsion_dEdθ(d.periodicities[1], d.phases[1], d.ks[1], θ)
     for i in 2:N
-        fi, fj, fk, fl = periodic_torsion_force(d.periodicities[i], d.phases[i], d.ks[i], ab, bc,
-                                                cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-        fi_sum += λs[i]*fi
-        fj_sum += λs[i]*fj
-        fk_sum += λs[i]*fk
-        fl_sum += λs[i]*fl
+        dEdθ += λs[i] * periodic_torsion_dEdθ(d.periodicities[i], d.phases[i], d.ks[i], θ)
     end
-    return SpecificForce4Atoms(fi_sum, fj_sum, fk_sum, fl_sum)
+    fi, fj, fk, fl = torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
 @inline function potential_energy(d::PeriodicTorsionλ{N, T, E}, coords_i, coords_j, coords_k,

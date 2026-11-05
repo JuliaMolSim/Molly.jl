@@ -160,8 +160,10 @@ Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
 """
 struct GeometricMixing end
 
+# The parameters are non-negative, and the absolute value lets the compiler drop the
+#   domain check of `sqrt`, which is a branch in every pair of the GPU kernels
 function xy_mixing(::GeometricMixing, x, y, args...) 
-    return sqrt(x * y)
+    return sqrt(abs(x * y))
 end
 
 function xy_mixing(::GeometricMixing, x::Tuple, y::Tuple, λ_params, alch_role, args...) 

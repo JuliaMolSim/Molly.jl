@@ -73,12 +73,12 @@ Calculate the force between atoms due to a given interaction type on GPU.
 See [`force`](@ref) for more details.
 This function is only required when a different code path is required on CPU and GPU.
 """
-force_gpu(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
-force_gpu(inter, ci, bnd, ai, fu, vi, sn, data) = force(inter, ci, bnd, ai, fu, vi, sn, data)
-force_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data)
-force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data) = force(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data)
-force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data)
-force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
+@inline force_gpu(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
+@inline force_gpu(inter, ci, bnd, ai, fu, vi, sn, data) = force(inter, ci, bnd, ai, fu, vi, sn, data)
+@inline force_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn, data)
+@inline force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data) = force(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn, data)
+@inline force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn, data)
+@inline force_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data) = force(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, fu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_force(dr, force_units) = ustrip.(zero(dr)) * force_units
 
@@ -93,6 +93,23 @@ end
 @inline function radial_force_vector(f, r, dr, force_units)
     return iszero_value(r) ? zero_pairwise_force(dr, force_units) : (f / r) * dr
 end
+
+#=
+Exponential for pairwise interactions. In Float32 this is `Base.FastMath.exp_fast`, which
+on CUDA GPUs is the hardware approximation used by nvcc's `--use_fast_math` and by OpenMM,
+with a relative error of about 1e-6 for the arguments of the interactions. On the CPU it
+gives the same values as `exp` apart from flushing subnormal results to zero. Enzyme
+differentiates it as `exp`. Other types, including Float64, use `exp`.
+
+Pairwise interactions also find `r = sqrt(r2)` and `inv_r = inv(r)` once and multiply by
+`inv_r` rather than dividing by `r` repeatedly, as divisions are slow on the CPU and use the
+same limited unit as square roots on the GPU, where the fast math of the CUDA pairwise
+kernels gives a square root and a reciprocal square root of `r2`. Finding `inv_r` first and
+`r` as `r2 * inv_r` gives the same instructions on the GPU but a longer chain of dependent
+operations on the CPU.
+=#
+@inline fast_exp(x::Float32) = Base.FastMath.exp_fast(x)
+@inline fast_exp(x) = exp(x)
 
 @inline function sum_pairwise_forces(inters::Tuple{T}, dr, atom_i, atom_j, force_units,
                                      special, coord_i, coord_j, boundary, vel_i, vel_j,
@@ -516,6 +533,9 @@ energy calculations.
   [`find_neighbors`](@ref) increases when they are due to be rebuilt.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
+- `num_tile_candidates`: the number of tiles found by the last search for interacting
+  tiles, before those without an atom pair within the cutoff were removed, used to
+  choose how the next search is done.
 - `neighbor_reference`: the coordinates and boundary that the interacting-tile list
   was built from, or `nothing` before the list is built or when it is rebuilt every
   time. Used by a [`GPUNeighborFinder`](@ref) with `auto_update` to decide when to
@@ -574,6 +594,7 @@ mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR,
     reorder_generation::UInt64
     tile_generation::UInt64
     num_pairs::Int
+    num_tile_candidates::Int
     neighbor_reference::Base.RefValue{Any}
 end
 
@@ -603,7 +624,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
                       step_n_preprocessed, sparse_pair_generation, UInt64(0), UInt64(0),
-                      num_pairs, Base.RefValue{Any}(nothing))
+                      num_pairs, num_pairs, Base.RefValue{Any}(nothing))
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -741,7 +762,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       num_interacting_tiles,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
-                      -1, UInt64(0), UInt64(0), UInt64(0), 0, Base.RefValue{Any}(nothing))
+                      -1, UInt64(0), UInt64(0), UInt64(0), 0, 0,
+                      Base.RefValue{Any}(nothing))
 end
 
 """
@@ -1361,6 +1383,11 @@ function forces!(fs,
                  visit_state::Bool=false,
                  strictness=default_strictness()) where needs_vir
     has_early_interactions = any(evaluate_before_pairwise, values(general_inters))
+    concurrent = concurrent_gpu_forces(sys)
+    # The general interactions calculated at the same time as the pairwise interactions
+    #   add their forces to `fs` before those are added
+    accumulate = has_early_interactions ||
+                 (concurrent && !all(evaluate_before_pairwise, values(general_inters)))
     if has_early_interactions
         fill!(fs, zero(eltype(fs)))
     end
@@ -1376,16 +1403,25 @@ function forces!(fs,
         end
     end
 
-    # Allow an Enzyme reverse rule
-    gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
-                specific_inter_lists, n_threads, Val(has_early_interactions))
-
-    for inter in values(general_inters)
-        if !evaluate_before_pairwise(inter)
-            AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
-                                     n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     visit_state=visit_state, strictness=strictness)
+    general_forces! = function ()
+        for inter in values(general_inters)
+            if !evaluate_before_pairwise(inter)
+                AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors,
+                                step_n=step_n, n_threads=n_threads, buffers=buffers,
+                                needs_vir=needs_vir, visit_state=visit_state,
+                                strictness=strictness)
+            end
         end
+    end
+    if concurrent
+        gpu_forces_concurrent!(fs, sys, neighbors, step_n, buffers, needs_vir_val,
+                               pairwise_inters, specific_inter_lists, general_forces!,
+                               Val(accumulate), accumulate && !has_early_interactions)
+    else
+        # Allow an Enzyme reverse rule
+        gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
+                    specific_inter_lists, n_threads, Val(has_early_interactions))
+        general_forces!()
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1431,11 +1467,10 @@ function gpu_forces!(fs,
                                        step_n)
         end
 
-        for inter_list in values(specific_inter_lists)
-            specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
-                                inter_list, sys.coords, sys.velocities, sys.atoms,
-                                sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
-        end
+        specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+                             values(specific_inter_lists), sys.coords, sys.velocities,
+                             sys.atoms, sys.boundary, Val(needs_vir), step_n, sys.force_units,
+                             Val(T))
 
         if length(pis_nl) > 0
             finish_pairwise_forces_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir),
@@ -1450,4 +1485,80 @@ function gpu_forces!(fs,
     if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
+end
+
+# Whether `forces!` calculates the specific and general interactions on the device at the
+#   same time as the pairwise interactions, see `gpu_forces_concurrent!`
+concurrent_gpu_forces(sys) = false
+
+#=
+`gpu_forces!` with the specific interactions, and the general interactions whose forces
+`general_forces!()` adds to `fs`, calculated on the device at the same time as the
+pairwise interactions, see `run_side_work!`. The pairwise force kernel takes longer than
+the others, which do not have enough work to fill the device. The pairwise and specific
+forces are added to `fs` if `accumulate`, and `fs` is first set to zero if `zero_fs`.
+=#
+function gpu_forces_concurrent!(fs,
+                                sys::System{D, <:AbstractGPUArray, T, TH},
+                                neighbors,
+                                step_n::Integer,
+                                buffers::BuffersGPU,
+                                ::Val{needs_vir},
+                                pairwise_inters,
+                                specific_inter_lists,
+                                general_forces!,
+                                ::Val{accumulate},
+                                zero_fs::Bool) where {D, T, TH, needs_vir, accumulate}
+    if needs_vir
+        fill!(buffers.virial_nounits, zero(TH))
+    else
+        invalidate_interaction_virial!(buffers.validity)
+        invalidate_total_virial!(buffers.validity)
+    end
+    invalidate_pressure!(buffers.validity)
+    fill!(buffers.kin_tensor, zero(TH) * sys.energy_units)
+    fill!(buffers.pres_tensor, zero(TH) * pressure_units(sys))
+    fill!(buffers.fs_mat, zero(T))
+    fill!(buffers.fs_mat_reordered, zero(T))
+
+    # Giving the specific and general interactions a queue each was slower, as the pairwise
+    #   force kernel then shares the device with more work at once
+    side = side_work_start(get_backend(sys.coords))
+    shared = (sys.coords, sys.velocities, sys.atoms, buffers.fs_mat, buffers.virial_nounits,
+              fs)
+    with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        # The kernels using the neighbor list are launched first as they take the longest
+        if length(pis_nl) > 0
+            start_pairwise_forces_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir),
+                                       step_n)
+        end
+        # The specific forces are launched first, which was faster than after the general
+        #   ones as they are independent kernels that finish early
+        run_side_work!(side, shared) do
+            zero_fs && zero_forces_gpu!(fs)
+            specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+                                 values(specific_inter_lists), sys.coords, sys.velocities,
+                                 sys.atoms, sys.boundary, Val(needs_vir), step_n,
+                                 sys.force_units, Val(T))
+            general_forces!()
+        end
+        if length(pis_nonl) > 0
+            nbs = NoNeighborList(length(sys))
+            pairwise_forces_loop_gpu!(buffers, sys, pis_nonl, nbs, Val(needs_vir), step_n)
+        end
+        side_work_finish!(side)
+        if length(pis_nl) > 0
+            finish_pairwise_forces_gpu!(buffers, sys, pis_nl, neighbors, Val(needs_vir),
+                                        step_n)
+        end
+        return nothing
+    end
+
+    apply_force_units_gpu!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T),
+                           Val(accumulate))
+
+    if needs_vir
+        buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
+    end
+    return fs
 end

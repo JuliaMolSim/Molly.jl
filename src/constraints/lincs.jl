@@ -22,8 +22,8 @@ Maps each atom to the constraints it takes part in, as a CSR where the constrain
 is signed by which end of the constraint the atom is: `+i` when the atom is `atom2[i]`
 and `-i` when it is `atom1[i]`.
 With this mapping the update is gathered per atom instead of per constraint, which is
-conflict free. It is only built on CPU, since the GPU path scatters into a per-atom buffer
-with atomics instead.
+conflict free. It is only built on CPU, the GPU path uses the atoms of each workgroup in
+`LincsWorkgroupAtoms` instead.
 =#
 struct LincsAtomScatter{R, C}
     range::R
@@ -53,7 +53,70 @@ function build_lincs_atom_scatter(atom1, atom2, n_atoms::Integer)
     return LincsAtomScatter(range, constraints)
 end
 
-struct LincsData{A1, A2, L, IM, SD, CM, AS}
+#=
+The atoms of each workgroup of the GPU kernels that keep the coordinates or velocities in
+shared memory, see `lincs_shared_position_kernel!`.
+Every constraint that moves an atom is in the same workgroup, so the workgroup can keep the
+coordinates or velocities of its atoms in shared memory between the iterations, and gather
+the change to each atom from the constraints it is in rather than scattering the changes
+with atomic operations into a buffer in device memory.
+`local_atoms[s, i]` is the slot in the workgroup of atom `s` of constraint `i`.
+`gather[k + (s - 1) * max_deg, i]` lists the constraints that move that atom, if constraint
+`i` applies it, by position in the workgroup and signed as in `LincsAtomScatter`, padded
+with zero.
+`coupled_local` holds the constraints of `coupled_indices` by position in the workgroup,
+padded with the position of the constraint itself.
+=#
+struct LincsWorkgroupAtoms{LA, G, CL}
+    local_atoms::LA
+    gather::G
+    coupled_local::CL
+    max_deg::Int
+end
+
+function build_lincs_workgroup_atoms(perm, atom1, atom2, apply_mask, coupled_indices,
+                                     n_coupled, block_size)
+    K_padded = length(perm)
+    # Positions in a workgroup fit in 16 bits, which keeps the data each kernel reads small
+    block_size <= typemax(Int16) ÷ 2 || error("LINCS gpu_block_size $block_size is too large")
+    local_atoms = ones(Int16, 2, K_padded)
+    contributions = Dict{Tuple{Int, Int16}, Vector{Int16}}()
+    for g in 1:cld(K_padded, block_size)
+        slot_of = Dict{Int, Int16}()
+        for li in 1:block_size
+            i = (g - 1) * block_size + li
+            (i > K_padded || perm[i] == 0) && continue
+            for (s, a) in ((1, atom1[i]), (2, atom2[i]))
+                slot = get!(slot_of, a, Int16(length(slot_of) + 1))
+                local_atoms[s, i] = slot
+                push!(get!(Vector{Int16}, contributions, (g, slot)),
+                      s == 1 ? Int16(-li) : Int16(li))
+            end
+        end
+    end
+    max_deg = maximum(length, values(contributions); init=1)
+    gather = zeros(Int16, 2 * max_deg, K_padded)
+    max_coupled = size(coupled_indices, 1)
+    coupled_local = Matrix{Int16}(undef, max_coupled, K_padded)
+    for i in 1:K_padded
+        g = (i - 1) ÷ block_size + 1
+        li = i - (g - 1) * block_size
+        for j in 1:max_coupled
+            coupled_local[j, i] = (j <= n_coupled[i] ? coupled_indices[j, i] -
+                                                       (g - 1) * block_size : li)
+        end
+        perm[i] == 0 && continue
+        for (s, bit) in ((1, 0x01), (2, 0x02))
+            iszero(apply_mask[i] & bit) && continue
+            for (k, c) in enumerate(contributions[(g, local_atoms[s, i])])
+                gather[k + (s - 1) * max_deg, i] = c
+            end
+        end
+    end
+    return LincsWorkgroupAtoms(local_atoms, gather, coupled_local, max_deg)
+end
+
+struct LincsData{A1, A2, L, IM, SD, CM, AS, AM}
     atom1::A1
     atom2::A2
     lengths::L
@@ -62,7 +125,8 @@ struct LincsData{A1, A2, L, IM, SD, CM, AS}
     coupling::CM
     n_rec::Int
     n_iter::Int
-    scatter::AS # `nothing` on GPU, see `LincsAtomScatter`
+    scatter::AS # `LincsAtomScatter` on CPU, `LincsWorkgroupAtoms` on GPU
+    apply_mask::AM # `nothing` on CPU, see `lincs_apply_owned!`
 end
 
 struct LincsWorkspace{BV, R, S, TM, BL, FS}
@@ -386,7 +450,8 @@ function build_lincs_data(dist_constraints::AbstractVector{<:DistanceConstraint}
 
     coupling = build_lincs_coupling_matrix(atom1, atom2, invmass, sdiag, T)
     scatter = build_lincs_atom_scatter(atom1, atom2, length(masses))
-    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, n_rec, n_iter, scatter)
+    return LincsData(atom1, atom2, lengths, invmass, sdiag, coupling, n_rec, n_iter, scatter,
+                     nothing)
 end
 
 function create_lincs_workspace(data::LincsData)
@@ -516,19 +581,54 @@ end
 end
 
 # --- GPU kernels ---
+const default_lincs_block_size = 128
+# The most coupled constraints for which `lincs_fused_position_correction_kernel!` is used
+const max_coupled_registers = 8
+
 # These fused kernels rely on @synchronize (workgroup barrier) between matrix expansion
 # iterations. Correctness requires that all coupled constraints within a connected
 # component reside in the same workgroup. This is ensured by group_constraints_for_gpu,
 # which packs connected components into blocks, and by passing gpu_block_size as the
 # workgroup size to the KernelAbstractions kernel constructor.
+# It also means that every constraint that moves an atom is in the same workgroup, so
+# once the workgroup has added its changes to `delta_buf` it can apply them to its atoms
+# itself rather than a separate kernel doing so, see `lincs_apply_owned!`.
+
+#=
+Add the changes accumulated in `delta_buf` to the coordinates or velocities `x` of the
+atoms that constraint `i` applies, and zero them, after a workgroup barrier.
+`apply_mask[i]` has bit 1 set if the constraint applies its first atom and bit 2 if it
+applies its second, with each constrained atom applied by one constraint. Called by every
+thread of the workgroup. The changes are read with an atomic swap since they were added
+with atomics.
+=#
+@inline function lincs_apply_atom!(x, delta_buf, a, unit_scale)
+    T = eltype(delta_buf)
+    d1 = Atomix.@atomicswap delta_buf[1, a] = zero(T)
+    d2 = Atomix.@atomicswap delta_buf[2, a] = zero(T)
+    d3 = Atomix.@atomicswap delta_buf[3, a] = zero(T)
+    x[a] += SVector(d1, d2, d3) .* unit_scale
+    return x
+end
+
+@inline function lincs_apply_owned!(x, delta_buf, a1, a2, mask, unit_scale)
+    if !iszero(mask & 0x01)
+        lincs_apply_atom!(x, delta_buf, a1, unit_scale)
+    end
+    if !iszero(mask & 0x02)
+        lincs_apply_atom!(x, delta_buf, a2, unit_scale)
+    end
+    return x
+end
 
 @kernel inbounds=true function lincs_fused_position_kernel!(
         delta_buf,
         B, rhs, sol, tmp,
-        @Const(coords), @Const(old_coords),
+        coords, @Const(old_coords),
         @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, n_rec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial, @Const(apply_mask),
+        unit_scale)
     i = @index(Global, Linear)
     @uniform T = eltype(lengths)
 
@@ -581,15 +681,393 @@ end
         Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
         Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
     end
+
+    @synchronize
+    lincs_apply_owned!(coords, delta_buf, a1, a2, apply_mask[i], unit_scale)
+end
+
+#=
+The position solve followed by the `n_iter` correction iterations for rotational
+lengthening in one kernel, doing what `lincs_fused_position_kernel!` and then
+`lincs_fused_correction_kernel!` do. As every constraint that moves an atom is in the
+workgroup, the coordinates the corrections start from are those the workgroup has applied,
+which a barrier makes visible, so the corrections do not need a launch each. The
+coefficients of the coupled constraints only depend on the directions from the old
+coordinates, so they are found once, with `max_coupled` given as a type parameter so that
+they are kept in registers, as is the solution of each constraint. The operations are done
+in the same order as in the two kernels, so the results are the same.
+=#
+# The indices and coefficients of the constraints coupled to constraint `i`, padded with `i`
+#   and zero to `max_coupled`
+@inline function lincs_coupled_coefs(coupled_indices, coupled_coef, B, B_i, i, nc,
+                                     ::Val{max_coupled}) where max_coupled
+    coupled = ntuple(j -> @inbounds(j <= nc ? coupled_indices[j, i] : i), Val(max_coupled))
+    blcc = ntuple(Val(max_coupled)) do j
+        @inline
+        @inbounds(j <= nc ? coupled_coef[j, i] * dot(B_i, B[coupled[j]]) :
+                            zero(eltype(coupled_coef)))
+    end
+    return coupled, blcc
+end
+
+# The sum over the coupled constraints of the coefficient times `src` of the constraint, in
+#   order, unrolled so that the tuples stay in registers
+@inline function lincs_coupled_sum(blcc::Tuple, coupled::Tuple, src, nc)
+    T = eltype(src)
+    terms = ntuple(Val(length(blcc))) do j
+        @inline
+        @inbounds(j <= nc ? blcc[j] * src[coupled[j]] : zero(T))
+    end
+    return foldl(+, terms; init=zero(T))
+end
+
+@kernel inbounds=true function lincs_fused_position_correction_kernel!(
+        delta_buf,
+        B, rhs, tmp,
+        coords, @Const(old_coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
+        @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
+        ::Val{max_coupled}, n_rec, n_iter, boundary, factor_sum, needs_virial,
+        @Const(apply_mask), unit_scale) where max_coupled
+    i = @index(Global, Linear)
+    @uniform T = eltype(lengths)
+
+    a1, a2 = atom1[i], atom2[i]
+    length_i, sdiag_i = lengths[i], sdiag[i]
+    invmass_1, invmass_2 = invmass[a1], invmass[a2]
+    mask_i = apply_mask[i]
+
+    diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+    inv_len = inv(sqrt(dot(diff_old, diff_old)))
+    B_i = diff_old * inv_len
+    B[i] = B_i
+
+    diff_new = lincs_bond_vector(coords, a1, a2, boundary)
+    proj = dot(B_i, diff_new)
+    val = sdiag_i * (proj - length_i)
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    coupled, blcc = lincs_coupled_coefs(coupled_indices, coupled_coef, B, B_i, i, nc,
+                                        Val(max_coupled))
+
+    for iter in 0:n_iter
+        if iter > 0
+            # The coordinates applied by the workgroup
+            @synchronize
+            diff = lincs_bond_vector(coords, a1, a2, boundary)
+            dlen2 = 2 * length_i^2 - dot(diff, diff)
+            p = sqrt(max(dlen2, zero(T)))
+            val = sdiag_i * (length_i - p)
+        end
+        rhs[i] = val
+        sol_i = val
+
+        if n_rec > 0
+            @synchronize
+        end
+        for rec in 1:n_rec
+            mvb = lincs_coupled_sum(blcc, coupled, (isodd(rec) ? rhs : tmp), nc)
+            if isodd(rec)
+                tmp[i] = mvb
+            else
+                rhs[i] = mvb
+            end
+            sol_i += mvb
+            if rec < n_rec
+                @synchronize
+            end
+        end
+
+        factor = sdiag_i * sol_i
+        if needs_virial
+            factor_sum[i] += factor
+        end
+        delta = B_i * factor
+        for dim in 1:3
+            d = delta[dim]
+            Atomix.@atomic delta_buf[dim, a1] -= invmass_1 * d
+            Atomix.@atomic delta_buf[dim, a2] += invmass_2 * d
+        end
+
+        @synchronize
+        lincs_apply_owned!(coords, delta_buf, a1, a2, mask_i, unit_scale)
+    end
+end
+
+#=
+LINCS on the GPU with the data of each workgroup in shared memory: the directions,
+right-hand sides and solutions of its constraints, and the coordinates or velocities of its
+atoms, see `LincsWorkgroupAtoms`. Each atom is loaded by the constraint that applies it,
+which adds the changes from the constraints the atom is in, in a fixed order, and writes the
+atom back at the end. This does the operations of `lincs_fused_position_correction_kernel!`
+and `lincs_fused_velocity_kernel!` without the atomic operations in device memory and with
+one read and write of each atom, apart from the order in which the changes to an atom are
+added. The directions are written to `B` when the virial is needed.
+=#
+const max_deg_registers = 8
+
+@inline lincs_shared_vec(arr, k) = @inbounds SVector(arr[1, k], arr[2, k], arr[3, k])
+
+@inline function lincs_shared_store!(arr, k, v)
+    @inbounds arr[1, k] = v[1]
+    @inbounds arr[2, k] = v[2]
+    @inbounds arr[3, k] = v[3]
+    return arr
+end
+
+# The coefficients of the constraints coupled to the one at position `li` of the
+#   workgroup, from the directions in shared memory, padded with zero to `max_coupled`
+@inline function lincs_shared_coupled_coefs(coupled_local, coupled_coef, B_sh, B_i, i, nc,
+                                            ::Val{max_coupled}) where max_coupled
+    coupled = ntuple(j -> @inbounds(coupled_local[j, i]), Val(max_coupled))
+    # Without inlining the closure is called with its captures on the stack, which every
+    #   thread then reads and writes in device memory
+    blcc = ntuple(Val(max_coupled)) do j
+        @inline
+        @inbounds(j <= nc ? coupled_coef[j, i] * dot(B_i, lincs_shared_vec(B_sh, coupled[j])) :
+                            zero(eltype(coupled_coef)))
+    end
+    return coupled, blcc
+end
+
+# The change to an atom from the constraints listed for it in `gather`, which are signed by
+#   which end of the constraint the atom is, each change found as in the scatter kernels
+@inline function lincs_gather_delta(gather, i, offset, ::Val{max_deg}, B_sh, f_sh,
+                                    invmass_a) where max_deg
+    T = eltype(f_sh)
+    d1, d2, d3 = zero(T), zero(T), zero(T)
+    @inbounds for k in 1:max_deg
+        c = gather[k + offset, i]
+        if c != 0
+            lc = abs(c)
+            factor = f_sh[lc]
+            if c < 0
+                d1 -= invmass_a * (B_sh[1, lc] * factor)
+                d2 -= invmass_a * (B_sh[2, lc] * factor)
+                d3 -= invmass_a * (B_sh[3, lc] * factor)
+            else
+                d1 += invmass_a * (B_sh[1, lc] * factor)
+                d2 += invmass_a * (B_sh[2, lc] * factor)
+                d3 += invmass_a * (B_sh[3, lc] * factor)
+            end
+        end
+    end
+    return SVector(d1, d2, d3)
+end
+
+# The matrix expansion for the right-hand side `val` of the constraint at position `li`,
+#   which every thread of the workgroup calls, returning the solution
+# Only for the GPU kernels, as the CPU backend of KernelAbstractions only allows
+#   `@synchronize` in the body of a kernel
+@inline function lincs_shared_solve(rhs_sh, tmp_sh, li, val, blcc, coupled, nc, n_rec)
+    @inbounds rhs_sh[li] = val
+    sol_i = val
+    if n_rec > 0
+        @synchronize()
+    end
+    for rec in 1:n_rec
+        mvb = lincs_coupled_sum(blcc, coupled, (isodd(rec) ? rhs_sh : tmp_sh), nc)
+        if isodd(rec)
+            @inbounds tmp_sh[li] = mvb
+        else
+            @inbounds rhs_sh[li] = mvb
+        end
+        sol_i += mvb
+        if rec < n_rec
+            @synchronize()
+        end
+    end
+    return sol_i
+end
+
+@kernel inbounds=true function lincs_shared_position_kernel!(
+        coords, @Const(old_coords),
+        @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
+        @Const(coupled_local), @Const(coupled_coef), @Const(n_coupled_arr),
+        @Const(local_atoms), @Const(gather), B,
+        ::Val{max_coupled}, ::Val{max_deg}, ::Val{block_size}, n_rec, n_iter, boundary,
+        factor_sum, needs_virial, @Const(apply_mask),
+        unit_scale) where {max_coupled, max_deg, block_size}
+    i = @index(Global, Linear)
+    li = @index(Local, Linear)
+    @uniform T = eltype(lengths)
+    @uniform C = eltype(coords)
+    B_sh = @localmem T (3, block_size)
+    rhs_sh = @localmem T (block_size,)
+    tmp_sh = @localmem T (block_size,)
+    f_sh = @localmem T (block_size,)
+    x_sh = @localmem C (2 * block_size,)
+
+    a1, a2 = atom1[i], atom2[i]
+    la1, la2 = local_atoms[1, i], local_atoms[2, i]
+    length_i, sdiag_i = lengths[i], sdiag[i]
+    invmass_1, invmass_2 = invmass[a1], invmass[a2]
+    mask_i = apply_mask[i]
+
+    x1, x2 = coords[a1], coords[a2]
+    if !iszero(mask_i & 0x01)
+        x_sh[la1] = x1
+    end
+    if !iszero(mask_i & 0x02)
+        x_sh[la2] = x2
+    end
+
+    diff_old = lincs_bond_vector(old_coords, a1, a2, boundary)
+    inv_len = inv(sqrt(dot(diff_old, diff_old)))
+    B_i = diff_old * inv_len
+    if needs_virial
+        B[i] = B_i
+    end
+    lincs_shared_store!(B_sh, li, B_i)
+
+    diff_new = ustrip.(vector(x2, x1, boundary))
+    proj = dot(B_i, diff_new)
+    val = sdiag_i * (proj - length_i)
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    coupled, blcc = lincs_shared_coupled_coefs(coupled_local, coupled_coef, B_sh, B_i, i,
+                                               nc, Val(max_coupled))
+
+    for iter in 0:n_iter
+        if iter > 0
+            # The coordinates applied by the workgroup
+            @synchronize
+            diff = ustrip.(vector(x_sh[la2], x_sh[la1], boundary))
+            dlen2 = 2 * length_i^2 - dot(diff, diff)
+            p = sqrt(max(dlen2, zero(T)))
+            val = sdiag_i * (length_i - p)
+        end
+        sol_i = lincs_shared_solve(rhs_sh, tmp_sh, li, val, blcc, coupled, nc, n_rec)
+
+        factor = sdiag_i * sol_i
+        if needs_virial
+            factor_sum[i] += factor
+        end
+        f_sh[li] = factor
+
+        @synchronize
+        if !iszero(mask_i & 0x01)
+            x_sh[la1] += lincs_gather_delta(gather, i, 0, Val(max_deg), B_sh, f_sh,
+                                            invmass_1) .* unit_scale
+        end
+        if !iszero(mask_i & 0x02)
+            x_sh[la2] += lincs_gather_delta(gather, i, max_deg, Val(max_deg), B_sh, f_sh,
+                                            invmass_2) .* unit_scale
+        end
+    end
+
+    if !iszero(mask_i & 0x01)
+        coords[a1] = x_sh[la1]
+    end
+    if !iszero(mask_i & 0x02)
+        coords[a2] = x_sh[la2]
+    end
+end
+
+# The velocity solve, followed by `n_iter` correction iterations as
+#   `lincs_fused_velocity_correction_kernel!` does
+@kernel inbounds=true function lincs_shared_velocity_kernel!(
+        @Const(coords), velocities,
+        @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
+        @Const(coupled_local), @Const(coupled_coef), @Const(n_coupled_arr),
+        @Const(local_atoms), @Const(gather), B,
+        ::Val{max_coupled}, ::Val{max_deg}, ::Val{block_size}, n_rec, n_iter, boundary,
+        factor_sum, needs_virial, @Const(apply_mask),
+        unit_scale) where {max_coupled, max_deg, block_size}
+    i = @index(Global, Linear)
+    li = @index(Local, Linear)
+    @uniform T = eltype(sdiag)
+    @uniform V = eltype(velocities)
+    B_sh = @localmem T (3, block_size)
+    rhs_sh = @localmem T (block_size,)
+    tmp_sh = @localmem T (block_size,)
+    f_sh = @localmem T (block_size,)
+    v_sh = @localmem V (2 * block_size,)
+
+    a1, a2 = atom1[i], atom2[i]
+    la1, la2 = local_atoms[1, i], local_atoms[2, i]
+    sdiag_i = sdiag[i]
+    invmass_1, invmass_2 = invmass[a1], invmass[a2]
+    mask_i = apply_mask[i]
+
+    v1, v2 = velocities[a1], velocities[a2]
+    if !iszero(mask_i & 0x01)
+        v_sh[la1] = v1
+    end
+    if !iszero(mask_i & 0x02)
+        v_sh[la2] = v2
+    end
+
+    diff = lincs_bond_vector(coords, a1, a2, boundary)
+    inv_len = inv(sqrt(dot(diff, diff)))
+    B_i = diff * inv_len
+    if needs_virial
+        B[i] = B_i
+    end
+    lincs_shared_store!(B_sh, li, B_i)
+
+    dv = ustrip.(v2 - v1)
+    val = -sdiag_i * dot(B_i, dv)
+
+    @synchronize
+
+    nc = n_coupled_arr[i]
+    coupled, blcc = lincs_shared_coupled_coefs(coupled_local, coupled_coef, B_sh, B_i, i,
+                                               nc, Val(max_coupled))
+
+    for iter in 0:n_iter
+        if iter > 0
+            # The velocities applied by the workgroup
+            @synchronize
+            dv = ustrip.(v_sh[la2] - v_sh[la1])
+            val = -sdiag_i * dot(B_i, dv)
+        end
+        sol_i = lincs_shared_solve(rhs_sh, tmp_sh, li, val, blcc, coupled, nc, n_rec)
+
+        factor = sdiag_i * sol_i
+        if needs_virial
+            factor_sum[i] += factor
+        end
+        f_sh[li] = factor
+
+        @synchronize
+        if !iszero(mask_i & 0x01)
+            v_sh[la1] += lincs_gather_delta(gather, i, 0, Val(max_deg), B_sh, f_sh,
+                                            invmass_1) .* unit_scale
+        end
+        if !iszero(mask_i & 0x02)
+            v_sh[la2] += lincs_gather_delta(gather, i, max_deg, Val(max_deg), B_sh, f_sh,
+                                            invmass_2) .* unit_scale
+        end
+    end
+
+    if !iszero(mask_i & 0x01)
+        velocities[a1] = v_sh[la1]
+    end
+    if !iszero(mask_i & 0x02)
+        velocities[a2] = v_sh[la2]
+    end
+end
+
+# Whether the shared memory kernels can be used for the constraints
+function use_lincs_shared_kernels(data)
+    return data.scatter isa LincsWorkgroupAtoms &&
+           data.coupling.max_coupled <= max_coupled_registers &&
+           data.scatter.max_deg <= max_deg_registers
 end
 
 @kernel inbounds=true function lincs_fused_correction_kernel!(
         delta_buf,
         @Const(B), rhs, sol, tmp,
-        @Const(coords),
+        coords,
         @Const(atom1), @Const(atom2), @Const(lengths), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, n_rec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial, @Const(apply_mask),
+        unit_scale)
     i = @index(Global, Linear)
     @uniform T = eltype(lengths)
 
@@ -641,15 +1119,19 @@ end
         Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
         Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
     end
+
+    @synchronize
+    lincs_apply_owned!(coords, delta_buf, a1, a2, apply_mask[i], unit_scale)
 end
 
 @kernel inbounds=true function lincs_fused_velocity_kernel!(
         delta_buf,
         B, rhs, sol, tmp,
-        @Const(coords), @Const(velocities),
+        @Const(coords), velocities,
         @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, n_rec, boundary, factor_sum, needs_virial)
+        max_coupled, n_rec, boundary, factor_sum, needs_virial, @Const(apply_mask),
+        unit_scale)
     i = @index(Global, Linear)
     @uniform T = eltype(sdiag)
 
@@ -700,15 +1182,18 @@ end
         Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
         Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
     end
+
+    @synchronize
+    lincs_apply_owned!(velocities, delta_buf, a1, a2, apply_mask[i], unit_scale)
 end
 
 @kernel inbounds=true function lincs_fused_velocity_correction_kernel!(
         delta_buf,
         @Const(B), rhs, sol, tmp,
-        @Const(velocities),
+        velocities,
         @Const(atom1), @Const(atom2), @Const(invmass), @Const(sdiag),
         @Const(coupled_indices), @Const(coupled_coef), @Const(n_coupled_arr),
-        max_coupled, n_rec, factor_sum, needs_virial)
+        max_coupled, n_rec, factor_sum, needs_virial, @Const(apply_mask), unit_scale)
     i = @index(Global, Linear)
     @uniform T = eltype(sdiag)
 
@@ -756,19 +1241,9 @@ end
         Atomix.@atomic delta_buf[dim, a1] -= invmass[a1] * d
         Atomix.@atomic delta_buf[dim, a2] += invmass[a2] * d
     end
-end
 
-@kernel inbounds=true function lincs_apply_deltas_kernel!(
-        coords, delta_buf,
-        @Const(constrained_atoms), unit_scale)
-    idx = @index(Global, Linear)
-    if idx <= length(constrained_atoms)
-        a = constrained_atoms[idx]
-        coords[a] += SVector(delta_buf[1, a], delta_buf[2, a], delta_buf[3, a]) .* unit_scale
-        delta_buf[1, a] = zero(eltype(delta_buf))
-        delta_buf[2, a] = zero(eltype(delta_buf))
-        delta_buf[3, a] = zero(eltype(delta_buf))
-    end
+    @synchronize
+    lincs_apply_owned!(velocities, delta_buf, a1, a2, apply_mask[i], unit_scale)
 end
 
 @kernel inbounds=true function lincs_accumulate_virial_kernel!(
@@ -1100,7 +1575,7 @@ function accumulate_lincs_position_virial_gpu!(data, ws, context, backend, block
     end
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
-    virial_kern!(context.buffers.constraint_virial_nounits, ws.B, data.lengths,
+    launch_kernel!(virial_kern!, context.buffers.constraint_virial_nounits, ws.B, data.lengths,
                  data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
     return context
@@ -1116,7 +1591,7 @@ function accumulate_lincs_velocity_virial_gpu!(data, ws, context, backend, block
     end
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
-    virial_kern!(context.buffers.constraint_virial_nounits, ws.B, data.lengths,
+    launch_kernel!(virial_kern!, context.buffers.constraint_virial_nounits, ws.B, data.lengths,
                  data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
     return context
@@ -1127,39 +1602,53 @@ function lincs_apply_gpu!(coords, old_coords, data, ws, boundary,
     K_padded = length(data.atom1)
     backend = get_backend(coords)
     unit_scale = oneunit(eltype(eltype(coords)))
-    n_ca = length(constrained_atoms)
     coupling = data.coupling
     if context.needs_virial
         fill!(ws.factor_sum, zero(eltype(ws.factor_sum)))
     end
 
-    # Fused solve: bond vectors + blcc + SpMV iterations + scatter
-    fused_kern! = lincs_fused_position_kernel!(backend, block_size)
-    fused_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
-                coords, old_coords,
-                data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
-                coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
-                context.needs_virial;
-                ndrange=K_padded)
-
-    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
-    apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
-                ndrange=n_ca)
-
-    # Correction iterations (rotational lengthening)
-    if data.n_iter > 0
-        corr_kern! = lincs_fused_correction_kernel!(backend, block_size)
-        for _ in 1:data.n_iter
-            corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
-                       coords,
+    # Fused solve: bond vectors + blcc + SpMV iterations + scatter, with each workgroup
+    #   then moving its atoms, and the correction iterations (rotational lengthening)
+    # The coefficients of the coupled constraints are kept in registers when there are few
+    if use_lincs_shared_kernels(data)
+        wg = data.scatter
+        kern! = ka_kernel(lincs_shared_position_kernel!, backend, block_size,
+                          Val(default_lincs_block_size))
+        launch_kernel!(kern!, coords, old_coords, data.atom1, data.atom2, data.lengths,
+                       data.invmass, data.sdiag, wg.coupled_local, coupling.coupled_coef,
+                       coupling.n_coupled, wg.local_atoms, wg.gather, ws.B,
+                       Val(coupling.max_coupled), Val(wg.max_deg), Val(block_size),
+                       data.n_rec, data.n_iter, boundary, ws.factor_sum,
+                       context.needs_virial, data.apply_mask, unit_scale; ndrange=K_padded)
+    elseif coupling.max_coupled <= max_coupled_registers
+        fused_kern! = ka_kernel(lincs_fused_position_correction_kernel!, backend, block_size,
+                                Val(default_lincs_block_size))
+        launch_kernel!(fused_kern!, delta_buf, ws.B, ws.rhs, ws.tmp, coords, old_coords,
                        data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
                        coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
-                       coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
-                       context.needs_virial;
+                       Val(coupling.max_coupled), data.n_rec, data.n_iter, boundary,
+                       ws.factor_sum, context.needs_virial, data.apply_mask, unit_scale;
                        ndrange=K_padded)
-            apply_kern!(coords, delta_buf, constrained_atoms, unit_scale;
-                        ndrange=n_ca)
+    else
+        fused_kern! = lincs_fused_position_kernel!(backend, block_size)
+        launch_kernel!(fused_kern!, delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                    coords, old_coords,
+                    data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
+                    coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
+                    coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
+                    context.needs_virial, data.apply_mask, unit_scale;
+                    ndrange=K_padded)
+        if data.n_iter > 0
+            corr_kern! = lincs_fused_correction_kernel!(backend, block_size)
+            for _ in 1:data.n_iter
+                launch_kernel!(corr_kern!, delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+                           coords,
+                           data.atom1, data.atom2, data.lengths, data.invmass, data.sdiag,
+                           coupling.coupled_indices, coupling.coupled_coef,
+                           coupling.n_coupled, coupling.max_coupled, data.n_rec, boundary,
+                           ws.factor_sum, context.needs_virial, data.apply_mask,
+                           unit_scale; ndrange=K_padded)
+            end
         end
     end
 
@@ -1173,38 +1662,48 @@ function lincs_vel_apply_gpu!(velocities, coords, data, ws, boundary,
     K_padded = length(data.atom1)
     backend = get_backend(velocities)
     unit_vel_scale = oneunit(eltype(eltype(velocities)))
-    n_ca = length(constrained_atoms)
     coupling = data.coupling
     if context.needs_virial
         fill!(ws.factor_sum, zero(eltype(ws.factor_sum)))
     end
 
-    fused_kern! = lincs_fused_velocity_kernel!(backend, block_size)
-    fused_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+    if use_lincs_shared_kernels(data)
+        # The correction iterations are done in the same kernel
+        wg = data.scatter
+        kern! = ka_kernel(lincs_shared_velocity_kernel!, backend, block_size,
+                          Val(default_lincs_block_size))
+        launch_kernel!(kern!, coords, velocities, data.atom1, data.atom2, data.invmass,
+                       data.sdiag, wg.coupled_local, coupling.coupled_coef,
+                       coupling.n_coupled, wg.local_atoms, wg.gather, ws.B,
+                       Val(coupling.max_coupled), Val(wg.max_deg), Val(block_size),
+                       data.n_rec, n_iter_velocity, boundary, ws.factor_sum,
+                       context.needs_virial, data.apply_mask, unit_vel_scale;
+                       ndrange=K_padded)
+        accumulate_lincs_velocity_virial_gpu!(data, ws, context, backend, block_size)
+        return velocities
+    end
+
+    fused_kern! = ka_kernel(lincs_fused_velocity_kernel!, backend, block_size,
+                            Val(default_lincs_block_size))
+    launch_kernel!(fused_kern!, delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
                 coords, velocities,
                 data.atom1, data.atom2, data.invmass, data.sdiag,
                 coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
                 coupling.max_coupled, data.n_rec, boundary, ws.factor_sum,
-                context.needs_virial;
+                context.needs_virial, data.apply_mask, unit_vel_scale;
                 ndrange=K_padded)
-
-    apply_kern! = lincs_apply_deltas_kernel!(backend, block_size)
-    apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
-                ndrange=n_ca)
 
     # Iterative correction: re-evaluate velocity residual and solve again
     if n_iter_velocity > 0
         corr_kern! = lincs_fused_velocity_correction_kernel!(backend, block_size)
         for _ in 1:n_iter_velocity
-            corr_kern!(delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
+            launch_kernel!(corr_kern!, delta_buf, ws.B, ws.rhs, ws.sol, ws.tmp,
                        velocities,
                        data.atom1, data.atom2, data.invmass, data.sdiag,
                        coupling.coupled_indices, coupling.coupled_coef, coupling.n_coupled,
                        coupling.max_coupled, data.n_rec, ws.factor_sum,
-                       context.needs_virial;
+                       context.needs_virial, data.apply_mask, unit_vel_scale;
                        ndrange=K_padded)
-            apply_kern!(velocities, delta_buf, constrained_atoms, unit_vel_scale;
-                        ndrange=n_ca)
         end
     end
 
@@ -1355,23 +1854,46 @@ function move_lincs_to_gpu(data::LincsData, ws, arr_type, n_atoms, block_size)
     # Build dense coupling layout
     dense_coupling = build_dense_coupling(perm, data.coupling, T)
 
+    # Each constrained atom is applied by the first constraint it is in, see
+    #   `lincs_apply_owned!`, which is in the same workgroup as every other constraint it
+    #   is in. The dummy constraints apply nothing.
+    apply_mask = zeros(UInt8, K_padded)
+    owned = falses(n_atoms)
+    for (new_i, old_c) in enumerate(perm)
+        old_c == 0 && continue
+        for (bit, a) in ((0x01, atom1_padded[new_i]), (0x02, atom2_padded[new_i]))
+            if !owned[a]
+                owned[a] = true
+                apply_mask[new_i] |= bit
+            end
+        end
+    end
+
     # Transfer to GPU
-    atom1_gpu = arr_type(atom1_padded)
-    atom2_gpu = arr_type(atom2_padded)
+    # 32-bit indices halve the index data each kernel reads
+    atom1_gpu = arr_type(Int32.(atom1_padded))
+    atom2_gpu = arr_type(Int32.(atom2_padded))
     lengths_gpu = arr_type(lengths_padded)
     invmass_gpu = arr_type(data.invmass)
     sdiag_gpu = arr_type(sdiag_padded)
 
     coupled_indices_gpu = arr_type(dense_coupling.coupled_indices)
     coupled_coef_gpu = arr_type(dense_coupling.coupled_coef)
-    n_coupled_gpu = arr_type(dense_coupling.n_coupled)
+    n_coupled_gpu = arr_type(Int32.(dense_coupling.n_coupled))
     coupling_gpu = LincsCouplingDense(coupled_indices_gpu, coupled_coef_gpu,
                                       n_coupled_gpu, dense_coupling.max_coupled)
 
-    # The GPU path scatters into `delta_buf` with atomics and reorders and pads the
-    #   constraints, so the CPU atom mapping does not apply and is not carried over
+    # The GPU path reorders and pads the constraints, so the CPU atom mapping does not
+    #   apply and the atoms of each workgroup are used instead
+    wg_atoms = build_lincs_workgroup_atoms(perm, atom1_padded, atom2_padded, apply_mask,
+                                           dense_coupling.coupled_indices,
+                                           dense_coupling.n_coupled, block_size)
+    wg_atoms_gpu = LincsWorkgroupAtoms(arr_type(wg_atoms.local_atoms),
+                                       arr_type(wg_atoms.gather),
+                                       arr_type(wg_atoms.coupled_local), wg_atoms.max_deg)
     data_gpu = LincsData(atom1_gpu, atom2_gpu, lengths_gpu, invmass_gpu,
-                         sdiag_gpu, coupling_gpu, data.n_rec, data.n_iter, nothing)
+                         sdiag_gpu, coupling_gpu, data.n_rec, data.n_iter, wg_atoms_gpu,
+                         arr_type(apply_mask))
 
     # Workspace sized for padded constraint count
     backend = get_backend(atom1_gpu)

@@ -73,14 +73,16 @@ parameter_fields(::Type{<:Coulomb}) =
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...) where C
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = charge(atom_i), charge(atom_j)
     params = (ke, qi, qj)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -229,16 +231,18 @@ parameter_fields(::Type{<:CoulombScaled}) =
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
+    inv_r = inv(r)
 
     cutoff = inter.cutoff
     params = (ke, qij)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = λ * (f / r) * dr
+    fdr = (λ * f * inv_r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -921,6 +925,7 @@ parameter_fields(::Type{<:CoulombReactionField}) =
     ke = inter.coulomb_const / inter.solute_dielectric
     qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
+    inv_r = inv(r)
 
     if special
         # 1-4 interactions do not use the reaction field approximation
@@ -930,12 +935,12 @@ parameter_fields(::Type{<:CoulombReactionField}) =
                                           inter.solute_dielectric)
     end
 
-    f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
+    f = (ke * qi * qj) * (inv_r - 2 * krf * r2) * inv_r^2
 
     if special
-        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
+        return within_cutoff(f * inter.weight_special, r, inter.dist_cutoff) * dr
     else
-        return f * dr * (r <= inter.dist_cutoff)
+        return within_cutoff(f, r, inter.dist_cutoff) * dr
     end
 end
 
@@ -963,9 +968,9 @@ end
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
 
     if special
-        return pe * inter.weight_special * (r <= inter.dist_cutoff)
+        return within_cutoff(pe * inter.weight_special, r, inter.dist_cutoff)
     else
-        return pe * (r <= inter.dist_cutoff)
+        return within_cutoff(pe, r, inter.dist_cutoff)
     end
 end
 
@@ -1129,9 +1134,10 @@ end
                                           inter.solute_dielectric)
     end
 
-    f = λ * (ke * qij) * (inv(r) - 2 * krf * r2) * inv(r2)
-    return special ? f * dr * inter.weight_special * (r <= inter.dist_cutoff) :
-                     f * dr * (r <= inter.dist_cutoff)
+    inv_r = inv(r)
+    f = λ * (ke * qij) * (inv_r - 2 * krf * r2) * inv_r^2
+    return special ? within_cutoff(f * inter.weight_special, r, inter.dist_cutoff) * dr :
+                     within_cutoff(f, r, inter.dist_cutoff) * dr
 end
 
 @inline function potential_energy(inter::CoulombReactionFieldScaled,
@@ -1168,8 +1174,8 @@ end
     end
 
     pe = λ * (ke * qij) * (inv(r) + krf * r2 - crf)
-    return special ? pe * inter.weight_special * (r <= inter.dist_cutoff) :
-                     pe * (r <= inter.dist_cutoff)
+    return special ? within_cutoff(pe * inter.weight_special, r, inter.dist_cutoff) :
+                     within_cutoff(pe, r, inter.dist_cutoff)
 end
 
 @doc raw"""
@@ -1952,6 +1958,8 @@ function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     end
 end
 
+const two_over_sqrt_π = 1.1283791670955126
+
 @inline function force(inter::CoulombEwald{T},
                        dr,
                        atom_i,
@@ -1964,16 +1972,18 @@ end
     qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
+    # Found before the branch, which is slightly faster on the CPU, where the branch is
+    #   seldom taken, and the same on the GPU
     αr = α_ewald * r
-    exp_mαr2 = exp(-αr^2)
+    exp_mαr2 = fast_exp(-αr^2)
     erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
-    f = ke * qi * qj * inv_r^3
+    f = within_cutoff(ke * qi * qj * inv_r^3, r, inter.dist_cutoff)
     if special
         # Special interactions excluded from reciprocal calculation
         # so have a standard interaction
-        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
+        return (f * inter.weight_special) * dr
     else
-        return f * dr * (erfc_αr + 2 * αr * exp_mαr2 / sqrt(T(π))) * (r <= inter.dist_cutoff)
+        return (f * (erfc_αr + T(two_over_sqrt_π) * αr * exp_mαr2)) * dr
     end
 end
 
@@ -1989,14 +1999,14 @@ end
     qi, qj = charge(atom_i), charge(atom_j)
     r = sqrt(r2)
     inv_r = inv(r)
-    αr = α_ewald * r
-    exp_mαr2 = exp(-αr^2)
-    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
-    pe = ke * qi * qj * inv_r
+    pe = within_cutoff(ke * qi * qj * inv_r, r, inter.dist_cutoff)
     if special
-        return pe * inter.weight_special * (r <= inter.dist_cutoff)
+        return pe * inter.weight_special
     else
-        return pe * erfc_αr * (r <= inter.dist_cutoff)
+        αr = α_ewald * r
+        exp_mαr2 = fast_exp(-αr^2)
+        erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+        return pe * erfc_αr
     end
 end
 
@@ -2107,14 +2117,14 @@ end
     end
 
     inv_r = inv(r)
-    αr = α_ewald * r
-    exp_mαr2 = exp(-αr^2)
-    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
-    f = ke * qq * inv_r^3
+    f = within_cutoff(ke * qq * inv_r^3, r, inter.dist_cutoff)
     if special
-        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
+        return (f * inter.weight_special) * dr
     else
-        return f * dr * (erfc_αr + 2 * αr * exp_mαr2 / sqrt(T(π))) * (r <= inter.dist_cutoff)
+        αr = α_ewald * r
+        exp_mαr2 = fast_exp(-αr^2)
+        erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+        return (f * (erfc_αr + T(two_over_sqrt_π) * αr * exp_mαr2)) * dr
     end
 end
 
@@ -2139,14 +2149,14 @@ end
     end
 
     inv_r = inv(r)
-    αr = α_ewald * r
-    exp_mαr2 = exp(-αr^2)
-    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
-    pe = ke * qq * inv_r
+    pe = within_cutoff(ke * qq * inv_r, r, inter.dist_cutoff)
     if special
-        return pe * inter.weight_special * (r <= inter.dist_cutoff)
+        return pe * inter.weight_special
     else
-        return pe * erfc_αr * (r <= inter.dist_cutoff)
+        αr = α_ewald * r
+        exp_mαr2 = fast_exp(-αr^2)
+        erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+        return pe * erfc_αr
     end
 end
 
@@ -2176,9 +2186,9 @@ end
 @inline function softcore_ewald_screen(inter, r)
     T = typeof(ustrip(inter.coulomb_const))
     αr = inter.α_ewald * r
-    exp_mαr2 = exp(-αr^2)
+    exp_mαr2 = fast_exp(-αr^2)
     erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
-    force_screen = 2 * inter.α_ewald * exp_mαr2 / sqrt(T(π))
+    force_screen = T(two_over_sqrt_π) * inter.α_ewald * exp_mαr2
     return erfc_αr, force_screen
 end
 
@@ -2656,7 +2666,9 @@ parameter_fields(::Type{<:Yukawa}) =
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = charge(atom_i), charge(atom_j)
@@ -2664,7 +2676,7 @@ parameter_fields(::Type{<:Yukawa}) =
     params = (coulomb_const, qi, qj, kappa)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -2673,7 +2685,7 @@ parameter_fields(::Type{<:Yukawa}) =
 end
 
 function pairwise_force(::Yukawa, r, (coulomb_const, qi, qj, kappa))
-    return (coulomb_const * qi * qj) * exp(-kappa * r) * (kappa * r + 1) / r^2
+    return (coulomb_const * qi * qj) * fast_exp(-kappa * r) * (kappa * r + 1) * inv(r^2)
 end
 
 @inline function potential_energy(inter::Yukawa,
@@ -2698,5 +2710,5 @@ end
 end
 
 function pairwise_pe(::Yukawa, r, (coulomb_const, qi, qj, kappa))
-    return (coulomb_const * qi * qj) * inv(r) * exp(-kappa * r)
+    return (coulomb_const * qi * qj) * inv(r) * fast_exp(-kappa * r)
 end

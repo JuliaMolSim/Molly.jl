@@ -731,12 +731,12 @@ Calculate the potential energy between atoms due to a given interaction type on 
 See [`potential_energy`](@ref) for more details.
 This function is only required when a different code path is required on CPU and GPU.
 """
-potential_energy_gpu(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
-potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn, data) = potential_energy(inter, ci, bnd, ai, eu, vi, sn, data)
-potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
+@inline potential_energy_gpu(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
+@inline potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn, data) = potential_energy(inter, ci, bnd, ai, eu, vi, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 

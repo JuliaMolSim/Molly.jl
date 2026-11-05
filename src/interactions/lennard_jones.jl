@@ -80,6 +80,10 @@ parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Before the shortcut so that the compiler can share these with other interactions
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return zero_pairwise_force(dr, force_units)
     end
@@ -87,22 +91,21 @@ parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
     if special
-        return fdr * inter.weight_special
+        return (f * inv_r * inter.weight_special) * dr
     else
-        return fdr
+        return (f * inv_r) * dr
     end
 end
 
 function pairwise_force(::LennardJones, r, (σ2, ϵ))
-    six_term = (σ2 / r^2) ^ 3
-    return (24ϵ / r) * (2 * six_term ^ 2 - six_term)
+    inv_r = inv(r)
+    six_term = (σ2 * inv_r^2) ^ 3
+    return (24ϵ * inv_r) * (2 * six_term ^ 2 - six_term)
 end
 
 @inline function potential_energy(inter::LennardJones,
@@ -747,14 +750,16 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
+    inv_r = inv(r)
 
     params = (σ^2, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = λ * (f / r) * dr
+    fdr = (λ * f * inv_r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -1379,12 +1384,14 @@ parameter_fields(::Type{<:AshbaughHatch}) = ((:weight_special, "weight_14"),)
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
