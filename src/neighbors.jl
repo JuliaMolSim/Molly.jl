@@ -255,6 +255,21 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 
 find_neighbors(sys::System, ::Nothing, args...; kwargs...) = nothing
 
+auto_dist_buffer(nf_type) = 0.2u"nm" # Generic fallback
+
+function calc_dist_neighbors(dist_cutoff, dist_buffer, units, neighbor_finder_auto_update, nf_type)
+    if !isnothing(dist_buffer)
+        return dist_cutoff + dist_buffer
+    end
+    if neighbor_finder_auto_update
+        dist_buffer_units = auto_dist_buffer(nf_type)
+    else
+        dist_buffer_units = 0.2u"nm"
+    end
+    dist_buffer_auto = (units ? dist_buffer_units : ustrip(u"nm", dist_buffer_units))
+    return dist_cutoff + dist_buffer_auto
+end
+
 #=
 Displacement tracking
 
@@ -901,6 +916,8 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     tracker::DisplacementTracker
 end
 
+auto_dist_buffer(::Type{GPUNeighborFinder}) = 0.3u"nm"
+
 tracks_displacements(nf::GPUNeighborFinder) = nf.auto_update
 
 #=
@@ -1137,6 +1154,8 @@ mutable struct GPUCellListNeighborFinder{D, B, S}
     special::S
     tracker::DisplacementTracker
 end
+
+auto_dist_buffer(::Type{GPUCellListNeighborFinder}) = 0.1u"nm"
 
 tracks_displacements(nf::GPUCellListNeighborFinder) = nf.auto_update
 
@@ -2492,6 +2511,8 @@ function DistanceNeighborFinder(;
                 DisplacementTracker())
 end
 
+auto_dist_buffer(::Type{DistanceNeighborFinder}) = 0.2u"nm"
+
 tracks_displacements(nf::DistanceNeighborFinder) = nf.auto_update
 
 #=
@@ -2856,6 +2877,8 @@ struct TreeNeighborFinder{D, B, S}
     tracker::DisplacementTracker
 end
 
+auto_dist_buffer(::Type{TreeNeighborFinder}) = 0.2u"nm"
+
 tracks_displacements(nf::TreeNeighborFinder) = nf.auto_update
 
 # The neighbor finders that run on the CPU store dense matrices as a BitMatrix
@@ -2967,6 +2990,8 @@ mutable struct CellListMapNeighborFinder{N, T, S, B, SP}
     clm_particlesystem::S
     tracker::DisplacementTracker
 end
+
+auto_dist_buffer(::Type{CellListMapNeighborFinder}) = 0.2u"nm"
 
 tracks_displacements(nf::CellListMapNeighborFinder) = nf.auto_update
 

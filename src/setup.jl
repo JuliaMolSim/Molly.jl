@@ -488,8 +488,11 @@ Each residue is matched to a residue template of the force field, and a
     `Float64` by default, or `float_type` on backends that do not support
     `Float64` such as Metal.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for the non-bonded interactions.
-- `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
-    classical neighbor lists every few steps.
+- `dist_buffer=nothing`: distance added to `dist_cutoff` when calculating
+    neighbor lists. When `neighbor_finder_auto_update=true` this only affects
+    performance and is chosen based on the neighbour finder type, when that is
+    `false` this needs to be selected to avoid atoms crossing the buffer distance
+    and defaults to 0.2u"nm".
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` (all bonds)
     and `:hangles` (all bonds plus H-X-H and H-O-X angles). Note that not all options
@@ -569,7 +572,7 @@ function System(coord_file::AbstractString,
                 float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
                 float_type_high=default_float_type_high(array_type, float_type),
                 dist_cutoff=add_units(1.0, u"nm", units),
-                dist_buffer=add_units(0.2, u"nm", units),
+                dist_buffer=nothing,
                 constraints=:none,
                 rigid_water::Bool=false,
                 constraint_algorithm=SetupLINCS(),
@@ -604,7 +607,7 @@ function System(coord_file::AbstractString,
     if dist_cutoff <= zero(dist_cutoff)
         throw(ArgumentError("dist_cutoff ($dist_cutoff) should be positive"))
     end
-    if dist_buffer < zero(dist_buffer)
+    if !isnothing(dist_buffer) && dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
     if !(constraints in (:none, :hbonds, :allbonds, :hangles))
@@ -699,7 +702,6 @@ function System(coord_file::AbstractString,
                             "PolynomialCutoff, found $lj_cutoff; pass " *
                             "dispersion_correction=false to use this cutoff without it"))
     end
-    dist_neighbors = dist_cutoff + dist_buffer
     T, TH = float_type, float_type_high
     if units
         E  = typeof(zero(T) * u"kJ * mol^-1")
@@ -1213,7 +1215,7 @@ function System(coord_file::AbstractString,
                   units, dist_cutoff, constraints, rigid_water, coul_method, lj_cutoff,
                   neighbor_finder_type, neighbor_finder_auto_update,
                   neighbor_finder_n_steps, implicit_solvent,
-                  grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
+                  grad_safe, dist_buffer, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
 end
@@ -1444,7 +1446,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method, lj_cutoff,
                 neighbor_finder_type, neighbor_finder_auto_update, neighbor_finder_n_steps,
-                implicit_solvent, grad_safe, dist_neighbors, weight_14_lj,
+                implicit_solvent, grad_safe, dist_buffer, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
                 n_threads)
@@ -1660,16 +1662,21 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
+    # Used in branch
+    dist_neighbors_gpucl = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, GPUCellListNeighborFinder))
     if neighbor_finder_type === Nothing
         neighbor_finder = nothing
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT) && !grad_safe
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, GPUNeighborFinder))
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
             # GPUNeighborFinder reuses Morton ordering and tile metadata across
             # `n_steps`, so its search radius needs the same buffer as the other
             # neighbor finders
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors,
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
             auto_update=neighbor_finder_auto_update,
@@ -1678,9 +1685,9 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
-                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors_gpucl)
         neighbor_finder = GPUCellListNeighborFinder(
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors_gpucl,
             eligible=eligible,
             special=special,
             auto_update=neighbor_finder_auto_update,
@@ -1691,8 +1698,10 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, DistanceNeighborFinder))
         neighbor_finder = DistanceNeighborFinder(
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors,
             eligible=eligible,
             special=special,
             auto_update=neighbor_finder_auto_update,
@@ -1703,6 +1712,8 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         # CellListMap requires the cell list cutoff to fit twice in the box
         min_box_side = minimum(box_sides(boundary))
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, CellListMapNeighborFinder))
         if !has_infinite_boundary(boundary) && min_box_side < (2 * dist_neighbors)
             throw(ArgumentError("the minimum box side ($min_box_side) is less than " *
                     "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which " *
@@ -1711,7 +1722,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                     "neighbor_finder_type=DistanceNeighborFinder."))
         end
         neighbor_finder = CellListMapNeighborFinder(
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors,
             boundary=boundary,
             eligible=eligible,
             special=special,
@@ -1721,8 +1732,10 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
             strictness=strictness,
         )
     else
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, neighbor_finder_type))
         neighbor_finder = neighbor_finder_type(;
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors,
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
             auto_update=neighbor_finder_auto_update,
