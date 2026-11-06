@@ -172,6 +172,10 @@ function load_bond_definitions(; xmlpath=nothing, standardBonds=nothing)
     return standardBonds
 end
 
+bond_partner(atom_name, resnum) = (startswith(atom_name, "-") ? (resnum - 1, atom_name[2:end]) :
+                                   startswith(atom_name, "+") ? (resnum + 1, atom_name[2:end]) :
+                                   (resnum, atom_name))
+
 # Builds the topology of the system read from a structure file given the
 #   template bonds
 function create_bonds!(canon_sys, standard_bonds)
@@ -179,7 +183,6 @@ function create_bonds!(canon_sys, standard_bonds)
     bond_set = Set{Tuple{Int, Int}}() # Mirrors bonds to make the lookup below fast
 
     for (chain, resids) in canon_sys
-        n_resids = length(resids)
         atom_maps = Dict{Int, Dict{String, Int}}()
 
         for (resnum, rgraph) in resids
@@ -193,73 +196,29 @@ function create_bonds!(canon_sys, standard_bonds)
         end
 
         for (resnum, rgraph) in resids
-            i = resnum
-            res_name = rgraph.res_name
-
-            if haskey(standard_bonds, res_name)
-                for bond in standard_bonds[res_name]
-                    external = false
-                    if startswith(bond[1], "-") && i > 1
-                        external = true
-                        fromResidue = i - 1
-                        fromAtom = bond[1][2:end]
-
-                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
-                        resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    elseif startswith(bond[1], "+") && i < n_resids
-                        external = true
-                        fromResidue = i + 1
-                        fromAtom = bond[1][2:end]
-
-                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
-                        resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    else
-                        fromResidue = i
-                        fromAtom = bond[1]
-                    end
-
-                    if startswith(bond[2], "-") && i > 1
-                        external = true
-                        toResidue = i - 1
-                        toAtom = bond[2][2:end]
-
-                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
-                        resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    elseif startswith(bond[2], "+") && i < n_resids
-                        external = true
-                        toResidue = i + 1
-                        toAtom = bond[2][2:end]
-
-                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
-                        resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    else
-                        toResidue = i
-                        toAtom = bond[2]
-                    end
-
-                    if fromAtom in keys(atom_maps[fromResidue]) && toAtom in keys(atom_maps[toResidue])
-                        atom1 = atom_maps[fromResidue][fromAtom]
-                        atom2 = atom_maps[toResidue][toAtom]
-                        pair = (atom1 < atom2 ? (atom1, atom2) : (atom2, atom1))
-                        if !(pair in bond_set)
-                            push!(bonds, pair)
-                            push!(bond_set, pair)
-                            if !external
-                                i_local = findfirst(isequal(fromAtom), rgraph.atom_names)
-                                j_local = findfirst(isequal(toAtom),   rgraph.atom_names)
-                                pair_local = (i_local < j_local ? (i_local, j_local) : (j_local, i_local))
-                                push!(rgraph.bonds, pair_local)
-                            end
-                        end
-                    end
+            haskey(standard_bonds, rgraph.res_name) || continue
+            for bond in standard_bonds[rgraph.res_name]
+                # A "-" or "+" prefix refers to the previous or next residue in the chain,
+                #   which may be absent at a chain end or a gap in the residue numbering
+                from_res, from_atom = bond_partner(bond[1], resnum)
+                to_res  , to_atom   = bond_partner(bond[2], resnum)
+                (haskey(atom_maps, from_res) && haskey(atom_maps, to_res)) || continue
+                (haskey(atom_maps[from_res], from_atom) &&
+                        haskey(atom_maps[to_res], to_atom)) || continue
+                atom1 = atom_maps[from_res][from_atom]
+                atom2 = atom_maps[to_res][to_atom]
+                pair = (atom1 < atom2 ? (atom1, atom2) : (atom2, atom1))
+                pair in bond_set && continue
+                push!(bonds, pair)
+                push!(bond_set, pair)
+                from_graph, to_graph = resids[from_res], resids[to_res]
+                i_local = findfirst(isequal(from_atom), from_graph.atom_names)
+                j_local = findfirst(isequal(to_atom)  , to_graph.atom_names)
+                if from_res == to_res
+                    push!(rgraph.bonds, minmax(i_local, j_local))
+                else
+                    from_graph.external_bonds[i_local] += 1
+                    to_graph.external_bonds[j_local] += 1
                 end
             end
         end

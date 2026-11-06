@@ -131,10 +131,21 @@ function place_diatomics(n_molecules::Integer,
     return wrap_coords.([coords...], (boundary,))
 end
 
-get_res_id(res) = (
-    Chemfiles.id(res),
-    "chainid" in Chemfiles.list_properties(res) ? Chemfiles.property(res, "chainid") : "X",
-)
+# Residues are keyed by residue number within a chain
+# Files from CHARMM-GUI and similar can reuse a chain ID and residue numbers for different
+#   molecules, e.g. protein and water, and distinguish them only by segment name, so the
+#   segment name forms part of the chain key when present
+function get_res_id(res)
+    props = Chemfiles.list_properties(res)
+    chain = ("chainid" in props ? Chemfiles.property(res, "chainid") : "X")
+    if "segname" in props
+        segname = strip(Chemfiles.property(res, "segname"))
+        if !isempty(segname)
+            chain = "$chain (segment $segname)"
+        end
+    end
+    return Chemfiles.id(res), chain
+end
 
 atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_types), "/")
 
@@ -223,6 +234,13 @@ function canonicalize_system(top, resname_replacements, atomname_replacements,
 
         if !haskey(canon_system, res_id[2])
             canon_system[res_id[2]] = Dict(res_id[1] => rgraph)
+        elseif haskey(canon_system[res_id[2]], res_id[1])
+            # Can occur with insertion codes or with molecules that share a chain ID and
+            #   residue numbers without distinct segment names
+            other_name = canon_system[res_id[2]][res_id[1]].res_name
+            throw(ArgumentError("residue $res_name and residue $other_name have the same " *
+                "residue number $(res_id[1]) in chain \"$(res_id[2])\", residues must have " *
+                "unique numbers within a chain or segment"))
         else
             canon_system[res_id[2]][res_id[1]] = rgraph
         end
