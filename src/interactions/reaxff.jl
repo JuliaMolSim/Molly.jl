@@ -437,6 +437,7 @@ end
 
 Reactive force field (ReaxFF) implemented as an AtomsCalculators.jl calculator.
 
+See [van Duin et al. 2001](https://doi.org/10.1021/jp004368u).
 `force_field_file` specifies the path to a ReaxFF parameter file. `version` selects
 the functional form; currently only [`ReaxFF2008`](@ref) is supported.
 `float_type` sets the precision of the force-field parameters and internal ReaxFF calculations (Float64 strongly recommended).

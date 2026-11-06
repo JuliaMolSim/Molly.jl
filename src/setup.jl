@@ -716,7 +716,11 @@ function System(coord_file::AbstractString,
 
     # Read structure
     traj = Chemfiles.Trajectory(coord_file)
-    frame = Chemfiles.read(traj)
+    if strictness == :nowarn
+        frame = @suppress_err Chemfiles.read(traj)
+    else
+        frame = Chemfiles.read(traj)
+    end
     top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 

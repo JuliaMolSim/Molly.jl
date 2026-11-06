@@ -34,6 +34,7 @@ using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
+using Suppressor
 using Unitful
 using UnitfulAtomic
 using StructArrays

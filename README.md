@@ -18,6 +18,7 @@ Implemented features include:
 - Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants for alchemical simulation.
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Ewald and particle mesh Ewald (PME) electrostatic summation.
+- ReaxFF simulation.
 - Interface to allow definition of new interactions, simulators, thermostats, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl).
 - Write out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC.
