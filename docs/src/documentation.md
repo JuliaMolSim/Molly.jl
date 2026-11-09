@@ -82,6 +82,29 @@ simulate!(sys, simulator, 1_000)
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
 The `data` keyword argument can give arbitrary data to the [`System`](@ref) that can be accessed with `sys.data`, for example metadata or properties to be used with a custom simulator.
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable) in cases where units are provided.
+Showing `sys` in the REPL gives a summary of the system:
+```julia-repl
+julia> sys
+Molly System
+  n atoms: 100
+  n molecules: -
+  n dimensions: 3
+  n pairwise interactions: 1
+  n specific interaction lists: 0
+  n general interactions: 0
+  n constrained atoms: 0
+  n virtual sites: 0
+  n loggers: 2
+  neighbor finder: Nothing
+  total mass: 1000.0 g mol^-1
+  Degrees of freedom: 297
+  Array type: Array
+  Float type: general Float64, high Float64
+  Units: energy kJ mol^-1, force kJ nm^-1 mol^-1, length nm, time ps, mass g mol^-1
+  Boundary: CubicBoundary{3, Float64, Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}[2.0 nm, 2.0 nm, 2.0 nm])
+
+```
+
 Various functions can be used on a [`System`](@ref):
 ```julia
 potential_energy(sys) # -40.91077282719628 kJ mol^-1
@@ -1177,6 +1200,7 @@ The logic here is that any parameter mixing, shortcutting or setup is done in [`
 
 Most of the arguments to [`force`](@ref) will generally not be used but are passed to allow maximum flexibility.
 You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
+`args...` should be added to the end, since more arguments may be allowed in future.
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
