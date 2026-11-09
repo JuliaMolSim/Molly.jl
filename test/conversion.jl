@@ -455,7 +455,7 @@ end
         # `approximate_erfc` is a type parameter of the Ewald interactions, which is kept
         for ae in (true, false)
             ce = CoulombEwald(dist_cutoff=T(1.0), coulomb_const=cc, approximate_erfc=ae)
-            @test Molly.convert_component(c, ce).approximate_erfc == ae
+            @test Molly.uses_approximate_erfc(Molly.convert_component(c, ce)) == ae
         end
 
         @test Molly.convert_component(c, Dict("C" => T(0.17)u"nm")) == Dict("C" => Float64(T(0.17)))
