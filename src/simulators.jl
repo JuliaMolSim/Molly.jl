@@ -119,6 +119,68 @@ default_check_nans(::System{<:Any, <:AbstractGPUArray}, sim) = false
 fuse_integrator_steps(sys) = false
 fuse_integrator_steps(sys::System{<:Any, <:AbstractGPUArray}) = !sys.grad_safe
 
+#=
+Add the accelerations from `forces` times `dt` to the velocities. With `store_accels` the
+accelerations are kept in `accels`, found from `forces` first if `update_accels`, and
+otherwise the velocities are updated from the forces in one kernel, see
+`velocity_force_step!`, which is used when the integrator steps are fused and the
+accelerations are not checked. The results are the same.
+=#
+function kick_velocities!(vels, accels, forces, masses, dt, store_accels::Bool,
+                          update_accels::Bool=true)
+    if store_accels
+        if update_accels
+            accels .= calc_accels.(forces, masses)
+        end
+        vels .+= accels .* dt
+    else
+        velocity_force_step!(vels, forces, masses, dt)
+    end
+    return vels
+end
+
+# `coords .+= vels .* dt` then wrapping the coordinates into the box, in one kernel with
+#   `fused`, see `drift_step!`
+function drift_wrap!(sys, dt, fused::Bool)
+    if fused
+        drift_step!(sys.coords, sys.velocities, nothing, nothing, dt, sys.boundary,
+                    Val(false))
+    else
+        sys.coords .+= sys.velocities .* dt
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    end
+    return sys
+end
+
+#=
+Move the coordinates by the velocities over `dt`, apply the position constraints with the
+velocity correction if there are any, using the constraint storage `coord_storage` and
+`vel_storage`, and wrap the coordinates into the box. With `fused`, see
+`fuse_integrator_steps`, the updates other than the constraints are one or two kernels,
+see `drift_step!`, with the same results.
+=#
+function drift_constrain_wrap!(sys, coord_storage, vel_storage, dt, fused::Bool; context,
+                               n_threads::Integer, strictness)
+    using_constraints = (length(sys.constraints) > 0)
+    if fused && using_constraints
+        drift_step!(sys.coords, sys.velocities, coord_storage, vel_storage, dt, sys.boundary,
+                    Val(true))
+        # Also wraps the coordinates
+        apply_position_constraints_wrap!(sys, coord_storage, vel_storage, dt;
+                                         context=context, n_threads=n_threads,
+                                         strictness=strictness)
+    elseif using_constraints
+        coord_storage .= sys.coords
+        sys.coords .+= sys.velocities .* dt
+        apply_position_constraints!(sys, coord_storage, vel_storage, dt; context=context,
+                                    n_threads=n_threads, strictness=strictness)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    else
+        drift_wrap!(sys, dt, fused)
+    end
+    return sys
+end
+
 isnan_svec(sv) = any(isnan, sv)
 isnan_svec_array(svs) = any(isnan_svec, svs) # On CPU this is faster than AcceleratedKernels
 isnan_svec_array(svs::AbstractGPUArray) = AcceleratedKernels.any(isnan_svec, svs)
@@ -898,15 +960,15 @@ constraint_virial_integrator_factor(sim::VelocityVerlet) = 2
     apply_loggers!(sys, neighbors, init_step, buffers, run_loggers == true; n_threads=n_threads,
                    strictness=strictness, current_forces=forces_t)
     using_constraints = (length(sys.constraints) > 0)
-    if using_constraints
-        cons_coord_storage = zero(sys.coords)
-        cons_vel_storage = zero(sys.velocities)
-    end
+    cons_coord_storage = (using_constraints ? zero(sys.coords) : nothing)
+    cons_vel_storage = (using_constraints ? zero(sys.velocities) : nothing)
     dt_div2 = sim.dt / 2
     pressure_kin_tensor = zero(buffers.kin_tensor)
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -914,33 +976,29 @@ constraint_virial_integrator_factor(sim::VelocityVerlet) = 2
         fill!(pressure_kin_tensor, zero(eltype(pressure_kin_tensor)))
         pressure_kin_tensor_valid = false
 
-        sys.velocities .+= accels_t .* dt_div2
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), dt_div2,
+                         store_accels, false)
         if using_constraints
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
                                                       false, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
-            cons_coord_storage .= sys.coords
-        end
-
-        sys.coords .+= sys.velocities .* sim.dt
-        if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
                                                       false, sim)
-            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
-                                        context=pos_context, n_threads=n_threads,
-                                        strictness=strictness)
+        else
+            pos_context = nothing
         end
-        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        drift_constrain_wrap!(sys, cons_coord_storage, cons_vel_storage, sim.dt, fused;
+                              context=pos_context, n_threads=n_threads,
+                              strictness=strictness)
         place_virtual_sites!(sys; n_threads=n_threads)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
         forces!(forces_t_dt, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, visit_state=true, strictness=strictness)
-        accels_t_dt .= calc_accels.(forces_t_dt, masses(sys))
-
-        sys.velocities .+= accels_t_dt .* dt_div2
+        kick_velocities!(sys.velocities, accels_t_dt, forces_t_dt, masses(sys), dt_div2,
+                         store_accels)
         if using_constraints
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
@@ -975,7 +1033,9 @@ constraint_virial_integrator_factor(sim::VelocityVerlet) = 2
             recompute_forces_after_coupling!(forces_t_dt, sys, neighbors, buffers, step_n,
                                              needs_vir_step, n_threads, strictness)
             forces_t, forces_t_dt = forces_t_dt, forces_t
-            accels_t .= calc_accels.(forces_t, masses(sys))
+            if store_accels
+                accels_t .= calc_accels.(forces_t, masses(sys))
+            end
         else
             forces_t, forces_t_dt = forces_t_dt, forces_t
             accels_t, accels_t_dt = accels_t_dt, accels_t
@@ -1052,9 +1112,9 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     buffers = init_buffers!(sys, n_threads)
     using_constraints = (length(sys.constraints) > 0)
+    cons_coord_storage = (using_constraints ? zero(sys.coords) : nothing)
+    cons_vel_storage = (using_constraints ? zero(sys.velocities) : nothing)
     if using_constraints
-        cons_coord_storage = zero(sys.coords)
-        cons_vel_storage = zero(sys.velocities)
         vel_context = velocity_constraint_context(buffers, sys, init_step, sim.dt, false, sim)
         apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                     strictness=strictness)
@@ -1075,6 +1135,7 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1088,18 +1149,14 @@ constraint_virial_integrator_factor(sim::DPDVelocityVerlet) = 2
                                                       false, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
-            cons_coord_storage .= sys.coords
-        end
-
-        sys.coords .+= sys.velocities .* sim.dt
-        if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
                                                       false, sim)
-            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
-                                        context=pos_context, n_threads=n_threads,
-                                        strictness=strictness)
+        else
+            pos_context = nothing
         end
-        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        drift_constrain_wrap!(sys, cons_coord_storage, cons_vel_storage, sim.dt, fused;
+                              context=pos_context, n_threads=n_threads,
+                              strictness=strictness)
         place_virtual_sites!(sys; n_threads=n_threads)
 
         velocities_half .= sys.velocities
@@ -1240,31 +1297,31 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, visit_state=true, strictness=strictness)
-        accels_t .= calc_accels.(forces_t, masses(sys))
-
-        sys.velocities .+= accels_t .* sim.dt
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), sim.dt,
+                         store_accels)
 
         if using_constraints
             cons_coord_storage .= sys.coords
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
-        end
-        sys.coords .+= sys.velocities .* sim.dt
-        if using_constraints
+            sys.coords .+= sys.velocities .* sim.dt
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
             apply_position_constraints!(sys, cons_coord_storage; context=pos_context,
                                         n_threads=n_threads, strictness=strictness)
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
+            sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        else
+            drift_wrap!(sys, sim.dt, fused)
         end
-
-        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         place_virtual_sites!(sys; n_threads=n_threads)
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
@@ -1506,12 +1563,8 @@ end
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, visit_state=true, strictness=strictness)
-        if store_accels
-            accels_t .= calc_accels.(forces_t, masses(sys))
-            sys.velocities .+= accels_t .* sim.dt
-        else
-            velocity_force_step!(sys.velocities, forces_t, masses(sys), sim.dt)
-        end
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), sim.dt,
+                         store_accels)
 
         if using_constraints
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
@@ -1716,6 +1769,8 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -1723,7 +1778,7 @@ end
         coords_moved = false
         for (j, op) in enumerate(splitting_ops)
             if op == 'A'
-                A_step!(sys, effective_dts[j], n_threads)
+                A_step!(sys, effective_dts[j], n_threads, fused)
                 coords_moved = true
             elseif op == 'B'
                 # The neighbors are found after the coordinates are updated and before the
@@ -1744,6 +1799,7 @@ end
                     neighbors,
                     step_n,
                     strictness,
+                    store_accels,
                 )
             else # op == 'O'
                 langevin_o_step!(
@@ -1783,21 +1839,22 @@ end
     return sys
 end
 
-function A_step!(sys, dt_eff, n_threads::Integer)
-    sys.coords .+= sys.velocities .* dt_eff
-    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+function A_step!(sys, dt_eff, n_threads::Integer, fused::Bool=false)
+    drift_wrap!(sys, dt_eff, fused)
     place_virtual_sites!(sys; n_threads=n_threads)
     return sys
 end
 
+# Without `store_accels` the accelerations are not stored, see `kick_velocities!`
 function B_step!(sys, forces_t, buffers, accels_t, dt_eff, compute_forces::Bool,
-                 n_threads::Integer, neighbors, step_n::Integer, strictness)
+                 n_threads::Integer, neighbors, step_n::Integer, strictness,
+                 store_accels::Bool=true)
     if compute_forces
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                 visit_state=true, strictness=strictness)
-        accels_t .= calc_accels.(forces_t, masses(sys))
     end
-    sys.velocities .+= dt_eff .* accels_t
+    kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), dt_eff, store_accels,
+                     compute_forces)
     return sys
 end
 
@@ -2118,7 +2175,9 @@ end
 #   the host arrays are copies for the loggers that are updated when required
 # The chain uses the high precision float type on the host and the system float type on
 #   the GPU, where Float64 operations in a single thread can be slow
-struct NoseHooverChainState{FT, V, W, H, S}
+# On the GPU `twice_ke` holds the sum of m * v^2 over the atoms found each step, see
+#   `nose_hoover_chain_gpu!`
+struct NoseHooverChainState{FT, V, W, H, S, K}
     positions::V
     velocities::V
     forces::V
@@ -2126,6 +2185,7 @@ struct NoseHooverChainState{FT, V, W, H, S}
     positions_host::H
     velocities_host::H
     vel_scale::S
+    twice_ke::K
     n_dof::Int
     n_mts::Int
     dt::FT
@@ -2143,6 +2203,10 @@ nose_hoover_storage(x, sys::System{<:Any, AT}) where {AT <: AbstractGPUArray} =
 nose_hoover_vel_scale(sys) = nothing
 nose_hoover_vel_scale(sys::System{<:Any, AT, T}) where {AT <: AbstractGPUArray, T} =
                                                                 to_device(ones(T, 1), AT)
+
+nose_hoover_twice_ke(sys) = nothing
+nose_hoover_twice_ke(sys::System{<:Any, AT, T, TH}) where {AT <: AbstractGPUArray, T, TH} =
+                                                                to_device(zeros(TH, 1), AT)
 
 function NoseHooverChainState(sys, sim::NoseHoover)
     FT = nose_hoover_float_type(sys)
@@ -2162,6 +2226,7 @@ function NoseHooverChainState(sys, sim::NoseHoover)
         positions_host,
         velocities_host,
         nose_hoover_vel_scale(sys),
+        nose_hoover_twice_ke(sys),
         n_dof,
         sim.n_mts,
         FT(ustrip(sim.dt)),
@@ -2185,26 +2250,113 @@ end
 
 function nose_hoover_scale_and_drift!(sys::System{<:Any, <:AbstractGPUArray, T, TH},
                                       chain, dt_div2) where {T, TH}
-    # The kinetic energy stays on the device
-    twice_ke = mapreduce(MassVelSq{TH}(), +, masses(sys), sys.velocities; dims=1,
-                         init=zero(TH))
+    nose_hoover_chain_gpu!(sys, chain)
     backend = get_backend(sys.velocities)
-    kernel_chain! = nose_hoover_chain_kernel!(backend, 1)
-    kernel_chain!(chain.vel_scale, chain.positions, chain.velocities, chain.forces, twice_ke,
-                  chain.ys_weights, chain.ke_ratio_factor, chain.n_dof, chain.ω2, chain.dt,
-                  chain.n_mts; ndrange=1)
     kernel_scale! = nose_hoover_scale_drift_kernel!(backend)
     kernel_scale!(sys.coords, sys.velocities, chain.vel_scale, dt_div2;
                   ndrange=length(sys.velocities))
     return sys
 end
 
+const twice_ke_threads = 256
+
+#=
+Propagate the chain on the GPU, leaving the velocity scaling in `chain.vel_scale`.
+The kinetic energy stays on the device. It is summed into `chain.twice_ke`, which the
+chain kernel sets back to zero, rather than by `mapreduce`, which allocates two arrays each
+step. Arrays allocated each step are only freed when the garbage collector runs, and many
+waiting to be freed slowed the steps by a third.
+=#
+function nose_hoover_chain_gpu!(sys::System{<:Any, <:AbstractGPUArray, T, TH},
+                                chain) where {T, TH}
+    backend = get_backend(sys.velocities)
+    n_groups = cld(length(sys.velocities), twice_ke_threads)
+    kernel_ke! = twice_ke_kernel!(backend, twice_ke_threads)
+    launch_kernel!(kernel_ke!, chain.twice_ke, masses(sys), sys.velocities, Val(TH);
+                   ndrange=n_groups * twice_ke_threads)
+    kernel_chain! = nose_hoover_chain_kernel!(backend, 1)
+    launch_kernel!(kernel_chain!, chain.vel_scale, chain.positions, chain.velocities,
+                   chain.forces, chain.twice_ke, chain.ys_weights, chain.ke_ratio_factor,
+                   chain.n_dof, chain.ω2, chain.dt, chain.n_mts; ndrange=1)
+    return chain
+end
+
+# Add the sum of m * v^2 over the atoms to `twice_ke[1]`, summed in each workgroup and then
+#   added atomically. The range is a whole number of workgroups so that every work item
+#   reaches the synchronizations.
+@kernel inbounds=true function twice_ke_kernel!(twice_ke, @Const(masses), @Const(velocities),
+                                                ::Val{TH}) where TH
+    i = @index(Global, Linear)
+    tid = @index(Local, Linear)
+    partial = @localmem TH (twice_ke_threads,)
+    partial[tid] = (i <= length(velocities) ? mass_vel_sq(masses[i], velocities[i], TH) :
+                                              zero(TH))
+    @synchronize
+    stride = twice_ke_threads ÷ 2
+    while stride > 0
+        if tid <= stride
+            partial[tid] += partial[tid + stride]
+        end
+        @synchronize
+        stride ÷= 2
+    end
+    if tid == 1
+        Atomix.@atomic twice_ke[1] += partial[1]
+    end
+end
+
+#=
+The two half drifts of a Nosé-Hoover step on the GPU and the scaling of the velocities by
+the chain between them, in one pass over the atoms, doing what the half drift before
+`nose_hoover_scale_and_drift!`, it, and the stores or wrapping around them do. The kinetic
+energy is found before the first half drift, which does not change the velocities. With
+`store` the coordinates before the drifts are stored in `coord_storage` and minus the
+coordinates after them divided by `dt` in `vel_storage`, for
+`apply_position_constraints_wrap!`. Without `store` the coordinates are wrapped into the
+box.
+=#
+function nose_hoover_drift_fused!(sys, chain, dt_div2, dt, coord_storage, vel_storage,
+                                  ::Val{store}) where store
+    nose_hoover_chain_gpu!(sys, chain)
+    backend = get_backend(sys.velocities)
+    kernel! = nose_hoover_drift_fused_kernel!(backend, 256)
+    launch_kernel!(kernel!, sys.coords, sys.velocities, coord_storage, vel_storage,
+                   chain.vel_scale, dt_div2, dt, sys.boundary, Val(store);
+                   ndrange=length(sys.velocities))
+    return sys
+end
+
+@kernel inbounds=true function nose_hoover_drift_fused_kernel!(coords, velocities,
+                    coord_storage, vel_storage, @Const(vel_scale), dt_div2, dt, boundary,
+                    ::Val{store}) where store
+    i = @index(Global, Linear)
+    if i <= length(velocities)
+        x = coords[i]
+        if store
+            coord_storage[i] = x
+        end
+        v = velocities[i]
+        x = muladd(dt_div2, v, x)
+        v = v * vel_scale[1]
+        velocities[i] = v
+        x = muladd(dt_div2, v, x)
+        if store
+            coords[i] = x
+            vel_storage[i] = -x / dt
+        else
+            coords[i] = wrap_coords(x, boundary)
+        end
+    end
+end
+
+# Also sets `twice_ke` back to zero for the next step
 @kernel function nose_hoover_chain_kernel!(vel_scale, chain_pos, chain_vel, chain_force,
-                                           @Const(twice_ke), ys_weights, ke_ratio_factor,
+                                           twice_ke, ys_weights, ke_ratio_factor,
                                            n_dof, ω2, dt, n_mts)
     i = @index(Global, Linear)
     @inbounds if i == 1
         ke_ratio = convert(eltype(chain_vel), twice_ke[1]) * ke_ratio_factor
+        twice_ke[1] = zero(eltype(twice_ke))
         vel_scale[1] = propagate_nose_hoover_chain!(chain_pos, chain_vel, chain_force,
                                                     ke_ratio, n_dof, ω2, dt, n_mts,
                                                     ys_weights)
@@ -2300,35 +2452,55 @@ end
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
         needs_vir_step = needs_virial_on_step(needs_vir, needs_vir_steps, step_n)
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(needs_vir_step);
                 n_threads=n_threads, visit_state=true, strictness=strictness)
-        accels_t .= calc_accels.(forces_t, masses(sys))
-
-        sys.velocities .+= accels_t .* sim.dt
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), sim.dt,
+                         store_accels)
         if using_constraints
             prepare_constraint_virial!(buffers, sys, step_n, needs_vir_step)
             vel_context = velocity_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
             apply_velocity_constraints!(sys; context=vel_context, n_threads=n_threads,
                                         strictness=strictness)
-            cons_coord_storage .= sys.coords
         end
-        sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
+        if fused && using_constraints
+            nose_hoover_drift_fused!(sys, chain, dt_div2, sim.dt, cons_coord_storage,
+                                     cons_vel_storage, Val(true))
+        elseif fused
+            nose_hoover_drift_fused!(sys, chain, dt_div2, sim.dt, nothing, nothing,
+                                     Val(false))
+        else
+            if using_constraints
+                cons_coord_storage .= sys.coords
+            end
+            sys.coords .= muladd.(dt_div2, sys.velocities, sys.coords)
+            nose_hoover_scale_and_drift!(sys, chain, dt_div2)
+        end
 
-        nose_hoover_scale_and_drift!(sys, chain, dt_div2)
         if using_constraints
             pos_context = position_constraint_context(buffers, sys, step_n, sim.dt,
                                                       needs_vir_step, sim)
-            apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt;
-                                        context=pos_context, n_threads=n_threads,
-                                        strictness=strictness)
+            if fused
+                # Also wraps the coordinates
+                apply_position_constraints_wrap!(sys, cons_coord_storage, cons_vel_storage,
+                                                 sim.dt; context=pos_context,
+                                                 n_threads=n_threads, strictness=strictness)
+            else
+                apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
+                                            sim.dt; context=pos_context, n_threads=n_threads,
+                                            strictness=strictness)
+            end
             merge_constraint_virial_if_needed!(buffers, sys, step_n, needs_vir_step)
         end
-        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        if !fused
+            sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+        end
         place_virtual_sites!(sys; n_threads=n_threads)
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
@@ -2593,11 +2765,13 @@ end
 #   in which case they are checked before every force calculation that uses them
 # `coords_moved` is whether the coordinates have moved since the neighbors were last found
 #   by a neighbor finder that tracks displacements
+# With `fused` some updates are fused into fewer kernels, and the accelerations are only
+#   stored in `accels_t` with `store_accels`, see `kick_velocities!`
 function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_storage,
                        cons_vel_storage, sim, ordered_fractions, fraction_inters, neighbors,
                        dt, step_n, n_threads, rng, using_constraints, n_parent_substeps,
                        strictness, inner_step_neighbors, recompute_forces_in,
-                       coords_moved=Ref(false))
+                       coords_moved=Ref(false), fused::Bool=false, store_accels::Bool=true)
     n_substeps = first(ordered_fractions)
     n_steps_per_parent_step = n_substeps ÷ n_parent_substeps
     pis, sis, gis = first(fraction_inters)
@@ -2614,22 +2788,23 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
             forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                     pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis,
                     visit_state=true, strictness=strictness)
-            accels_t .= calc_accels.(forces_t, masses(sys))
         end
-        sys.velocities .+= accels_t .* dt_frac_v
+        # `forces_t` and `accels_t` hold the forces of this level, from the end of the last
+        #   substep when they are not found again
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), dt_frac_v,
+                         store_accels, recompute_forces)
 
         if length(ordered_fractions) == 1
             if using_constraints
                 cons_coord_storage .= sys.coords
-            end
-            mts_coordinate_update!(sys, noise, sim, dt_frac_x, rng)
-
-            if using_constraints
+                mts_coordinate_update!(sys, noise, sim, dt_frac_x, rng)
                 apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                             dt_frac_x; n_threads=n_threads, strictness=strictness)
                 apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
+                sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+            else
+                mts_coordinate_update_wrap!(sys, noise, sim, dt_frac_x, rng, fused)
             end
-            sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
             place_virtual_sites!(sys; n_threads=n_threads)
             if inner_step_neighbors
                 neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
@@ -2643,7 +2818,8 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
                                       Base.tail(ordered_fractions),
                                       Base.tail(fraction_inters), neighbors, dt, step_n,
                                       n_threads, rng, using_constraints, n_substeps,
-                                      strictness, inner_step_neighbors, true, coords_moved)
+                                      strictness, inner_step_neighbors, true, coords_moved,
+                                      fused, store_accels)
         end
 
         # The outer level runs once per step after all the coordinate updates, so without
@@ -2657,12 +2833,26 @@ function mts_substeps!(sys, forces_t, accels_t, buffers, noise, cons_coord_stora
         forces!(forces_t, sys, neighbors, step_n, buffers, Val(false); n_threads=n_threads,
                 pairwise_inters=pis, specific_inter_lists=sis, general_inters=gis,
                 visit_state=true, strictness=strictness)
-        accels_t .= calc_accels.(forces_t, masses(sys))
-        sys.velocities .+= accels_t .* dt_frac_v
+        kick_velocities!(sys.velocities, accels_t, forces_t, masses(sys), dt_frac_v,
+                         store_accels)
         recompute_forces = false
     end
 
     return neighbors
+end
+
+# `mts_coordinate_update!` then wrapping the coordinates, in one kernel for `MTSIntegrator`
+#   with `fused`, see `drift_wrap!`
+function mts_coordinate_update_wrap!(sys, noise, sim::MTSIntegrator, dt_frac_x, rng,
+                                     fused::Bool)
+    return drift_wrap!(sys, dt_frac_x, fused)
+end
+
+function mts_coordinate_update_wrap!(sys, noise, sim::MTSLangevinIntegrator, dt_frac_x, rng,
+                                     fused::Bool)
+    mts_coordinate_update!(sys, noise, sim, dt_frac_x, rng)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
+    return sys
 end
 
 mts_initialize_noise(sys, ::MTSIntegrator) = nothing
@@ -2716,12 +2906,18 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     end
     fraction_inters = mts_interaction_groups(sys, sim)
     recompute_forces = true # Forces re-used between steps
+    # The forces of all the interactions for the virial are kept apart, as `forces_t` and
+    #   `accels_t` hold those of the outer level for the start of the next step
+    forces_vir = (needs_vir ? zero_forces(sys) : nothing)
+    accels_vir = (needs_vir ? zero(accels_t) : nothing)
     # Whether the coordinates have moved since the neighbors were last found, for a neighbor
     #   finder that tracks displacements
     coords_moved = Ref(false)
     check_nan_labels = ("coordinates", "velocities", "forces", "accelerations")
     check_nans && check_array_nans((sys.coords, sys.velocities, forces_t, accels_t),
                                    check_nan_labels, init_step)
+    fused = fuse_integrator_steps(sys)
+    store_accels = !fused || check_nans
 
     progress = setup_progress(n_steps, show_progress)
     for step_n in (init_step + 1):(init_step + n_steps)
@@ -2729,7 +2925,8 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
                                   cons_coord_storage, cons_vel_storage, sim,
                                   sim.ordered_fractions, fraction_inters, neighbors, sim.dt,
                                   step_n, n_threads, rng, using_constraints, 1, strictness,
-                                  sim.inner_step_neighbors, recompute_forces, coords_moved)
+                                  sim.inner_step_neighbors, recompute_forces, coords_moved,
+                                  fused, store_accels)
         if using_constraints
             apply_velocity_constraints!(sys; n_threads=n_threads, strictness=strictness)
         end
@@ -2746,10 +2943,10 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
         if needs_vir_step
             # Virial calculated with all interactions
             # The constraint contribution is evaluated at the current configuration
-            forces!(forces_t, sys, neighbors, step_n, buffers, Val(true); n_threads=n_threads,
-                    visit_state=true, strictness=strictness)
-            accels_t .= calc_accels.(forces_t, masses(sys))
-            merge_step_constraint_virial!(buffers, sys, step_n, true, accels_t, sim, sim.dt,
+            forces!(forces_vir, sys, neighbors, step_n, buffers, Val(true);
+                    n_threads=n_threads, visit_state=true, strictness=strictness)
+            accels_vir .= calc_accels.(forces_vir, masses(sys))
+            merge_step_constraint_virial!(buffers, sys, step_n, true, accels_vir, sim, sim.dt,
                                           vir_coord_storage, vir_vel_storage,
                                           cons_coord_storage, cons_vel_storage;
                                           n_threads=n_threads, strictness=strictness)
