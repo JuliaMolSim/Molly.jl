@@ -425,7 +425,7 @@ See the [OpenMM documentation](https://docs.openmm.org/latest/userguide/applicat
 The following tags are supported:
 - `<AtomTypes>`: both atom types and atom classes are supported
 - `<Residues>`: `<VirtualSite>` tags are supported except for `type="localCoords"`, and the `override` attribute on `<Residue>` tags is supported
-- `<Patches>`: patches that apply to multiple residue templates and multiple patches acting on one residue template are not supported, so disulfide bonds can not currently be set up with CHARMM36, which uses the `DISU` patch
+- `<Patches>`: patches that apply to one or two residue templates are supported, patches that apply to more than two residue templates and multiple single residue patches acting on one residue template are not supported
 - `<HarmonicBondForce>`
 - `<HarmonicAngleForce>`
 - `<PeriodicTorsionForce>`: both `<Proper>` and `<Improper>` tags are supported

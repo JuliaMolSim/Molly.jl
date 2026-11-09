@@ -214,6 +214,33 @@
     end
 end
 
+@testset "CHARMM disulfide bonds" begin
+    # The three disulfide bonds of crambin use the two residue DISU patch of CHARMM36
+    ff = MolecularForceField(
+        joinpath.(ff_dir, ["charmm36.xml", "charmm36_water.xml"])...;
+        strictness=:nowarn,
+    )
+    sys = System(
+        joinpath(data_dir, "ReaxFF", "data", "crambin.pdb"),
+        ff;
+        nonbonded_method=SetupPME(mesh_dims=(43, 43, 43)),
+        center_coords=false,
+        strictness=:nowarn, # Chemfiles warns about the CHARMM-GUI atom names
+    )
+    @test length(sys) == 13191
+    sg_inds = findall(ad -> ad.res_name == "CYS" && ad.atom_name == "SG", sys.atoms_data)
+    @test length(sg_inds) == 6
+    @test all(i -> sys.atoms_data[i].atom_type == "SM", sg_inds)
+    @test all(i -> sys.atoms[i].charge == -0.08, sg_inds)
+    bonds = sys.specific_inter_lists[1]
+    ss_res_pairs = Set(Set((sys.atoms_data[i].res_number, sys.atoms_data[j].res_number))
+                       for (i, j) in zip(bonds.is, bonds.js) if i in sg_inds && j in sg_inds)
+    @test ss_res_pairs == Set([Set((3, 40)), Set((4, 32)), Set((16, 26))])
+    # OpenMM 8.0 Reference platform, PME with a 1 nm cutoff, no constraints, flexible water
+    E_openmm = -152358.14599141592u"kJ * mol^-1"
+    @test isapprox(potential_energy(sys), E_openmm; atol=0.1u"kJ * mol^-1")
+end
+
 @testset "Protein energy minimization" begin
     pme_mesh_dims = (46, 46, 51)
     ff = MolecularForceField(

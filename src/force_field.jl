@@ -499,13 +499,39 @@ function parse_bool_attr(node::EzXML.Node, key::AbstractString, ff_file)
                              "in force field file $ff_file as a boolean, found \"$str\""))
 end
 
+# Split an atom or template name in a patch, such as "2:SG", into the index of the residue in
+#   the patch and the name, the index is 1 when not given
+function split_patch_name(str, n_res, pname, ff_file)
+    i = findfirst(':', str)
+    isnothing(i) && return 1, str
+    ri = tryparse(Int, str[1:prevind(str, i)])
+    if isnothing(ri) || !(1 <= ri <= n_res)
+        throw(ForceFieldXMLError("patch $pname in force field file $ff_file applies to " *
+                                 "$n_res residue(s) but refers to \"$str\""))
+    end
+    return ri, String(str[nextind(str, i):end])
+end
+
+# Split a patch name in an <AllowPatch> tag, such as "DISU:1", into the patch name and the
+#   index of the residue in the patch, the index is 1 when not given
+function split_allowed_patch(str)
+    i = findfirst(':', str)
+    isnothing(i) && return str, 1
+    ri = tryparse(Int, str[nextind(str, i):end])
+    if isnothing(ri)
+        throw(ForceFieldXMLError("could not parse the residue index of the patch \"$str\" " *
+                                 "in an <AllowPatch> tag"))
+    end
+    return String(str[1:prevind(str, i)]), ri
+end
+
 # Having this as a function allows recursion to support <Include> tags
 # Modifies most arguments
 function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                      residues, residue_overrides, patches, bond_rule_specs, angle_rule_specs,
-                      torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
-                      ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
-                      T, IC)
+                      residues, residue_overrides, patches, two_residue_patches, bond_rule_specs,
+                      angle_rule_specs, torsion_rule_specs, cmap_rules, custor_rule_specs,
+                      nb_atom_classes, ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units,
+                      strictness, T, IC)
     P = typeof(inv(oneunit(IC))) # Length type of a virtual site local position
     if !isfile(ff_file)
         throw(ArgumentError("force field XML file $ff_file does not exist"))
@@ -530,9 +556,10 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
             xml_fp = joinpath(dirname(ff_file), xml_attr(entry, "file", ff_file))
             read_ff_xml!(xml_fp, ff_param_array, atom_types, atom_type_order,
                          attributes_from_residue, residues, residue_overrides, patches,
-                         bond_rule_specs, angle_rule_specs, torsion_rule_specs, cmap_rules,
-                         custor_rule_specs, nb_atom_classes, ljforce_atom_classes, nbfix_pairs,
-                         urey_rule_specs, units, strictness, T, IC)
+                         two_residue_patches, bond_rule_specs, angle_rule_specs,
+                         torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
+                         ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
+                         T, IC)
 
         elseif entry_name == "AtomTypes"
             for atom_type in eachelement(entry)
@@ -761,52 +788,81 @@ function read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attr
         elseif entry_name == "Patches"
             for patch in eachelement(entry)
                 pname = xml_attr(patch, "name", ff_file)
-                if haskey(patch, "residues") && patch["residues"] != "1"
-                    err_str = "Residue patches altering multiple templates not " *
+                n_res_str = (haskey(patch, "residues") ? strip(patch["residues"]) : "1")
+                if !(n_res_str in ("1", "2"))
+                    err_str = "Residue patches altering more than two templates not " *
                               "supported, ignoring patch $pname"
                     report_issue(err_str, strictness; error_type=ForceFieldXMLError)
                     continue
                 end
+                n_res = parse(Int, n_res_str)
 
-                add_atoms = Tuple{String, String, Any}[]
-                change_atoms = Tuple{String, String, Any}[]
-                remove_atoms = String[]
-                add_bonds = Tuple{String, String}[]
-                remove_bonds = Tuple{String, String}[]
-                add_external_bonds = String[]
-                remove_external_bonds = String[]
-                apply_to_residues = String[]
+                # Changes to each residue of the patch
+                add_atoms = [Tuple{String, String, Any}[] for _ in 1:n_res]
+                change_atoms = [Tuple{String, String, Any}[] for _ in 1:n_res]
+                remove_atoms = [String[] for _ in 1:n_res]
+                add_bonds = [Tuple{String, String}[] for _ in 1:n_res]
+                remove_bonds = [Tuple{String, String}[] for _ in 1:n_res]
+                add_external_bonds = [String[] for _ in 1:n_res]
+                remove_external_bonds = [String[] for _ in 1:n_res]
+                apply_to_residues = [String[] for _ in 1:n_res]
+                inter_residue_bonds = Tuple{String, String}[]
+                split_name(pa, key) = split_patch_name(xml_attr(pa, key, ff_file), n_res,
+                                                       pname, ff_file)
 
                 for pa in eachelement(patch)
                     if pa.name == "AddAtom"
                         q = (haskey(pa, "charge") ?
                              parse_attr(T, pa, "charge", ff_file) : missing)
-                        push!(add_atoms, (xml_attr(pa, "name", ff_file),
-                                          xml_attr(pa, "type", ff_file), q))
+                        ri, name = split_name(pa, "name")
+                        push!(add_atoms[ri], (name, xml_attr(pa, "type", ff_file), q))
                     elseif pa.name == "ChangeAtom"
                         q = (haskey(pa, "charge") ?
                              parse_attr(T, pa, "charge", ff_file) : missing)
-                        push!(change_atoms, (xml_attr(pa, "name", ff_file),
-                                             xml_attr(pa, "type", ff_file), q))
+                        ri, name = split_name(pa, "name")
+                        push!(change_atoms[ri], (name, xml_attr(pa, "type", ff_file), q))
                     elseif pa.name == "RemoveAtom"
-                        push!(remove_atoms, xml_attr(pa, "name", ff_file))
+                        ri, name = split_name(pa, "name")
+                        push!(remove_atoms[ri], name)
                     elseif pa.name == "AddBond"
-                        push!(add_bonds, (xml_attr(pa, "atomName1", ff_file),
-                                          xml_attr(pa, "atomName2", ff_file)))
+                        ri, name_1 = split_name(pa, "atomName1")
+                        rj, name_2 = split_name(pa, "atomName2")
+                        if ri == rj
+                            push!(add_bonds[ri], (name_1, name_2))
+                        else
+                            # A bond between the residues is an external bond of each
+                            push!(add_external_bonds[ri], name_1)
+                            push!(add_external_bonds[rj], name_2)
+                            push!(inter_residue_bonds, (ri == 1 ? (name_1, name_2) :
+                                                                  (name_2, name_1)))
+                        end
                     elseif pa.name == "RemoveBond"
-                        push!(remove_bonds, (xml_attr(pa, "atomName1", ff_file),
-                                             xml_attr(pa, "atomName2", ff_file)))
+                        ri, name_1 = split_name(pa, "atomName1")
+                        rj, name_2 = split_name(pa, "atomName2")
+                        # Removing a bond between the residues has no effect
+                        ri == rj && push!(remove_bonds[ri], (name_1, name_2))
                     elseif pa.name == "AddExternalBond"
-                        push!(add_external_bonds, xml_attr(pa, "atomName", ff_file))
+                        ri, name = split_name(pa, "atomName")
+                        push!(add_external_bonds[ri], name)
                     elseif pa.name == "RemoveExternalBond"
-                        push!(remove_external_bonds, xml_attr(pa, "atomName", ff_file))
+                        ri, name = split_name(pa, "atomName")
+                        push!(remove_external_bonds[ri], name)
                     elseif pa.name == "ApplyToResidue"
-                        push!(apply_to_residues, xml_attr(pa, "name", ff_file))
+                        ri, name = split_name(pa, "name")
+                        push!(apply_to_residues[ri], name)
                     end
                 end
-                patches[pname] = ResiduePatchTemplate(pname, add_atoms, change_atoms,
-                                    remove_atoms, add_bonds, remove_bonds, add_external_bonds,
-                                    remove_external_bonds, apply_to_residues)
+                residue_patches = [ResiduePatchTemplate(pname, add_atoms[ri], change_atoms[ri],
+                                    remove_atoms[ri], add_bonds[ri], remove_bonds[ri],
+                                    add_external_bonds[ri], remove_external_bonds[ri],
+                                    apply_to_residues[ri]) for ri in 1:n_res]
+                if n_res == 1
+                    patches[pname] = residue_patches[1]
+                else
+                    two_residue_patches[pname] = TwoResiduePatchTemplate(pname,
+                            Tuple(residue_patches), inter_residue_bonds,
+                            (ResidueTemplate[], ResidueTemplate[]))
+                end
             end
 
         elseif entry_name == "HarmonicBondForce"
@@ -1172,6 +1228,7 @@ struct MolecularForceField{T, G, NB, M, D, DA, E, K, KA, C}
     atom_types::Dict{String, AtomType{T, M, D, E}}
     atom_type_order::Vector{String}
     residues::Dict{String, ResidueTemplate{T, C, D}}
+    two_residue_patches::Vector{TwoResiduePatchTemplate}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
@@ -1226,6 +1283,7 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
     # Residue templates can be replaced by ones with a higher override level
     residue_overrides = Dict{String, Int}()
     patches = Dict{String, ResiduePatchTemplate}()
+    two_residue_patch_dict = Dict{String, TwoResiduePatchTemplate}()
 
     atom_type_order = String[]
     bond_rule_specs    = [] # Accumulators for pattern rules
@@ -1239,10 +1297,10 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
 
     for ff_file in ff_files
         read_ff_xml!(ff_file, ff_param_array, atom_types, atom_type_order, attributes_from_residue,
-                     residues, residue_overrides, patches, bond_rule_specs, angle_rule_specs,
-                     torsion_rule_specs, cmap_rules, custor_rule_specs, nb_atom_classes,
-                     ljforce_atom_classes, nbfix_pairs, urey_rule_specs, units, strictness,
-                     T, IC)
+                     residues, residue_overrides, patches, two_residue_patch_dict,
+                     bond_rule_specs, angle_rule_specs, torsion_rule_specs, cmap_rules,
+                     custor_rule_specs, nb_atom_classes, ljforce_atom_classes, nbfix_pairs,
+                     urey_rule_specs, units, strictness, T, IC)
     end
     torsion_order = ff_param_array[1]
     weight_14_coulomb = ff_param_array[2]
@@ -1263,8 +1321,16 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
     end
 
     # Apply residue patches
+    # The templates made from each template, which two residue patches also apply to
+    patched_template_names = Dict{String, Vector{String}}()
     for res_name in collect(keys(residues)) # Collect required since residues changes
-        patches_to_apply = copy(residues[res_name].allowed_patches)
+        patches_to_apply = String[]
+        for allowed_patch in residues[res_name].allowed_patches
+            patch_name, _ = split_allowed_patch(allowed_patch)
+            if !haskey(two_residue_patch_dict, patch_name)
+                push!(patches_to_apply, patch_name)
+            end
+        end
         for patch_name in keys(patches)
             for rn in patches[patch_name].apply_to_residues
                 if rn == res_name
@@ -1292,6 +1358,32 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
                                     patch_res_name, res_name, patch_name, atom_types, strictness)
             if !isnothing(patched_res) # Invalid patches warn and return nothing
                 residues[patch_res_name] = patched_res
+                push!(get!(patched_template_names, res_name, String[]), patch_res_name)
+            end
+        end
+    end
+
+    # Apply two residue patches to the templates they allow for each residue and to the
+    #   templates made from those by a single residue patch
+    # When setting up a system, the patched templates are matched to bonded pairs of residues
+    #   that do not match any other template
+    two_residue_patches = sort(collect(values(two_residue_patch_dict)); by=(p -> p.pname))
+    for patch in two_residue_patches, (ri, res_patch) in enumerate(patch.residue_patches)
+        res_names = Set(res_patch.apply_to_residues)
+        for (res_name, template) in residues
+            if any(ap -> split_allowed_patch(ap) == (patch.pname, ri), template.allowed_patches)
+                push!(res_names, res_name)
+            end
+        end
+        for res_name in sort(collect(res_names))
+            haskey(residues, res_name) || continue
+            for name in [res_name; sort(get(patched_template_names, res_name, String[]))]
+                # The patch can be incompatible with a single residue patch, e.g. CYSD and
+                #   DISU both remove HG1, so only failures with the original template warn
+                patched_res = apply_residue_patch(residues[name], res_patch,
+                                    "$(name)_$(patch.pname)", name, patch.pname, atom_types,
+                                    (name == res_name ? strictness : :nowarn))
+                isnothing(patched_res) || push!(patch.templates[ri], patched_res)
             end
         end
     end
@@ -1501,9 +1593,10 @@ function MolecularForceField(ff_files::AbstractString...; units::Bool=true,
     )
 
     return MolecularForceField{T, G, NB, M, D, DA, E, K, KA, IC}(
-        atom_types, atom_type_order, residues, torsion_order, weight_14_coulomb, weight_14_lj,
-        global_params, dispersion_correction, ff_param_array[13], nbfix_pairs_conc,
-        attributes_from_residue, resname_replacements, atomname_replacements, standard_bonds,
+        atom_types, atom_type_order, residues, two_residue_patches, torsion_order,
+        weight_14_coulomb, weight_14_lj, global_params, dispersion_correction,
+        ff_param_array[13], nbfix_pairs_conc, attributes_from_residue,
+        resname_replacements, atomname_replacements, standard_bonds,
         type_to_class, class_to_types, bond_resolver, angle_resolver, torsion_resolver,
         cmap_resolver, units,
     )

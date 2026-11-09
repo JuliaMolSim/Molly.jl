@@ -808,37 +808,47 @@ function System(coord_file::AbstractString,
                                               Union{Vector{Int}, Nothing},
                                               Union{String, Nothing},
                                               Union{Vector{String}, Nothing}}}()
+    matched_residues = Tuple{ResidueGraph, ResidueTemplate, Vector{Int}}[]
+    unmatched_residues = Tuple{String, Int, ResidueGraph}[]
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
             template, matches = match_residue(rgraph, force_field, sorted_template_names,
                                               chain, res_id, strictness, match_cache)
-            matched = !isnothing(matches)
-            if matched
-                for (r_i, m_i) in enumerate(matches)
-                    global_idx = rgraph.atom_inds[r_i]
-                    atom_type_of[global_idx] = template.types[m_i]
-                    charge_of[global_idx] = template.charges[m_i]
-                    element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
-                    template_id_of[global_idx] = m_i
-                    template_of[global_idx] = template
-                    resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
-                end
-                add_virtual_sites!(virtual_sites, template, rgraph, matches)
-            end
-            if !matched
-                n_names = length(rgraph.atom_names)
-                if n_names > 30
-                    atom_str = join(rgraph.atom_names[1:30], ", ") * " and $(n_names - 30) more"
-                else
-                    atom_str = join(rgraph.atom_names, ", ")
-                end
-                throw(MissingResidueTemplateError("could not match residue $(rgraph.res_name) " *
-                    "(residue number $res_id of chain \"$chain\") to any of the residue templates " *
-                    "in the force field. " * residue_match_error(rgraph, force_field.residues) *
-                    " The residue has $n_names atoms: $atom_str. See the Molly documentation " *
-                    "section on simulating a protein for tips on obtaining compatible files."))
+            if isnothing(matches)
+                push!(unmatched_residues, (chain, res_id, rgraph))
+            else
+                push!(matched_residues, (rgraph, template, matches))
             end
         end
+    end
+    # Residues that do not match a template can match as a bonded pair, e.g. a disulfide bond
+    unmatched_residues = match_two_residue_patches!(matched_residues, unmatched_residues,
+                                force_field.two_residue_patches, top_bonds, atom_lookup)
+    if length(unmatched_residues) > 0
+        chain, res_id, rgraph = unmatched_residues[1]
+        n_names = length(rgraph.atom_names)
+        if n_names > 30
+            atom_str = join(rgraph.atom_names[1:30], ", ") * " and $(n_names - 30) more"
+        else
+            atom_str = join(rgraph.atom_names, ", ")
+        end
+        throw(MissingResidueTemplateError("could not match residue $(rgraph.res_name) " *
+            "(residue number $res_id of chain \"$chain\") to any of the residue templates " *
+            "in the force field. " * residue_match_error(rgraph, force_field.residues) *
+            " The residue has $n_names atoms: $atom_str. See the Molly documentation " *
+            "section on simulating a protein for tips on obtaining compatible files."))
+    end
+    for (rgraph, template, matches) in matched_residues
+        for (r_i, m_i) in enumerate(matches)
+            global_idx = rgraph.atom_inds[r_i]
+            atom_type_of[global_idx] = template.types[m_i]
+            charge_of[global_idx] = template.charges[m_i]
+            element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
+            template_id_of[global_idx] = m_i
+            template_of[global_idx] = template
+            resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
+        end
+        add_virtual_sites!(virtual_sites, template, rgraph, matches)
     end
     virtual_sites_type = (length(virtual_sites) > 0 ? virtual_sites : [])
 

@@ -18,7 +18,7 @@ using Test
         simulator = VelocityVerlet(dt=0.001u"ps", remove_CM_motion=false)
 
         atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.05u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-        dist_cutoff = 3.0u"nm"
+        dist_cutoff = 2.5u"nm"
         cutoffs = (
             DistanceCutoff(dist_cutoff),
             ShiftedPotentialCutoff(dist_cutoff),
@@ -37,7 +37,7 @@ using Test
                     )
                 else
                     neighbor_finder=DistanceNeighborFinder(
-                        eligible=to_device(trues(n_atoms, n_atoms), AT),
+                        eligible=Molly.to_device(trues(n_atoms, n_atoms), AT),
                         n_steps=10,
                         dist_cutoff=dist_cutoff,
                     )
@@ -47,8 +47,8 @@ using Test
             end
 
             sys = System(
-                atoms=to_device(atoms, AT),
-                coords=to_device(coords, AT),
+                atoms=Molly.to_device(atoms, AT),
+                coords=Molly.to_device(coords, AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=ifelse(nl, true, false)),),
                 neighbor_finder=neighbor_finder,
@@ -98,7 +98,7 @@ end
     data_dir = normpath(@__DIR__, "..", "..", "data")
 
     for array_type in (CUDA.functional() ? (Array, CuArray) : (Array,))
-        device = array_type === Array ? "CPU" : "GPU"
+        device = (array_type == Array ? "CPU" : "GPU")
 
         @testset "$device" begin
             float_type = Float64
@@ -138,7 +138,7 @@ end
             simulate!(sys, simulator, 100_000; run_loggers=false, show_progress=false)
             E0 = total_energy(sys)
 
-            n_steps = array_type === Array ? 700_000 : 20_000_000
+            n_steps = (array_type == Array ? 700_000 : 20_000_000)
             simulate!(sys, simulator, n_steps; show_progress=false)
 
             E = values(sys.loggers.energy)
