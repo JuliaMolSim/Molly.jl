@@ -2908,8 +2908,8 @@ mts_initialize_noise(sys, ::MTSLangevinIntegrator) = zero(sys.velocities)
     recompute_forces = true # Forces re-used between steps
     # The forces of all the interactions for the virial are kept apart, as `forces_t` and
     #   `accels_t` hold those of the outer level for the start of the next step
-    forces_vir = (needs_vir ? zero_forces(sys) : nothing)
-    accels_vir = (needs_vir ? zero(accels_t) : nothing)
+    forces_vir = (needs_vir ? zero(forces_t) : similar(forces_t, 0))
+    accels_vir = (needs_vir ? zero(accels_t) : similar(accels_t, 0))
     # Whether the coordinates have moved since the neighbors were last found, for a neighbor
     #   finder that tracks displacements
     coords_moved = Ref(false)
