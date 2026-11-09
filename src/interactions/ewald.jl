@@ -12,6 +12,8 @@ export
 
 abstract type AbstractEwald end
 
+concurrent_with_pairwise(::AbstractEwald) = true
+
 const default_ewald_error_tol = 0.0005
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,

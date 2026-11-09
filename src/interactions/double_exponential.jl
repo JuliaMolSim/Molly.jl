@@ -673,6 +673,8 @@ end
 
 AtomsCalculators.zero_forces(sys::System, ::DExpDispersionCorrection) = zero_forces(sys)
 
+concurrent_with_pairwise(::DExpDispersionCorrection) = true
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                     inter::DExpDispersionCorrectionλ; kwargs...)
     return inter.factor / volume(sys) + inter.energy_const
@@ -690,3 +692,5 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
 end
 
 AtomsCalculators.zero_forces(sys::System, ::DExpDispersionCorrectionλ) = zero_forces(sys)
+
+concurrent_with_pairwise(::DExpDispersionCorrectionλ) = true

@@ -1369,6 +1369,7 @@ Since the forces are available for mutation in the function, general interaction
 In cases where the forces are not simply added to, the order of general interactions can matter.
 General interactions are applied after pairwise and specific interactions by default.
 Define `Molly.evaluate_before_pairwise(::MyGeneralInter) = true` to evaluate an interaction before them.
+On the GPU, a general interaction that only adds to the forces, as above, can define `Molly.concurrent_with_pairwise(::MyGeneralInter) = true` so that it is calculated at the same time as the pairwise and specific interactions, which is faster.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by the [`masses`](@ref) of the system, `masses(sys)`, to get the forces according to F=ma.
 
 If you want to use the [`virial`](@ref) in your simulation, for example for to control pressure, you will also need to calculate the contribution to the virial in the `AtomsCalculators.forces!` function.

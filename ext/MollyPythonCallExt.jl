@@ -149,6 +149,8 @@ end
 
 AtomsCalculators.zero_forces(sys::System, ::ASECalculator) = Molly.zero_forces(sys)
 
+Molly.concurrent_with_pairwise(::ASECalculator) = true
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys::System,
                                            ase_calc::ASECalculator;
                                            kwargs...)

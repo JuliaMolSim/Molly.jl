@@ -1006,6 +1006,42 @@ end
 end
 
 #=
+The drift of the coordinates by the velocities over `dt` in one pass over the atoms on the
+GPU, doing what `coords .+= vels .* dt` and the stores or wrapping around it do. With
+`store` the coordinates before the drift are stored in `coord_storage` and minus the
+coordinates after it divided by `dt` in `vel_storage`, for
+`apply_position_constraints_wrap!`. Without `store` the coordinates are wrapped into the
+box, as there are no constraints to apply first.
+=#
+function drift_step!(coords, vels, coord_storage, vel_storage, dt, boundary,
+                     ::Val{store}) where store
+    backend = get_backend(coords)
+    kernel! = drift_kernel!(backend, 256)
+    launch_kernel!(kernel!, coords, vels, coord_storage, vel_storage, dt, boundary,
+                   Val(store); ndrange=length(coords))
+    return coords
+end
+
+@kernel inbounds=true function drift_kernel!(coords, @Const(vels), coord_storage,
+                                             vel_storage, dt, boundary,
+                                             ::Val{store}) where store
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        x = coords[i]
+        if store
+            coord_storage[i] = x
+        end
+        x = x + vels[i] * dt
+        if store
+            coords[i] = x
+            vel_storage[i] = -x / dt
+        else
+            coords[i] = wrap_coords(x, boundary)
+        end
+    end
+end
+
+#=
 The A, O and A steps of the Langevin integrator in one pass over the atoms on the GPU,
 doing what the coordinate updates and `langevin_o_step!` do between the velocity and
 position constraints. With `store` the coordinates before the step are stored in

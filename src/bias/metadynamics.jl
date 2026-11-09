@@ -1173,6 +1173,8 @@ end
 
 AtomsCalculators.zero_forces(sys::System, ::Metadynamics) = zero_forces(sys)
 
+concurrent_with_pairwise(::Metadynamics) = true
+
 function AtomsCalculators.energy_forces!(fs::AbstractVector, # Required for disambiguation
                                          sys::System, md::Metadynamics; needs_vir::Bool=false,
                                          buffers=nothing, step_n=nothing,

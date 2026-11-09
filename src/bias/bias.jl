@@ -354,3 +354,5 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
 end
 
 AtomsCalculators.zero_forces(sys::System, ::BiasPotential) = zero_forces(sys)
+
+concurrent_with_pairwise(::BiasPotential) = true

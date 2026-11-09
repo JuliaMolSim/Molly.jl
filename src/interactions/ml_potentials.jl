@@ -12,6 +12,8 @@ export ANIPotential
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
 abstract type AbstractMLPotential end
 
+concurrent_with_pairwise(::AbstractMLPotential) = true
+
 # ANI energies are produced in Hartree; MD in Molly is typically in eV.
 const HARTREE_TO_EV = ustrip(u"eV", 1u"Eh_au")
 

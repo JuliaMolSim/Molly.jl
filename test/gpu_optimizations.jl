@@ -256,3 +256,70 @@
         end
     end
 end
+
+# General interactions to check the order of the forces on the GPU, see
+#   `concurrent_with_pairwise`: one that adds a constant force to every atom and one that
+#   records the forces it is given
+struct ConstantForceInter{F}
+    f::F
+    concurrent::Bool
+end
+
+Molly.concurrent_with_pairwise(inter::ConstantForceInter) = inter.concurrent
+
+function AtomsCalculators.forces!(fs, sys, inter::ConstantForceInter; kwargs...)
+    fs .+= (inter.f,)
+    return fs
+end
+
+mutable struct RecordForcesInter
+    seen::Any
+end
+
+function AtomsCalculators.forces!(fs, sys, inter::RecordForcesInter; kwargs...)
+    inter.seen = from_device(fs)
+    return fs
+end
+
+@testset "Order of general interactions on the GPU" begin
+    rec = RecordForcesInter(nothing)
+    c1 = ConstantForceInter(SVector(1.0, 2.0, 3.0), true)
+    c2 = ConstantForceInter(SVector(10.0, 20.0, 30.0), true)
+    @test Molly.n_general_alongside((c1, rec, c2)) == 1
+    @test Molly.n_general_alongside((c1, c2)) == 2
+    @test Molly.n_general_alongside((rec, c1)) == 0
+    @test Molly.n_general_alongside(()) == 0
+
+    if run_cuda_tests
+        n_atoms = 100
+        T = Float64
+        coords = place_atoms(n_atoms, CubicBoundary(T(3.0)); min_dist=T(0.25),
+                             rng=Xoshiro(10))
+        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0))
+                 for i in 1:n_atoms]
+        c1 = ConstantForceInter(SVector(T(1.0), T(2.0), T(3.0)), true)
+        c2 = ConstantForceInter(SVector(T(10.0), T(20.0), T(30.0)), true)
+        for grad_safe in (false, true)
+            rec = RecordForcesInter(nothing)
+            sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                boundary=CubicBoundary(T(3.0)),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(1.0))),),
+                general_inters=(c1, rec, c2),
+                neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=T(1.2),
+                                                  array_type=CuArray),
+                force_units=NoUnits,
+                energy_units=NoUnits,
+                grad_safe=grad_safe,
+            )
+            fs = from_device(forces(sys))
+            fs_pairwise = from_device(forces(System(sys; general_inters=())))
+            @test maximum(norm.(fs_pairwise)) > 1
+            # The recording interaction sees the forces of the interactions before it, and
+            #   the one after it is added afterwards
+            @test rec.seen ≈ fs_pairwise .+ (c1.f,)
+            @test fs ≈ fs_pairwise .+ (c1.f + c2.f,)
+        end
+    end
+end

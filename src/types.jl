@@ -31,6 +31,7 @@ export
 
 @public pairwise_uses_velocity,
     evaluate_before_pairwise,
+    concurrent_with_pairwise,
     from_device,
     to_device
 
@@ -61,8 +62,27 @@ when calculating the potential energy and forces.
 This is `false` by default, meaning that general interactions are calculated afterwards.
 Custom general interactions should implement this function to return `true` if
 they change the state such that it affects subsequent interactions (e.g. atomic charges).
+
+On the GPU those calculated afterwards can instead be calculated at the same time as the
+pairwise and specific interactions, see [`concurrent_with_pairwise`](@ref).
 """
 evaluate_before_pairwise(inter) = false
+
+"""
+    concurrent_with_pairwise(inter)
+
+Whether a general interaction that is not evaluated before the pairwise interactions, see
+[`evaluate_before_pairwise`](@ref), can be calculated at the same time as the pairwise and
+specific interactions on the GPU.
+
+This is `false` by default, meaning that the interaction is calculated after the forces of
+the pairwise and specific interactions have been added.
+Custom general interactions can implement this function to return `true` if they only add
+their forces, rather than reading the forces of other interactions or changing the state.
+They are then calculated on a separate stream while the pairwise force kernel runs, unless
+a general interaction before them in the list returns `false`.
+"""
+concurrent_with_pairwise(inter) = false
 
 """
     from_device(arr)

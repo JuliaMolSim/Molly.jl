@@ -4844,6 +4844,8 @@ end
 
 AtomsCalculators.zero_forces(sys::System, ::ReaxFF) = zero_forces(sys)
 
+concurrent_with_pairwise(::ReaxFF) = true
+
 ### Extra energy and force functions for tests below ###
 
 # returns component level energies in kcal/mol

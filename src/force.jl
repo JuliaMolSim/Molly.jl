@@ -1384,10 +1384,12 @@ function forces!(fs,
                  strictness=default_strictness()) where needs_vir
     has_early_interactions = any(evaluate_before_pairwise, values(general_inters))
     concurrent = concurrent_gpu_forces(sys)
-    # The general interactions calculated at the same time as the pairwise interactions
-    #   add their forces to `fs` before those are added
-    accumulate = has_early_interactions ||
-                 (concurrent && !all(evaluate_before_pairwise, values(general_inters)))
+    # The general interactions calculated at the same time as the pairwise interactions,
+    #   see `n_general_alongside`, add their forces to `fs` before those are added
+    n_alongside = (concurrent ? n_general_alongside(values(general_inters)) : 0)
+    has_alongside = any(((i, inter),) -> i <= n_alongside && !evaluate_before_pairwise(inter),
+                        enumerate(values(general_inters)))
+    accumulate = has_early_interactions || has_alongside
     if has_early_interactions
         fill!(fs, zero(eltype(fs)))
     end
@@ -1403,9 +1405,11 @@ function forces!(fs,
         end
     end
 
-    general_forces! = function ()
-        for inter in values(general_inters)
-            if !evaluate_before_pairwise(inter)
+    # The general interactions after the pairwise ones, those calculated alongside them if
+    #   `alongside` and the others otherwise
+    general_forces! = function (alongside::Bool)
+        for (i, inter) in enumerate(values(general_inters))
+            if !evaluate_before_pairwise(inter) && (i <= n_alongside) == alongside
                 AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors,
                                 step_n=step_n, n_threads=n_threads, buffers=buffers,
                                 needs_vir=needs_vir, visit_state=visit_state,
@@ -1415,13 +1419,16 @@ function forces!(fs,
     end
     if concurrent
         gpu_forces_concurrent!(fs, sys, neighbors, step_n, buffers, needs_vir_val,
-                               pairwise_inters, specific_inter_lists, general_forces!,
-                               Val(accumulate), accumulate && !has_early_interactions)
+                               pairwise_inters, specific_inter_lists,
+                               () -> general_forces!(true), Val(accumulate),
+                               accumulate && !has_early_interactions)
+        # Once `fs` holds the forces of all the other interactions
+        general_forces!(false)
     else
         # Allow an Enzyme reverse rule
         gpu_forces!(fs, sys, neighbors, step_n, buffers, needs_vir_val, pairwise_inters,
                     specific_inter_lists, n_threads, Val(has_early_interactions))
-        general_forces!()
+        general_forces!(false)
     end
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
@@ -1487,9 +1494,25 @@ function gpu_forces!(fs,
     end
 end
 
-# Whether `forces!` calculates the specific and general interactions on the device at the
-#   same time as the pairwise interactions, see `gpu_forces_concurrent!`
+# Whether `forces!` calculates the specific interactions, and the general interactions that
+#   allow it, on the device at the same time as the pairwise interactions, see
+#   `gpu_forces_concurrent!`
 concurrent_gpu_forces(sys) = false
+
+#=
+The number of general interactions at the start of `general_inters` that can be calculated
+at the same time as the pairwise interactions: those before the first that is evaluated
+after the pairwise interactions and is not `concurrent_with_pairwise`. The general
+interactions evaluated after the pairwise interactions then see the forces of the same
+interactions as they would with everything calculated in order, those of the general
+interactions before them included, since the ones calculated alongside only add their
+forces.
+=#
+function n_general_alongside(general_inters::Tuple)
+    i = findfirst(inter -> !evaluate_before_pairwise(inter) && !concurrent_with_pairwise(inter),
+                  general_inters)
+    return (isnothing(i) ? length(general_inters) : i - 1)
+end
 
 #=
 `gpu_forces!` with the specific interactions, and the general interactions whose forces

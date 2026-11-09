@@ -85,6 +85,8 @@ end
 
 AtomsCalculators.zero_forces(sys::System, ::MullerBrown) = zero_forces(sys)
 
+concurrent_with_pairwise(::MullerBrown) = true
+
 @inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})
     x, y = coord
     res_x = ustrip(zero(coord[1])) * inter.force_units

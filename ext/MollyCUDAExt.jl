@@ -566,6 +566,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
             buffers.interacting_tiles_diag,
             buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow,
+            nothing,
         )
     end
 
@@ -593,6 +594,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
         buffers.interacting_tiles_diag,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
+        nothing,
     )
 end
 
@@ -724,7 +726,8 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pair
                 buffers.interacting_tiles_type,
                 buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow;
+                buffers.interacting_tiles_overflow,
+                nothing;
                 threads=(32, block_y),
                 blocks=n_blocks_launch,
                 shmem=shmem,
@@ -1051,12 +1054,16 @@ const displacement_max_blocks = 256
 #   tracker holds the scratch without a type
 mutable struct CUDADisplacementScratch{T}
     # Pinned host memory mapped into the device address space, holding the two largest
-    #   squared displacements and whether they exceed the allowance
+    #   squared displacements and whether they exceed the allowance, then the same for
+    #   the inner masks of the tile list, see `InnerTileMasks`
     result::CuArray{T, 1, CUDA_CORE.HostMemory}
     result_host::Vector{T}
-    # The results of each block and the count of finished blocks on the device
+    # The results of each block and the count of finished blocks on the device, for the
+    #   reference and for the inner masks
     block_maxs_1::CuArray{T, 1, CUDA_CORE.DeviceMemory}
     block_maxs_2::CuArray{T, 1, CUDA_CORE.DeviceMemory}
+    inner_block_maxs_1::CuArray{T, 1, CUDA_CORE.DeviceMemory}
+    inner_block_maxs_2::CuArray{T, 1, CUDA_CORE.DeviceMemory}
     counter::CuArray{Int32, 1, CUDA_CORE.DeviceMemory}
     event::CuEvent
     context::CuContext
@@ -1069,14 +1076,13 @@ function cuda_displacement_scratch(tracker, ::Type{T},
             length(scratch.block_maxs_1) >= n_blocks
         return scratch
     end
-    result = CuArray{T, 1, CUDA_CORE.HostMemory}(undef, 3)
+    result = CuArray{T, 1, CUDA_CORE.HostMemory}(undef, 6)
     result_host = unsafe_wrap(Array, result)
     counter = fill!(CuArray{Int32, 1, CUDA_CORE.DeviceMemory}(undef, 1), Int32(0))
     n_blocks_alloc = max(n_blocks, displacement_max_blocks)
-    block_maxs_1 = CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc)
-    block_maxs_2 = CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc)
-    scratch = CUDADisplacementScratch{T}(result, result_host, block_maxs_1, block_maxs_2,
-                    counter, CuEvent(CUDA_CORE.EVENT_DISABLE_TIMING), CUDA.context())
+    block_maxs = ntuple(_ -> CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc), 4)
+    scratch = CUDADisplacementScratch{T}(result, result_host, block_maxs..., counter,
+                    CuEvent(CUDA_CORE.EVENT_DISABLE_TIMING), CUDA.context())
     if !isnothing(tracker)
         tracker.scratch = scratch
     end
@@ -1121,11 +1127,35 @@ end
 @inline set_skip_flag!(::Nothing) = nothing
 @inline set_skip_flag!(skip_flag) = (@inbounds skip_flag[1] = Int32(1); nothing)
 
-# Called by every thread of a block with the two largest values of the block, writes them,
-#   and the last block to finish reduces the values of all the blocks and writes the result
+# The two largest values over all the blocks, from those each block wrote, correct in the
+#   first thread
+@inline function grid_reduce_top2(block_maxs_1, block_maxs_2, warp_maxs_1, warp_maxs_2,
+                                  ::Val{T}) where T
+    # Atomic reads, which are made in the device-wide cache, see the results of the other
+    #   blocks
+    max_1, max_2 = zero(T), zero(T)
+    b = threadIdx().x
+    @inbounds while b <= gridDim().x
+        other_1 = CUDA.atomic_add!(pointer(block_maxs_1, b), zero(T))
+        other_2 = CUDA.atomic_add!(pointer(block_maxs_2, b), zero(T))
+        max_1, max_2 = Molly.merge_top2((max_1, max_2), (other_1, other_2))
+        b += blockDim().x
+    end
+    return block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, Val(T))
+end
+
+#=
+Called by every thread of a block with the two largest values of the block, writes them,
+and the last block to finish reduces the values of all the blocks and writes the result.
+`inner` is `nothing` or holds the check of the inner masks of the tile list, see
+`InnerTileMasks`, made with the squared displacements `inner_d2` of the thread since the
+masks were found: whether they exceed its allowance, or the masks have to be found again
+whatever they are, is written to the result and to the flag on the device that the force
+kernel reads.
+=#
 @inline function finish_displacement_check!(max_1, max_2, result, block_maxs_1, block_maxs_2,
-                                            counter, skip_flag, allowance::T,
-                                            ::Val{T}) where T
+                                            counter, skip_flag, allowance::T, ::Val{T},
+                                            inner=nothing, inner_d2=zero(T)) where T
     tid = threadIdx().x
     block_i = blockIdx().x
     n_blocks = gridDim().x
@@ -1133,9 +1163,17 @@ end
     warp_maxs_2 = CuStaticSharedArray(T, 32)
     is_last = CuStaticSharedArray(Bool, 1)
     max_1, max_2 = block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, Val(T))
+    if !isnothing(inner)
+        inner_1, inner_2 = block_reduce_top2(inner_d2, zero(T), warp_maxs_1, warp_maxs_2,
+                                             Val(T))
+    end
     @inbounds if tid == 1
         block_maxs_1[block_i] = max_1
         block_maxs_2[block_i] = max_2
+        if !isnothing(inner)
+            inner.block_maxs_1[block_i] = inner_1
+            inner.block_maxs_2[block_i] = inner_2
+        end
         # The result is visible to every block before this block is counted as finished
         threadfence()
         n_finished = CUDA.atomic_add!(pointer(counter, 1), Int32(1))
@@ -1144,17 +1182,12 @@ end
     sync_threads()
 
     @inbounds if is_last[1]
-        # Atomic reads, which are made in the device-wide cache, see the results of the
-        #   other blocks
-        max_1, max_2 = zero(T), zero(T)
-        b = tid
-        while b <= n_blocks
-            other_1 = CUDA.atomic_add!(pointer(block_maxs_1, b), zero(T))
-            other_2 = CUDA.atomic_add!(pointer(block_maxs_2, b), zero(T))
-            max_1, max_2 = Molly.merge_top2((max_1, max_2), (other_1, other_2))
-            b += blockDim().x
+        max_1, max_2 = grid_reduce_top2(block_maxs_1, block_maxs_2, warp_maxs_1, warp_maxs_2,
+                                        Val(T))
+        if !isnothing(inner)
+            inner_1, inner_2 = grid_reduce_top2(inner.block_maxs_1, inner.block_maxs_2,
+                                                warp_maxs_1, warp_maxs_2, Val(T))
         end
-        max_1, max_2 = block_reduce_top2(max_1, max_2, warp_maxs_1, warp_maxs_2, Val(T))
         if tid == 1
             invalid = !(sqrt(max_1) + sqrt(max_2) <= allowance)
             result[1] = max_1
@@ -1162,6 +1195,13 @@ end
             result[3] = (invalid ? one(T) : zero(T))
             if invalid
                 set_skip_flag!(skip_flag)
+            end
+            if !isnothing(inner)
+                stale = inner.force || !(sqrt(inner_1) + sqrt(inner_2) <= inner.allowance)
+                result[4] = inner_1
+                result[5] = inner_2
+                result[6] = (stale ? one(T) : zero(T))
+                inner.stale[1] = (stale ? Int32(1) : Int32(0))
             end
             # Ready for the next check
             counter[1] = Int32(0)
@@ -1198,35 +1238,48 @@ launched after it then return straight away.
 function reorder_check_kernel!(coords_reordered, velocities_reordered, coords_var,
                                velocities_var, seq_var, ref_coords_var, result, block_maxs_1,
                                block_maxs_2, counter, skip_flag, boundary, F, dist_unit,
-                               allowance::T, ::Val{N}, ::Val{T}) where {N, T}
+                               allowance::T, inner, ::Val{N}, ::Val{T}) where {N, T}
     coords = CUDA_CORE.Const(coords_var)
     velocities = CUDA_CORE.Const(velocities_var)
     seq = CUDA_CORE.Const(seq_var)
     ref_coords = CUDA_CORE.Const(ref_coords_var)
     i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     max_1 = zero(T)
+    inner_d2 = zero(T)
     @inbounds if i <= N
         original_i = seq[i]
         c = coords[original_i]
         coords_reordered[i] = c
         velocities_reordered[i] = velocities[original_i]
         max_1 = Molly.sq_displacement(c, ref_coords[original_i], boundary, F, dist_unit, T)
+        if !isnothing(inner)
+            # The inner reference is in the Morton order
+            inner_d2 = Molly.sq_displacement(c, inner.coords[i], boundary, inner.F,
+                                             dist_unit, T)
+        end
     end
     finish_displacement_check!(max_1, zero(T), result, block_maxs_1, block_maxs_2, counter,
-                               skip_flag, allowance, Val(T))
+                               skip_flag, allowance, Val(T), inner, inner_d2)
     return nothing
 end
 
+# `inner` is `nothing` or holds the coordinates the inner masks of the tile list were found
+#   from, the box deformation since then and the allowance, the flag on the device and
+#   whether the masks have to be found again whatever the displacements are, see
+#   `InnerTileMasks`
 function launch_reorder_check!(buffers, sys, tracker, ref_coords, F, dist_unit,
-                               allowance::T) where T
+                               allowance::T, inner) where T
     N = length(sys.coords)
     n_blocks = max(cld(N, displacement_threads), 1)
     scratch = cuda_displacement_scratch(tracker, T, n_blocks)
+    inner_args = (isnothing(inner) ? nothing :
+                  (; inner..., block_maxs_1=scratch.inner_block_maxs_1,
+                     block_maxs_2=scratch.inner_block_maxs_2))
     args = (buffers.coords_reordered, buffers.velocities_reordered, sys.coords,
             sys.velocities, buffers.morton_seq, ref_coords, scratch.result,
             scratch.block_maxs_1, scratch.block_maxs_2, scratch.counter,
             buffers.interacting_tiles_overflow, sys.boundary, F, dist_unit, allowance,
-            Val(N), Val(T))
+            inner_args, Val(N), Val(T))
     kernel = cached_cufunction(reorder_check_kernel!, args, Val(NamedTuple()))
     kernel(args...; threads=displacement_threads, blocks=n_blocks)
     CUDA.record(scratch.event, CUDA.stream())
@@ -1289,13 +1342,49 @@ function Molly.max_sq_displacements(coords::CuArray, ref_coords, boundary, F, di
 end
 
 #=
+Dynamic pruning
+
+The tile list holds the pairs within the cutoff of the neighbor finder at the coordinates
+it was built from, which is longer than the cutoff of the interactions so that the list
+stays valid for a number of steps. Many of the pairs it holds are beyond the cutoff of the
+interactions at a given step. As in GROMACS, the force kernel instead uses masks of the
+tiles found at a shorter inner cutoff from more recent coordinates, which hold fewer pairs
+and leave some tiles with none, which are skipped. The inner masks stay valid while the
+two atoms that have moved furthest since they were found have moved less in total than
+the inner cutoff less that of the interactions, as for the list, so the check of the list
+checks this too. When they are not valid the force kernel uses the masks of the list and
+finds the inner masks again from the pairs it visits, which costs little more than not
+pruning.
+The masks of the list are kept, so a pair within the cutoff of the interactions is always
+in them whilst the list is valid, and the inner masks are found from all of their pairs.
+The energy kernel uses the masks of the list.
+
+`masks` are the inner masks of the tiles, found at `coords`, in the Morton order of the
+tile list, and `boundary` with the inner cutoff `cutoff`, which is without units. The
+check of the list sets `stale` on the device when the force kernel has to find the masks
+again. `valid` is whether the masks are for the current tile list, and `refresh_queued`
+is whether `stale` was set by the host since the last check, so that the next force
+kernel finds the masks.
+=#
+mutable struct InnerTileMasks{C, B, T}
+    masks::CuArray{UInt32, 1, CUDA_CORE.DeviceMemory}
+    coords::C
+    boundary::B
+    cutoff::T
+    stale::CuArray{Int32, 1, CUDA_CORE.DeviceMemory}
+    valid::Bool
+    refresh_queued::Bool
+end
+
+#=
 The coordinates and boundary that the tile list held in a set of buffers was built from,
 kept in the buffers since a neighbor finder can be used with more than one set of
 buffers, for example those of a simulation and those made by a call to `forces(sys)`.
 `moved_last` and `moved_prev` are the total displacements of the two atoms that had moved
 furthest at the last two checks, used to predict when the tile list will be rebuilt.
 `pending_check` is a check that has been launched but not waited for, see
-`run_tiled_kernel!`.
+`run_tiled_kernel!`. `inner` holds the masks of the dynamic pruning, see `InnerTileMasks`,
+or is `nothing` when it is not used.
 =#
 mutable struct TileReference{C, B, T}
     coords::C
@@ -1303,6 +1392,86 @@ mutable struct TileReference{C, B, T}
     moved_last::T
     moved_prev::T
     pending_check::Union{Nothing, CUDADisplacementScratch{T}}
+    inner::Union{Nothing, InnerTileMasks{C, B, T}}
+end
+
+# The part of the gap between the cutoff of the interactions and that of the tile list
+#   that is between the cutoff of the interactions and the inner cutoff. Smaller fractions
+#   prune more pairs but the masks are found again more often, and a third was fastest
+#   for a solvated protein with steps of 2 fs and within 1% of the fastest with steps
+#   of 0.5 fs.
+const inner_cutoff_fraction = 1/3
+
+# The inner cutoff of the dynamic pruning without units, or `nothing` if it is not used
+function inner_tile_cutoff(sys, pairwise_inters, ::Type{T}) where T
+    inter_sqdist = tile_inters_sqdist(sys, pairwise_inters)
+    isnothing(inter_sqdist) && return nothing
+    dist_unit = Molly.coords_length_unit(sys.coords)
+    r_list = sys.neighbor_finder.dist_cutoff
+    dimension(inter_sqdist) == dimension(dist_unit^2) || return nothing
+    dimension(r_list) == dimension(dist_unit) || return nothing
+    r_c = T(ustrip(dist_unit, sqrt(inter_sqdist)))
+    r_list = T(ustrip(dist_unit, r_list))
+    r_inner = r_c + T(inner_cutoff_fraction) * (r_list - r_c)
+    return (r_c < r_inner < r_list ? r_inner : nothing)
+end
+
+#=
+Set up the inner masks of `ref` for a tile list that has just been built, so that the next
+force kernel finds them, reusing the memory of the previous ones if possible.
+=#
+function reset_inner_masks!(ref::TileReference{C, B, T}, buffers, sys,
+                            pairwise_inters) where {C, B, T}
+    cutoff = inner_tile_cutoff(sys, pairwise_inters, T)
+    if isnothing(cutoff)
+        ref.inner = nothing
+        return ref
+    end
+    capacity = length(buffers.interacting_tiles_diag)
+    inner = ref.inner
+    if isnothing(inner) || length(inner.coords) != length(buffers.coords_reordered)
+        inner = InnerTileMasks{C, B, T}(similar(buffers.interacting_tiles_diag, capacity),
+                    similar(buffers.coords_reordered), sys.boundary, cutoff,
+                    CuArray{Int32, 1, CUDA_CORE.DeviceMemory}(undef, 1), false, false)
+        ref.inner = inner
+    elseif length(inner.masks) < capacity
+        inner.masks = similar(buffers.interacting_tiles_diag, capacity)
+    end
+    copyto!(inner.coords, buffers.coords_reordered)
+    inner.boundary = sys.boundary
+    inner.cutoff = cutoff
+    fill!(inner.stale, Int32(1))
+    inner.valid = false
+    inner.refresh_queued = true
+    return ref
+end
+
+# Record that a force kernel has been launched after the stale flag of the inner masks was
+#   set by the host, so that it found them
+function record_inner_refresh!(ref)
+    isnothing(ref) && return ref
+    inner = ref.inner
+    if !isnothing(inner) && inner.refresh_queued
+        inner.valid = true
+        inner.refresh_queued = false
+    end
+    return ref
+end
+
+#=
+The inner masks for the force kernel, see `InnerTileMasks`, or `nothing` if they are not
+used. `r_cut2` is the squared cutoff of the force kernel, whose type the squared inner
+cutoff is given in.
+=#
+function inner_kernel_args(buffers, sys, r_cut2)
+    sys.neighbor_finder.auto_update || return nothing
+    ref = tile_reference(buffers, sys)
+    (isnothing(ref) || isnothing(ref.inner)) && return nothing
+    inner = ref.inner
+    dist_unit = Molly.coords_length_unit(sys.coords)
+    r_inner = inner.cutoff * dist_unit
+    return (masks=inner.masks, stale=inner.stale, r2=convert(typeof(r_cut2), r_inner^2),
+            r=convert(typeof(sqrt(r_cut2)), r_inner))
 end
 
 #=
@@ -1356,7 +1525,8 @@ so that they can be launched straight after. Returns the scratch to wait on, or 
 if the tile list has to be rebuilt whatever the displacements are, as when the cutoff is
 not known or when the check is expected to fail, in which case nothing is launched.
 =#
-function start_tile_check!(ref::TileReference, buffers, sys, nf, pairwise_inters)
+function start_tile_check!(ref::TileReference, buffers, sys, nf, pairwise_inters,
+                           uses_inner::Bool)
     T = Molly.coords_float_type(sys.coords)
     dist_unit = Molly.coords_length_unit(sys.coords)
     F = Molly.box_deformation(ref.boundary, sys.boundary, T)
@@ -1368,13 +1538,37 @@ function start_tile_check!(ref::TileReference, buffers, sys, nf, pairwise_inters
     # Rebuilt without checking, see above
     tile_check_expected_to_fail(ref, allowance) && return nothing
     nf.tracker.n_checks += 1
-    return launch_reorder_check!(buffers, sys, nf.tracker, ref.coords, F, dist_unit,
-                                 allowance)
+    inner = ref.inner
+    if uses_inner && !isnothing(inner)
+        inner_args = inner_check_args(inner, sys, pairwise_inters, dist_unit, T)
+        # The check sets the flag of the inner masks from now on
+        inner.refresh_queued = false
+        return launch_reorder_check!(buffers, sys, nf.tracker, ref.coords, F, dist_unit,
+                                     allowance, inner_args)
+    else
+        return launch_reorder_check!(buffers, sys, nf.tracker, ref.coords, F, dist_unit,
+                                     allowance, nothing)
+    end
+end
+
+#=
+The inputs to the check of the inner masks for `reorder_check_kernel!`. The masks are
+found again whatever the displacements are when they are not for the current tile list,
+or when the box has changed in a way that is not a deformation.
+=#
+function inner_check_args(inner::InnerTileMasks, sys, pairwise_inters, dist_unit,
+                          ::Type{T}) where T
+    F = Molly.box_deformation(inner.boundary, sys.boundary, T)
+    allowance = Molly.neighbor_allowance(sys.boundary, F, inner.cutoff * dist_unit,
+                            tile_inters_sqdist(sys, pairwise_inters), dist_unit, T)
+    force = !inner.valid || isnothing(allowance)
+    return (coords=inner.coords, F=(ismissing(F) ? nothing : F),
+            allowance=something(allowance, zero(T)), stale=inner.stale, force=force)
 end
 
 # Record that the tile list held in `buffers` was built from the current coordinates,
 #   reusing the memory of the previous reference `ref` if possible
-function record_tile_reference!(ref, buffers, sys)
+function record_tile_reference!(ref, buffers, sys, pairwise_inters)
     if !isnothing(ref) && length(ref.coords) == length(sys.coords)
         copyto!(ref.coords, sys.coords)
         ref.boundary = sys.boundary
@@ -1383,9 +1577,11 @@ function record_tile_reference!(ref, buffers, sys)
         ref.pending_check = nothing
     else
         T = Molly.coords_float_type(sys.coords)
-        buffers.neighbor_reference[] = TileReference(copy(sys.coords), sys.boundary,
-                                                     zero(T), zero(T), nothing)
+        ref = TileReference(copy(sys.coords), sys.boundary, zero(T), zero(T), nothing,
+                            nothing)
+        buffers.neighbor_reference[] = ref
     end
+    reset_inner_masks!(ref, buffers, sys, pairwise_inters)
     return buffers
 end
 
@@ -1394,7 +1590,7 @@ function record_gpu_tiles!(buffers, sys, nf::GPUNeighborFinder, pairwise_inters)
     nf.auto_update || return buffers
     if Molly.neighbors_trackable(sys.boundary, sys.coords, nf.dist_cutoff,
                                  tile_inters_sqdist(sys, pairwise_inters))
-        record_tile_reference!(tile_reference(buffers, sys), buffers, sys)
+        record_tile_reference!(tile_reference(buffers, sys), buffers, sys, pairwise_inters)
     else
         # The tile list has to be rebuilt every time, so no reference is needed
         buffers.neighbor_reference[] = nothing
@@ -1457,12 +1653,24 @@ function refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n, flags,
     return buffers
 end
 
-# Wait for the check pending on `ref` and record its result, returning whether the atoms
-#   have moved too far for the tile list
-function resolve_tile_check!(ref::TileReference, check::CUDADisplacementScratch)
+#=
+Wait for the check pending on `ref` and record its result, returning whether the atoms
+have moved too far for the tile list.
+`uses_inner` is whether the check was of the inner masks too, in which case the kernel
+launched after it found them again if the check says so and the tile list is valid. The
+coordinates it found them from are then recorded.
+=#
+function resolve_tile_check!(ref::TileReference, check::CUDADisplacementScratch, buffers,
+                             sys, uses_inner::Bool)
     ref.pending_check = nothing
     max_sq_1, max_sq_2, moved = wait_displacement_check(check)
     record_tile_check!(ref, max_sq_1, max_sq_2)
+    inner = ref.inner
+    if uses_inner && !isnothing(inner) && !moved && !iszero(@inbounds check.result_host[6])
+        copyto!(inner.coords, buffers.coords_reordered)
+        inner.boundary = sys.boundary
+        inner.valid = true
+    end
     return moved
 end
 
@@ -1480,11 +1688,13 @@ With `defer`, the host does not wait for the check here but leaves it pending in
 reference, and `finish_tile_check!` must be called before the results of the kernel are
 used. A check left pending, for example by an error before it was finished, is finished
 at the next call.
+`uses_inner` is whether the kernel is the force kernel, which uses the inner masks of the
+dynamic pruning, see `InnerTileMasks`.
 =#
 # Inlined so that the closure is not allocated
 @inline function run_tiled_kernel!(launch_kernel!::K, buffers, sys, nf::GPUNeighborFinder,
                                    pairwise_inters, step_n, sync_reorder::Bool,
-                                   defer::Bool=false) where K
+                                   uses_inner::Bool, defer::Bool=false) where K
     # Whether the atoms have moved too far for the tile list, the only reason to rebuild it
     #   that is not recorded by the generation counts
     moved = false
@@ -1492,7 +1702,9 @@ at the next call.
     if !isnothing(ref)
         stale_check = ref.pending_check
         if !isnothing(stale_check)
-            moved = resolve_tile_check!(ref, stale_check)
+            moved = resolve_tile_check!(ref, stale_check, buffers, sys, false)
+            # Whether the kernel found the inner masks again is not known
+            isnothing(ref.inner) || (ref.inner.valid = false)
         end
     end
     if nf.auto_update && !moved && !tile_refresh_due(buffers, nf)
@@ -1500,7 +1712,7 @@ at the next call.
             # There is no reference to check against
             moved = true
         else
-            check = start_tile_check!(ref, buffers, sys, nf, pairwise_inters)
+            check = start_tile_check!(ref, buffers, sys, nf, pairwise_inters, uses_inner)
             if isnothing(check)
                 # The check could not be made or is expected to fail
                 moved = true
@@ -1512,7 +1724,7 @@ at the next call.
                     ref.pending_check = check
                     return buffers
                 end
-                moved = resolve_tile_check!(ref, check)
+                moved = resolve_tile_check!(ref, check, buffers, sys, uses_inner)
                 # Otherwise the kernel did nothing, so it is run again below once the tile
                 #   list is rebuilt, which also clears the overflow flag
                 moved || return buffers
@@ -1522,6 +1734,7 @@ at the next call.
     refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n,
                        gpu_neighbor_refresh_flags(buffers, nf, moved), sync_reorder)
     launch_kernel!()
+    (uses_inner && nf.auto_update) && record_inner_refresh!(tile_reference(buffers, sys))
     return buffers
 end
 
@@ -1531,16 +1744,18 @@ too far the kernel launched before the check did nothing, so the tile list is re
 `launch_kernel!()` called again. Returns whether this was done.
 =#
 @inline function finish_tile_check!(launch_kernel!::K, buffers, sys, nf::GPUNeighborFinder,
-                                    pairwise_inters, step_n, sync_reorder::Bool) where K
+                                    pairwise_inters, step_n, sync_reorder::Bool,
+                                    uses_inner::Bool) where K
     ref = tile_reference(buffers, sys)
     isnothing(ref) && return false
     check = ref.pending_check
     isnothing(check) && return false
-    moved = resolve_tile_check!(ref, check)
+    moved = resolve_tile_check!(ref, check, buffers, sys, uses_inner)
     if moved
         refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n,
                            gpu_neighbor_refresh_flags(buffers, nf, true), sync_reorder)
         launch_kernel!()
+        uses_inner && record_inner_refresh!(tile_reference(buffers, sys))
     end
     return moved
 end
@@ -1822,7 +2037,7 @@ function Molly.finish_pairwise_forces_gpu!(buffers, sys::System{D, <:CuArray, T,
     launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
                                                 Val(needs_vir), step_n)
     finish_tile_check!(launch_kernel!, buffers, sys, sys.neighbor_finder, pairwise_inters,
-                       step_n, false)
+                       step_n, false, true)
     reverse_reorder_forces_gpu!(buffers, sys)
     return buffers
 end
@@ -1834,7 +2049,8 @@ function tiled_pairwise_forces!(buffers, sys, pairwise_inters, ::Val{needs_vir},
     nf = sys.neighbor_finder
     launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
                                                 Val(needs_vir), step_n)
-    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, false, defer)
+    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, false, true,
+                      defer)
     defer || reverse_reorder_forces_gpu!(buffers, sys)
     return buffers
 end
@@ -1842,8 +2058,21 @@ end
 # Launch the force kernel over the list of interacting tiles
 # `r_cut2` is a value rather than a `Val` so that the call to this function is not a
 #   dynamic dispatch, as the launch inside it is anyway
+function launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2, ::Val{needs_vir},
+                              step_n) where needs_vir
+    inner = inner_kernel_args(buffers, sys, r_cut2)
+    if isnothing(inner)
+        return launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2, Val(needs_vir),
+                                    step_n, nothing)
+    else
+        return launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2, Val(needs_vir),
+                                    step_n, inner)
+    end
+end
+
 function launch_force_kernel!(buffers, sys::System{D, <:CuArray, T, TH}, pairwise_inters,
-                              r_cut2, ::Val{needs_vir}, step_n) where {D, T, TH, needs_vir}
+                              r_cut2, ::Val{needs_vir}, step_n,
+                              inner) where {D, T, TH, needs_vir}
     N = length(sys.coords)
     args = (buffers.fs_mat_reordered, buffers.virial_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2),
@@ -1851,7 +2080,7 @@ function launch_force_kernel!(buffers, sys::System{D, <:CuArray, T, TH}, pairwis
             tile_exceptions(buffers, sys.neighbor_finder), Val(needs_vir), Val(T), Val(TH),
             Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, inner)
     num_pairs = buffers.num_pairs
     num_pairs > 0 || return buffers
     auto_kernel = cached_cufunction(force_kernel!, args,
@@ -1891,7 +2120,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     nf = sys.neighbor_finder
     launch_kernel! = () -> launch_energy_kernel!(pe_vec_nounits, buffers, sys, pairwise_inters,
                                                  r_cut2, step_n)
-    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, true)
+    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, true, false)
     return pe_vec_nounits
 end
 
@@ -2772,6 +3001,12 @@ The other boundaries use the minimum image of each pair.
 @inline function tile_single_image(coords_i, coords_j, ref_j,
                                    boundary::Union{CubicBoundary, RectangularBoundary},
                                    ::Val{r_cut2}) where r_cut2
+    return tile_single_image(coords_i, coords_j, ref_j, boundary, sqrt(r_cut2))
+end
+
+# As above for the cutoff `r_cut`
+@inline function tile_single_image(coords_i, coords_j, ref_j,
+                                   boundary::Union{CubicBoundary, RectangularBoundary}, r_cut)
     d2 = ustrip(sum(abs2, coords_j - ref_j))
     offset = Int32(16)
     while offset > Int32(0)
@@ -2781,12 +3016,12 @@ The other boundaries use the minimum image of each pair.
     # A plain comparison rather than `minimum`, which handles NaN and signed zeros with
     #   several instructions per element on every tile
     min_side = reduce((a, b) -> ifelse(a < b, a, b), boundary.side_lengths)
-    max_d = min_side / 2 - sqrt(r_cut2)
+    max_d = min_side / 2 - r_cut
     valid = max_d > zero(max_d) && d2 < ustrip(max_d^2)
     return valid, image_closest(coords_i, ref_j, boundary)
 end
 
-@inline tile_single_image(coords_i, coords_j, ref_j, boundary, r_cut2) = (false, coords_i)
+@inline tile_single_image(coords_i, coords_j, ref_j, boundary, r_cut) = (false, coords_i)
 
 # The image of `c` closest to `p` in a rectangular box, which is `c` unless they are more
 #   than half a box side apart in a dimension
@@ -2811,17 +3046,21 @@ iteration, which the SASS shows dominating the loop.
 With `has_exceptions` the bitmasks of the tile give the excluded and special pairs, and
 otherwise there are none. With `single_image` the displacements are found from
 `coords_i_image`, see `tile_single_image`.
+With `refresh_inner` the inner masks of the dynamic pruning are found too, from the pairs
+within the squared inner cutoff `r_inner2`, see `InnerTileMasks`, and returned with the
+accumulators.
 =#
 @inline function tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
                         eligible_bitmask, special_bitmask, ::Val{has_exceptions},
                         ::Val{single_image}, lane, warpid, coords_i, coords_i_image, atoms_i,
                         vel_i, ::Type{A}, shuf_syms, uses_vel, inters_tuple, boundary, step_n,
-                        ::Val{r_cut2}, ::Val{force_units}, ::Val{needs_vir},
-                        ::Val{D}) where {has_exceptions, single_image, A, r_cut2, force_units,
-                                         needs_vir, D}
+                        ::Val{r_cut2}, refresh_inner, r_inner2, ::Val{force_units},
+                        ::Val{needs_vir}, ::Val{D}) where {has_exceptions, single_image, A,
+                                                           r_cut2, force_units, needs_vir, D}
     a = Int32(1)
     (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
      vir_yx, vir_zx, vir_zy) = acc
+    inner_mask = UInt32(0)
     active = diag_mask
     @inbounds while active != UInt32(0)
         m = Int32(trailing_zeros(active))
@@ -2837,11 +3076,16 @@ otherwise there are none. With `single_image` the displacements are found from
         if has_exceptions
             excl = (eligible_bitmask >> (warpsize() - slot)) | (eligible_bitmask << slot)
             spec = (special_bitmask >> (warpsize() - slot)) | (special_bitmask << slot)
-            condition = (excl & 0x1) == true && r2 <= r_cut2
+            eligible = (excl & 0x1) == true
+            condition = eligible && r2 <= r_cut2
             special = (spec & 0x1) == true
         else
+            eligible = true
             condition = r2 <= r_cut2
             special = false
+        end
+        if refresh_inner && CUDA.vote_any_sync(0xFFFFFFFF, eligible && r2 <= r_inner2)
+            inner_mask |= UInt32(1) << m
         end
         any_active = CUDA.vote_any_sync(0xFFFFFFFF, condition)
 
@@ -2880,8 +3124,19 @@ otherwise there are none. With `single_image` the displacements are found from
         end
     end
     return (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
-            vir_yx, vir_zx, vir_zy)
+            vir_yx, vir_zx, vir_zy), inner_mask
 end
+
+# The cutoff for `tile_single_image` in the force kernel, and the squared inner cutoff and
+#   the store of an inner mask, see `InnerTileMasks`
+@inline single_image_cutoff(::Nothing, refresh_inner, ::Val{r_cut2}) where {r_cut2} = sqrt(r_cut2)
+@inline function single_image_cutoff(inner, refresh_inner, ::Val{r_cut2}) where r_cut2
+    return ifelse(refresh_inner, inner.r, sqrt(r_cut2))
+end
+@inline inner_sq_cutoff(::Nothing, ::Val{r_cut2}) where {r_cut2} = r_cut2
+@inline inner_sq_cutoff(inner, ::Val{r_cut2}) where {r_cut2} = inner.r2
+@inline store_inner_mask!(::Nothing, idx, mask) = nothing
+@inline store_inner_mask!(inner, idx, mask) = (@inbounds inner.masks[idx] = mask; nothing)
 
 # This lane holds the `lane`-th atom of block j, so a hit against the m-th atom of block i
 #   lands on inner-loop iteration `(lane - m) & 31`
@@ -2945,7 +3200,7 @@ function force_kernel!(
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, force_units, needs_vir, T, TH, D}
+    interacting_tiles_overflow, inner) where {N, r_cut2, A, force_units, needs_vir, T, TH, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -2984,6 +3239,19 @@ function force_kernel!(
         return nothing
     end
     @inbounds diag_mask = tiles_diag_ro[idx]
+
+    # The inner masks of the dynamic pruning are used for the full tiles, the only ones
+    #   with masks, unless they have to be found again, see `InnerTileMasks`
+    refresh_inner = false
+    if !isnothing(inner) && j < n_blocks && i < j
+        refresh_inner = (@inbounds inner.stale[1] != Int32(0))
+        if !refresh_inner
+            @inbounds diag_mask = inner.masks[idx]
+            if diag_mask == UInt32(0)
+                return nothing
+            end
+        end
+    end
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -3049,38 +3317,43 @@ function force_kernel!(
 
         # The displacements are found from the image of atom i closest to the first atom
         #   of block j when that gives the minimum image of every pair within the cutoff,
-        #   see `tile_single_image`
+        #   or the inner cutoff when the inner masks are found, see `tile_single_image`
         single_image, coords_i_image = tile_single_image(coords_i, coords_j_lane,
-                                    @inbounds(sh_stage[a, warpid].coords), boundary, Val(r_cut2))
+                                    @inbounds(sh_stage[a, warpid].coords), boundary,
+                                    single_image_cutoff(inner, refresh_inner, Val(r_cut2)))
 
         acc = (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz,
                vir_yz, vir_yx, vir_zx, vir_zy)
+        r_inner2 = inner_sq_cutoff(inner, Val(r_cut2))
         if type == UInt8(0) # CLEAN
             if single_image
-                acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
-                            UInt32(0), UInt32(0), Val(false), Val(true), lane, warpid,
-                            coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
-                            inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
-                            Val(needs_vir), Val(D))
+                acc, inner_mask = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel,
+                            diag_mask, UInt32(0), UInt32(0), Val(false), Val(true), lane,
+                            warpid, coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms,
+                            uses_vel, inters_tuple, boundary, step_n, Val(r_cut2),
+                            refresh_inner, r_inner2, Val(force_units), Val(needs_vir), Val(D))
             else
-                acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
-                            UInt32(0), UInt32(0), Val(false), Val(false), lane, warpid,
-                            coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
-                            inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
-                            Val(needs_vir), Val(D))
+                acc, inner_mask = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel,
+                            diag_mask, UInt32(0), UInt32(0), Val(false), Val(false), lane,
+                            warpid, coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms,
+                            uses_vel, inters_tuple, boundary, step_n, Val(r_cut2),
+                            refresh_inner, r_inner2, Val(force_units), Val(needs_vir), Val(D))
             end
         else # EXCLUDED
             # These tiles are few enough that the minimum image of each pair is used
             eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
                                                         lane, n_blocks, r, Val(N))
-            acc = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel, diag_mask,
-                        eligible_bitmask, special_bitmask, Val(true), Val(false), lane, warpid,
-                        coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms, uses_vel,
-                        inters_tuple, boundary, step_n, Val(r_cut2), Val(force_units),
-                        Val(needs_vir), Val(D))
+            acc, inner_mask = tile_pair_forces(acc, opposites_sum, sh_stage, sh_vel,
+                        diag_mask, eligible_bitmask, special_bitmask, Val(true), Val(false),
+                        lane, warpid, coords_i, coords_i_image, atoms_i, vel_i, A, shuf_syms,
+                        uses_vel, inters_tuple, boundary, step_n, Val(r_cut2),
+                        refresh_inner, r_inner2, Val(force_units), Val(needs_vir), Val(D))
         end
         (force_i_x, force_i_y, force_i_z, vir_xx, vir_yy, vir_zz, vir_xy, vir_xz, vir_yz,
          vir_yx, vir_zx, vir_zy) = acc
+        if refresh_inner && lane == a
+            store_inner_mask!(inner, idx, inner_mask)
+        end
 
         sync_warp()
         if index_j <= N

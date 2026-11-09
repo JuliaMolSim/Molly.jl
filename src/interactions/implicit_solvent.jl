@@ -12,6 +12,8 @@ export
 # Custom GBSA methods should sub-type this abstract type
 abstract type AbstractGBSA end
 
+concurrent_with_pairwise(::AbstractGBSA) = true
+
 abstract type AbstractSetupGBSA end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
