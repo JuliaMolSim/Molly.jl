@@ -1893,7 +1893,7 @@ relative permittivity.
 Special pairs use the undamped Coulomb interaction scaled by `weight_special`.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
 """
-struct CoulombEwald{T, D, E, W, C, A} <: PairwiseInteraction
+struct CoulombEwald{T, D, E, W, C, A, AE} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::T
     ϵr::E
@@ -1901,7 +1901,13 @@ struct CoulombEwald{T, D, E, W, C, A} <: PairwiseInteraction
     weight_special::W
     coulomb_const::C
     α_ewald::A
-    approximate_erfc::Bool
+end
+
+# `approximate_erfc` is a type parameter, see `erfc_flag`, rather than a field
+function CoulombEwald(dist_cutoff::D, error_tol::T, ϵr::E, use_neighbors, weight_special::W,
+                      coulomb_const::C, α_ewald::A, approximate_erfc) where {T, D, E, W, C, A}
+    return CoulombEwald{T, D, E, W, C, A, erfc_flag(approximate_erfc)}(dist_cutoff,
+                        error_tol, ϵr, use_neighbors, weight_special, coulomb_const, α_ewald)
 end
 
 function CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true,
@@ -1912,11 +1918,16 @@ function CoulombEwald(; dist_cutoff, error_tol=0.0005, ϵr=1, use_neighbors=true
                         coulomb_const, α_ewald, approximate_erfc)
 end
 
+function Base.getproperty(inter::CoulombEwald{T, D, E, W, C, A, AE},
+                          name::Symbol) where {T, D, E, W, C, A, AE}
+    return (name === :approximate_erfc ? AE : getfield(inter, name))
+end
+
 use_neighbors(inter::CoulombEwald) = inter.use_neighbors
 
 required_atom_fields(::CoulombEwald) = (:charge,)
 
-function Base.zero(coul::CoulombEwald{T, D, E, W, C, A}) where {T, D, E, W, C, A}
+function Base.zero(coul::CoulombEwald{T, D, E, W, C, A, AE}) where {T, D, E, W, C, A, AE}
     return CoulombEwald(
         zero(D),
         zero(T),
@@ -1925,11 +1936,12 @@ function Base.zero(coul::CoulombEwald{T, D, E, W, C, A}) where {T, D, E, W, C, A
         zero(W),
         zero(C),
         zero(A),
-        coul.approximate_erfc,
+        Val(AE),
     )
 end
 
-function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
+function Base.:+(c1::CoulombEwald{T, D, E, W, C, A, AE},
+                 c2::CoulombEwald) where {T, D, E, W, C, A, AE}
     return CoulombEwald(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.error_tol + c2.error_tol,
@@ -1938,7 +1950,7 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.α_ewald + c2.α_ewald,
-        c1.approximate_erfc,
+        Val(AE),
     )
 end
 
@@ -1947,7 +1959,10 @@ parameter_fields(::Type{<:CoulombEwald}) =
     ((:dist_cutoff, "dist_cutoff"), (:weight_special, "weight_14"),
      (:coulomb_const, "coulomb_const"))
 
-function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
+erfc_flag(approximate_erfc::Bool) = approximate_erfc
+erfc_flag(::Val{AE}) where {AE} = AE
+
+@inline function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc
         # See the OpenMM source code, Abramowitz and Stegun 1964, and Hastings 1995
         t = inv(one(T) + T(0.3275911) * αr)
@@ -1978,13 +1993,10 @@ const two_over_sqrt_π = 1.1283791670955126
     exp_mαr2 = fast_exp(-αr^2)
     erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
     f = within_cutoff(ke * qi * qj * inv_r^3, r, inter.dist_cutoff)
-    if special
-        # Special interactions excluded from reciprocal calculation
-        # so have a standard interaction
-        return (f * inter.weight_special) * dr
-    else
-        return (f * (erfc_αr + T(two_over_sqrt_π) * αr * exp_mαr2)) * dr
-    end
+    # Special interactions are excluded from the reciprocal calculation so have a standard
+    #   interaction.
+    screening = erfc_αr + T(two_over_sqrt_π) * αr * exp_mαr2
+    return (f * ifelse(special, oftype(screening, inter.weight_special), screening)) * dr
 end
 
 @inline function potential_energy(inter::CoulombEwald,
@@ -2027,7 +2039,7 @@ gives from the `λ` of the atoms mixed with `λ_mixing` and their alchemical rol
 Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the same
 electrostatic scheduler.
 """
-struct CoulombEwaldScaled{T, D, LM, SCH, W, C, A} <: PairwiseInteraction
+struct CoulombEwaldScaled{T, D, LM, SCH, W, C, A, AE} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::T
     use_neighbors::Bool
@@ -2036,7 +2048,19 @@ struct CoulombEwaldScaled{T, D, LM, SCH, W, C, A} <: PairwiseInteraction
     weight_special::W
     coulomb_const::C
     α_ewald::A
-    approximate_erfc::Bool
+end
+
+function CoulombEwaldScaled(dist_cutoff::D, error_tol::T, use_neighbors, λ_mixing::LM,
+                            scheduler::SCH, weight_special::W, coulomb_const::C,
+                            α_ewald::A, approximate_erfc) where {T, D, LM, SCH, W, C, A}
+    return CoulombEwaldScaled{T, D, LM, SCH, W, C, A, erfc_flag(approximate_erfc)}(
+                dist_cutoff, error_tol, use_neighbors, λ_mixing, scheduler, weight_special,
+                coulomb_const, α_ewald)
+end
+
+function Base.getproperty(inter::CoulombEwaldScaled{T, D, LM, SCH, W, C, A, AE},
+                          name::Symbol) where {T, D, LM, SCH, W, C, A, AE}
+    return (name === :approximate_erfc ? AE : getfield(inter, name))
 end
 
 function CoulombEwaldScaled(; dist_cutoff, error_tol=0.0005, use_neighbors=true, λ_mixing=MinimumMixing(),
@@ -2051,7 +2075,7 @@ use_neighbors(inter::CoulombEwaldScaled) = inter.use_neighbors
 
 required_atom_fields(::CoulombEwaldScaled) = (:charge, :λ, :alch_role)
 
-function Base.zero(coul::CoulombEwaldScaled{T, D, LM, SCH, W, C, A}) where {T, D, LM, SCH, W, C, A}
+function Base.zero(coul::CoulombEwaldScaled{T, D, LM, SCH, W, C, A, AE}) where {T, D, LM, SCH, W, C, A, AE}
     return CoulombEwaldScaled(
         zero(D),
         zero(T),
@@ -2061,11 +2085,12 @@ function Base.zero(coul::CoulombEwaldScaled{T, D, LM, SCH, W, C, A}) where {T, D
         zero(W),
         zero(C),
         zero(A),
-        coul.approximate_erfc,
+        Val(AE),
     )
 end
 
-function Base.:+(c1::CoulombEwaldScaled, c2::CoulombEwaldScaled)
+function Base.:+(c1::CoulombEwaldScaled{T, D, LM, SCH, W, C, A, AE},
+                 c2::CoulombEwaldScaled) where {T, D, LM, SCH, W, C, A, AE}
     return CoulombEwaldScaled(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.error_tol + c2.error_tol,
@@ -2075,7 +2100,7 @@ function Base.:+(c1::CoulombEwaldScaled, c2::CoulombEwaldScaled)
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.α_ewald + c2.α_ewald,
-        c1.approximate_erfc,
+        Val(AE),
     )
 end
 
@@ -2211,7 +2236,7 @@ Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the sa
 electrostatic scheduler. Special pairs are excluded from the reciprocal-space
 calculation, so their interaction uses the undamped soft-core form.
 """
-struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA} <: PairwiseInteraction
+struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA, AE} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::ET
     α::A
@@ -2223,7 +2248,21 @@ struct CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA} <: Pairw
     weight_special::W
     coulomb_const::C
     α_ewald::EA
-    approximate_erfc::Bool
+end
+
+function CoulombSoftCoreBeutlerEwald(dist_cutoff::D, error_tol::ET, α::A, use_neighbors,
+                σ_mixing::SM, ϵ_mixing::EM, λ_mixing::LM, scheduler::SCH, weight_special::W,
+                coulomb_const::C, α_ewald::EA,
+                approximate_erfc) where {ET, D, A, SM, EM, LM, SCH, W, C, EA}
+    return CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA,
+                                       erfc_flag(approximate_erfc)}(dist_cutoff, error_tol,
+                α, use_neighbors, σ_mixing, ϵ_mixing, λ_mixing, scheduler, weight_special,
+                coulomb_const, α_ewald)
+end
+
+function Base.getproperty(inter::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA, AE},
+                          name::Symbol) where {ET, D, A, SM, EM, LM, SCH, W, C, EA, AE}
+    return (name === :approximate_erfc ? AE : getfield(inter, name))
 end
 
 function CoulombSoftCoreBeutlerEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
@@ -2255,7 +2294,7 @@ required_atom_fields(inter::CoulombSoftCoreBeutlerEwald) = (:charge, :σ, :ϵ, :
             mixing_atom_fields(inter.σ_mixing)..., mixing_atom_fields(inter.ϵ_mixing)...,
             mixing_atom_fields(inter.λ_mixing)...)
 
-function Base.zero(coul::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA}) where {ET, D, A, SM, EM, LM, SCH, W, C, EA}
+function Base.zero(coul::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA, AE}) where {ET, D, A, SM, EM, LM, SCH, W, C, EA, AE}
     return CoulombSoftCoreBeutlerEwald(
         zero(D),
         zero(ET),
@@ -2268,11 +2307,12 @@ function Base.zero(coul::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, 
         zero(W),
         zero(C),
         zero(EA),
-        coul.approximate_erfc,
+        Val(AE),
     )
 end
 
-function Base.:+(c1::CoulombSoftCoreBeutlerEwald, c2::CoulombSoftCoreBeutlerEwald)
+function Base.:+(c1::CoulombSoftCoreBeutlerEwald{ET, D, A, SM, EM, LM, SCH, W, C, EA, AE},
+                 c2::CoulombSoftCoreBeutlerEwald) where {ET, D, A, SM, EM, LM, SCH, W, C, EA, AE}
     return CoulombSoftCoreBeutlerEwald(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.error_tol + c2.error_tol,
@@ -2285,7 +2325,7 @@ function Base.:+(c1::CoulombSoftCoreBeutlerEwald, c2::CoulombSoftCoreBeutlerEwal
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.α_ewald + c2.α_ewald,
-        c1.approximate_erfc,
+        Val(AE),
     )
 end
 
@@ -2412,7 +2452,7 @@ Should be used alongside [`Ewald`](@ref) or [`PME`](@ref) configured with the sa
 electrostatic scheduler. Special pairs are excluded from the reciprocal-space
 calculation, so their interaction uses the undamped soft-core form.
 """
-struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA} <: PairwiseInteraction
+struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA, AE} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::ET
     α::A
@@ -2423,7 +2463,21 @@ struct CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA} <: PairwiseIn
     weight_special::W
     coulomb_const::C
     α_ewald::EA
-    approximate_erfc::Bool
+end
+
+function CoulombSoftCoreGapsysEwald(dist_cutoff::D, error_tol::ET, α::A, σQ::SQ,
+                use_neighbors, λ_mixing::LM, scheduler::SCH, weight_special::W,
+                coulomb_const::C, α_ewald::EA,
+                approximate_erfc) where {ET, D, A, SQ, LM, SCH, W, C, EA}
+    return CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA,
+                                      erfc_flag(approximate_erfc)}(dist_cutoff, error_tol,
+                α, σQ, use_neighbors, λ_mixing, scheduler, weight_special, coulomb_const,
+                α_ewald)
+end
+
+function Base.getproperty(inter::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA, AE},
+                          name::Symbol) where {ET, D, A, SQ, LM, SCH, W, C, EA, AE}
+    return (name === :approximate_erfc ? AE : getfield(inter, name))
 end
 
 function CoulombSoftCoreGapsysEwald(; dist_cutoff, error_tol=0.0005, α=0.3,
@@ -2454,7 +2508,7 @@ use_neighbors(inter::CoulombSoftCoreGapsysEwald) = inter.use_neighbors
 required_atom_fields(inter::CoulombSoftCoreGapsysEwald) = (:charge, :λ, :alch_role,
             mixing_atom_fields(inter.λ_mixing)...)
 
-function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA}) where {ET, D, A, SQ, LM, SCH, W, C, EA}
+function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA, AE}) where {ET, D, A, SQ, LM, SCH, W, C, EA, AE}
     return CoulombSoftCoreGapsysEwald(
         zero(D),
         zero(ET),
@@ -2466,11 +2520,12 @@ function Base.zero(coul::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C,
         zero(W),
         zero(C),
         zero(EA),
-        coul.approximate_erfc,
+        Val(AE),
     )
 end
 
-function Base.:+(c1::CoulombSoftCoreGapsysEwald, c2::CoulombSoftCoreGapsysEwald)
+function Base.:+(c1::CoulombSoftCoreGapsysEwald{ET, D, A, SQ, LM, SCH, W, C, EA, AE},
+                 c2::CoulombSoftCoreGapsysEwald) where {ET, D, A, SQ, LM, SCH, W, C, EA, AE}
     return CoulombSoftCoreGapsysEwald(
         c1.dist_cutoff + c2.dist_cutoff,
         c1.error_tol + c2.error_tol,
@@ -2482,7 +2537,7 @@ function Base.:+(c1::CoulombSoftCoreGapsysEwald, c2::CoulombSoftCoreGapsysEwald)
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.α_ewald + c2.α_ewald,
-        c1.approximate_erfc,
+        Val(AE),
     )
 end
 
@@ -2490,6 +2545,17 @@ parameter_prefix(::CoulombSoftCoreGapsysEwald) = "inter_CO_"
 parameter_fields(::Type{<:CoulombSoftCoreGapsysEwald}) =
     ((:dist_cutoff, "dist_cutoff"), (:α, "α"), (:σQ, "σQ"), (:weight_special, "weight_14"),
      (:coulomb_const, "coulomb_const"))
+
+# Converting a system rebuilds an interaction from its converted fields, see
+#   `convert_struct`, which would lose `approximate_erfc` as it is a type parameter
+for IT in (:CoulombEwald, :CoulombEwaldScaled, :CoulombSoftCoreBeutlerEwald,
+           :CoulombSoftCoreGapsysEwald)
+    @eval function convert_component(c::SystemConversion, inter::$IT)
+        fields = ntuple(i -> convert_component(c, getfield(inter, i)),
+                        Val(fieldcount(typeof(inter))))
+        return $IT(fields..., Val(inter.approximate_erfc))
+    end
+end
 
 
 function to_lambda_function(inter::CoulombEwald, ::GapsysSoftCore; α=0.3, σQ=1.0u"nm", λ_mixing=MinimumMixing(), 
