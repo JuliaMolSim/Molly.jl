@@ -373,7 +373,7 @@
                                         coupling=MonteCarloBarostat(press, temp, sys.boundary;
                                                                     n_steps=1)),
             "BerendsenBarostat"  => VelocityVerlet(dt=dt,
-                                        coupling=BerendsenBarostat(press, 1.0u"ps"; n_steps=1))),
+                                        coupling=BerendsenBarostat(press, 1.0u"ps"; n_steps=1)),
         ]
         for (sim_name, sim) in simulators
             JET.test_call(simulate!, Base.typesof(sys, sim, 1); jet_config...)
