@@ -362,6 +362,8 @@ mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
     n_valid_angles::VI      # 1-element device vector
     valid_hbonds::MI        # shape=(3, capacity) containing j, k, idx_i
     n_valid_hbonds::VI      # 1-element device vector
+    bond_pair_indices::VI
+    n_bond_pairs::VI
 end
 
 
@@ -423,6 +425,8 @@ function empty_state(
         MI(undef, 4, 0),
         VI(undef, 1),
         MI(undef, 3, 0),
+        VI(undef, 1),
+        VI(undef, 0),
         VI(undef, 1)
     )
 end
@@ -1353,6 +1357,8 @@ function init_reaxff_state!(
     n_valid_angles = zeros(Int, 1)
     valid_hbonds = zeros(Int, 3, max(10 * n_atoms, 1))
     n_valid_hbonds = zeros(Int, 1)
+    bond_pair_indices = zeros(Int, 0)
+    n_bond_pairs = zeros(Int, 1)
 
     inter.state = ReaxFF2008State(
         n_atoms,
@@ -1402,7 +1408,9 @@ function init_reaxff_state!(
         to_device(valid_angles, AT),
         to_device(n_valid_angles, AT),
         to_device(valid_hbonds, AT),
-        to_device(n_valid_hbonds, AT)
+        to_device(n_valid_hbonds, AT),
+        to_device(bond_pair_indices, AT),
+        to_device(n_bond_pairs, AT)
     )
 end
 
@@ -2012,8 +2020,41 @@ end
 end
 
 
+@kernel function compact_bond_pairs_kernel!(
+    bond_pair_indices,
+    n_bond_pairs,
+    nbrs_list,
+    coords,
+    boundary,
+    conv_factor::T,
+    atid,
+    bndp,
+    bond_dist_cutoff_sq,
+) where T
+    ti = @index(Global, Linear)
+
+    @inbounds begin
+        i, j, _ = nbrs_list[ti]
+
+        qry = bndp[atid[i], atid[j]]
+
+        if qry.is_defined
+            r_vec_ij = map(x -> ustrip(x) * conv_factor, vector(coords[j], coords[i], boundary))
+            dr_sq = sum(abs2, r_vec_ij)
+
+            if dr_sq <= bond_dist_cutoff_sq
+                position = Atomix.@atomic n_bond_pairs[1] += 1
+                bond_pair_indices[position] = ti
+            end
+        end
+    end
+end
+
+
 @kernel function bond_kernel(
     nbrs_list,
+    bond_pair_indices,
+    n_bond_pairs,
     bndp,
     atid,
     conv_factor::T,
@@ -2037,8 +2078,14 @@ end
 ) where T
     ti = @index(Global, Linear)
     
-    @inbounds begin
-        i, j, _ = nbrs_list[ti]
+    @inbounds if isnothing(bond_pair_indices) || ti <= n_bond_pairs[1]
+        if isnothing(bond_pair_indices)
+            pair_index = ti
+        else
+            pair_index = bond_pair_indices[ti]
+        end
+
+        i, j, _ = nbrs_list[pair_index]
 
         qry = bndp[atid[i], atid[j]]
 
@@ -2292,9 +2339,37 @@ function bonds!(
 
     bond_dist_cutoff_sq = inter.device_params.global_parameters.bond_dist_cutoff^2
 
+    bond_pair_indices = nothing
+
+    if backend isa KernelAbstractions.GPU
+        if length(inter.state.bond_pair_indices) < length(neighbors)
+            resize!(inter.state.bond_pair_indices, length(neighbors))
+        end
+
+        fill!(inter.state.n_bond_pairs, 0)
+
+        compact_kernel = compact_bond_pairs_kernel!(backend, 128)
+        compact_kernel(
+            inter.state.bond_pair_indices,
+            inter.state.n_bond_pairs,
+            neighbors.list,
+            sys.coords,
+            sys.boundary,
+            conv_factor,
+            atid,
+            bndp,
+            bond_dist_cutoff_sq;
+            ndrange=length(neighbors)
+        )
+
+        bond_pair_indices = inter.state.bond_pair_indices
+    end
+
     b_kernel = bond_kernel(backend)
     b_kernel(
         neighbors.list,
+        bond_pair_indices,
+        inter.state.n_bond_pairs,
         bndp,
         atid,
         conv_factor,
