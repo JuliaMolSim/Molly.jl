@@ -370,9 +370,10 @@
             "AndersenThermostat" => Langevin(dt=dt, temperature=temp, friction=friction,
                                         coupling=AndersenThermostat(temp, 1.0u"ps")),
             "MonteCarloBarostat" => VelocityVerlet(dt=dt,
-                                        coupling=MonteCarloBarostat(press, temp, sys.boundary)),
+                                        coupling=MonteCarloBarostat(press, temp, sys.boundary;
+                                                                    n_steps=1)),
             "BerendsenBarostat"  => VelocityVerlet(dt=dt,
-                                        coupling=BerendsenBarostat(press, 1.0u"ps")),
+                                        coupling=BerendsenBarostat(press, 1.0u"ps"; n_steps=1))),
         ]
         for (sim_name, sim) in simulators
             JET.test_call(simulate!, Base.typesof(sys, sim, 1); jet_config...)

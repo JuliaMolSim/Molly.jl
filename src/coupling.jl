@@ -272,7 +272,7 @@ end
     BerendsenBarostat(pressure, coupling_const;
                       coupling_type=:isotropic,
                       compressibility=4.6e-5u"bar^-1",
-                      max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
+                      max_scale_frac=0.1, n_steps=30) <: AbstractBarostat
 
 The Berendsen barostat for controlling pressure.
 
@@ -307,7 +307,7 @@ isibar(x::Number) = (unit(x) == NoUnits || dimension(x) == DIM_INV_P)
 
 function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1) where {PT}
+                           max_scale_frac=0.1, n_steps=30) where {PT}
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic"))
     end
@@ -513,7 +513,7 @@ end
     CRescaleBarostat(pressure, coupling_const;
                      coupling_type=:isotropic,
                      compressibility=4.6e-5u"bar^-1",
-                     max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
+                     max_scale_frac=0.1, n_steps=30) <: AbstractBarostat
 
 The stochastic cell rescale barostat.
 
@@ -533,6 +533,8 @@ The fractional change is limited to `max_scale_frac`.
 The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
 Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Generally, `n_steps` multiplied by the simulator `dt` should fit at least 25 times
+inside ``\tau_P``.
 """
 struct CRescaleBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P
@@ -545,7 +547,7 @@ end
 
 function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1) where {PT}
+                           max_scale_frac=0.1, n_steps=30) where {PT}
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic"))
     end

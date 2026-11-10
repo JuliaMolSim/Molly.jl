@@ -456,6 +456,7 @@ end
     n_atoms = 200
     boundary = CubicBoundary(3.0u"nm")
     mass = 4.0u"g/mol"
+
     function checked_system(; two_inters=false)
         rng = Xoshiro(11)
         coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
@@ -471,6 +472,7 @@ end
             neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms, dist_cutoff=r_c + skin),
         )
     end
+
     min_tol = 1e-6u"kJ * mol^-1 * nm^-1"
     sims = [
         VelocityVerlet(dt=dt, coupling=AndersenThermostat(temp, 0.5u"ps")),

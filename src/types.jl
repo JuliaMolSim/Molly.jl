@@ -64,7 +64,7 @@ Custom general interactions should implement this function to return `true` if
 they change the state such that it affects subsequent interactions (e.g. atomic charges).
 
 On the GPU those calculated afterwards can instead be calculated at the same time as the
-pairwise and specific interactions, see [`concurrent_with_pairwise`](@ref).
+pairwise and specific interactions, see [`Molly.concurrent_with_pairwise`](@ref).
 """
 evaluate_before_pairwise(inter) = false
 
@@ -72,8 +72,8 @@ evaluate_before_pairwise(inter) = false
     concurrent_with_pairwise(inter)
 
 Whether a general interaction that is not evaluated before the pairwise interactions, see
-[`evaluate_before_pairwise`](@ref), can be calculated at the same time as the pairwise and
-specific interactions on the GPU.
+[`Molly.evaluate_before_pairwise`](@ref), can be calculated at the same time as the pairwise
+and specific interactions on the GPU.
 
 This is `false` by default, meaning that the interaction is calculated after the forces of
 the pairwise and specific interactions have been added.
