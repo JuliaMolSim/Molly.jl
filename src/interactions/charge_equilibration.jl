@@ -41,7 +41,6 @@ eem_coupling_cutoff(coupling) = nothing
     colidx::VI          # column indices of non zero entries in CSR matrix
     row_counts::VI      # number of entries in each row in CSR matrix
     write_ptr::VI       # mutable cursor when modifying CSR arrays
-    pair_ptr::VI        # pair_ptr[2*i] and pair_ptr[2*i - 1] locate the entries in colidx for pair i 
 
     H_diag::VQ
     H_diag_inv::VQ
@@ -156,7 +155,6 @@ function ElectronegativityEqualizationMethod(
     colidx = similar(type_ids, 0)           # resized later according to number of CSR entries (2*n_pairs)
     row_counts = similar(type_ids, n_atoms)
     write_ptr = similar(type_ids, n_atoms)
-    pair_ptr = similar(type_ids, 0)         # resized later according to number of CSR entries (2*n_pairs)
 
     fill!(rowptr, 0)
     fill!(row_counts, 0)
@@ -216,7 +214,6 @@ function ElectronegativityEqualizationMethod(
         colidx=colidx,
         row_counts=row_counts,
         write_ptr=write_ptr,
-        pair_ptr=pair_ptr,
         H_diag=H_diag,
         H_diag_inv=H_diag_inv,
         r=r,
@@ -300,36 +297,11 @@ end
 end
 
 
-# fills in colidx and pair_ptr arrays from write_ptr
-# column order within each row is nondeterministic since pairs fill rows concurrently
-@kernel function create_csr_colidx!(
-    colidx,
-    pair_ptr,
-    write_ptr,
-    neighbors
-)
-    ti = @index(Global, Linear)
-
-    @inbounds begin
-        i, j, _ = neighbors[ti]
-
-        # first extracts the old value, then increments (fetch and add operation)
-        write_ptr_i = first(Atomix.@atomic(write_ptr[i] + 1))
-        write_ptr_j = first(Atomix.@atomic(write_ptr[j] + 1))
-
-        colidx[write_ptr_i] = j
-        colidx[write_ptr_j] = i
-
-        pair_ptr[2*ti - 1] = write_ptr_i
-        pair_ptr[2*ti] = write_ptr_j
-    end
-end
-
-
 # updates both symmetric off-diagonal CSR values for every neighbor pair
 @kernel function update_csr_values!(
     H_nonzero,
-    pair_ptr,
+    colidx,
+    write_ptr,
     coupling,
     neighbors,
     type_ids,
@@ -350,8 +322,12 @@ end
         
         hij = eem_hij(coupling, r, type_i, type_j)
 
-        H_nonzero[pair_ptr[2*ti - 1]] = hij
-        H_nonzero[pair_ptr[2*ti]] = hij
+        write_ptr_i = first(Atomix.@atomic(write_ptr[i] + 1))
+        write_ptr_j = first(Atomix.@atomic(write_ptr[j] + 1))
+        colidx[write_ptr_i] = j
+        colidx[write_ptr_j] = i
+        H_nonzero[write_ptr_i] = hij
+        H_nonzero[write_ptr_j] = hij
     end
 end
 
@@ -916,7 +892,6 @@ function charge_equilibration!(
     if length(eem.state.H_nonzero) < num_csr_entries
         eem.state.H_nonzero = similar(eem.state.H_nonzero, num_csr_entries_buffered)
         eem.state.colidx = similar(eem.state.colidx, num_csr_entries_buffered)
-        eem.state.pair_ptr = similar(eem.state.pair_ptr, num_csr_entries_buffered)
     end
 
     requires_rebuild = true
@@ -958,18 +933,6 @@ function charge_equilibration!(
             workgroupsize=atom_workgroupsize
         )
 
-        # populate colidx and pair_ptr
-        if n_pairs > 0
-            create_colidx_kernel! = create_csr_colidx!(backend)
-            create_colidx_kernel!(
-                eem.state.colidx,
-                eem.state.pair_ptr,
-                eem.state.write_ptr,
-                neighbors.list;
-                ndrange=n_pairs,
-                workgroupsize=pair_workgroupsize
-            )
-        end
     end
 
     # length conversion factor from System length units (coords) to General Interaction length units (parameter-compatible)
@@ -980,7 +943,8 @@ function charge_equilibration!(
         update_csr_kernel! = update_csr_values!(backend)
         update_csr_kernel!(
             eem.state.H_nonzero,
-            eem.state.pair_ptr,
+            eem.state.colidx,
+            eem.state.write_ptr,
             eem.coupling,
             neighbors.list,
             eem.type_ids,
@@ -994,7 +958,7 @@ function charge_equilibration!(
 
     eem.state.q_backup .= eem.state.q   # create backup in case of failure
 
-    group_size = QEQ_THREADS_PER_GROUP
+    group_size = backend isa KernelAbstractions.GPU ? 128 : QEQ_THREADS_PER_GROUP
     if backend isa KernelAbstractions.CPU && n_threads < Threads.nthreads()
         group_size = max(group_size, nextpow(2, backend_workgroupsize(backend, n_atoms, n_threads)))
     end
