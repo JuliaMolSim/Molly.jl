@@ -592,6 +592,16 @@ This generates the necessary inputs to use the self-consistent iteration method 
 F_k, logN = Molly.iterate_mbar(u, win_of, N_counts)
 ```
 
+The self-consistent iteration converges slowly when neighbouring states overlap poorly, as on long temperature ladders. In that case `method=:newton` solves the same equations with a damped Newton method, which stops when the weights of every sampled state are normalised to within `atol`. Free energies from a related problem, for instance from the previous step of an optimisation or from the full data set when solving a subset, can be passed as `f_init` so that only a few iterations are needed:
+
+```julia
+# MBAR.jl
+
+F_k, logN = Molly.iterate_mbar(u, win_of, N_counts; method=:newton)
+F_k_subset, _ = Molly.iterate_mbar(u[subset, :], win_of[subset], N_subset;
+                                   method=:newton, f_init=F_k)
+```
+
 With this, we can also produce a weight matrix and a vector of target weights, using the  [`Molly.mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
 
 ```julia

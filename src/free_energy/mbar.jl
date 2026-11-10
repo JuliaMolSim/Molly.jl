@@ -344,8 +344,36 @@ function assemble_target_u(all_coords, all_boundaries, all_volumes,
     return u_target
 end
 
+# Check that `win_of` and `N_counts` describe the same N frames of K states
+function mbar_check_counts(win_of::AbstractVector{<:Integer}, N_counts::AbstractVector{<:Integer},
+                           N::Integer, K::Integer)
+    if length(win_of) != N
+        throw(ArgumentError("length of win_of ($(length(win_of))) must equal number " *
+                            "of columns in u ($N)"))
+    end
+    if length(N_counts) != K
+        throw(ArgumentError("N_counts ($N_counts) must have length $K"))
+    end
+    counts = zeros(Int, K)
+    @inbounds for n in 1:N
+        k = win_of[n]
+        if !(1 ≤ k ≤ K)
+            throw(ArgumentError("win_of contains invalid state index $k"))
+        end
+        counts[k] += 1
+    end
+    if !(counts == N_counts)
+        throw(ArgumentError("counts derived from win_of differ from N_counts"))
+    end
+    if N == 0
+        throw(ArgumentError("no frames given"))
+    end
+    return nothing
+end
+
 # Initializer per Eq C4 (Shirts and Chodera 2008):
 # f_k^(0) = -mean( u[n, k] ) over frames n originating from state k
+# States without frames start at zero, the first MBAR iteration sets them
 function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
                    gauge_ref::Integer=1, N_counts::Union{Nothing, AbstractVector{<:Integer}}=nothing)
     N, K = size(u)
@@ -358,21 +386,7 @@ function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
     end
 
     if !isnothing(N_counts)
-        if length(N_counts) != K
-            throw(ArgumentError("N_counts ($N_counts) must have length $K"))
-        end
-        # Verify counts match win_of
-        counts = zeros(Int, K)
-        @inbounds for n in 1:N
-            k = win_of[n]
-            if !(1 ≤ k ≤ K)
-                throw(ArgumentError("win_of contains invalid state index $k"))
-            end
-            counts[k] += 1
-        end
-        if !(counts == N_counts)
-            throw(ArgumentError("counts derived from win_of differ from N_counts"))
-        end
+        mbar_check_counts(win_of, N_counts, N, K)
     end
 
     f = Vector{Float64}(undef, K)
@@ -385,10 +399,7 @@ function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
                 cnt += 1
             end
         end
-        if !(cnt > 0)
-            throw(ArgumentError("state $k has no frames"))
-        end
-        f[k] = -(sum_u / cnt)
+        f[k] = (cnt > 0 ? -(sum_u / cnt) : 0.0)
     end
 
     ref = f[gauge_ref]
@@ -427,17 +438,217 @@ function mbar_iteration(u, f_init, logN)
     return f_new
 end
 
-@doc raw"""
-    iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter=10_000)
+# Damped Newton-Raphson solver (Shirts and Chodera 2008, Appendix C2) for the MBAR free
+#   energies of the sampled states. The free energies minimize the convex function
+#     F(f) = ∑_n log D_n - ∑_j N_j f_j,   D_n = ∑_j N_j exp(f_j - u[n,j]),
+#   which is unchanged when all f_j are shifted together, so the first sampled state is held
+#   fixed. With the posterior weights P[j,n] = N_j exp(f_j - u[n,j]) / D_n and s_j = ∑_n P[j,n],
+#   the gradient is g_j = s_j - N_j and the Hessian is H = diag(s) - P Pᵀ. The normalization
+#   residual g_j / N_j = ∑_n W[n,j] - 1 vanishes at the solution.
 
-Solve the MBAR self-consistent equations, see
-[Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq C3.
+# One pass over the frames at `a = logN + f` of the sampled states: fills `logD`, the
+#   posterior weights `P` (sampled states × frames) and their sums `s`
+function mbar_newton_pass!(logD, P, s, u, a, sampled)
+    Ks = length(sampled)
+    Threads.@threads for n in axes(u, 1)
+        m = -Inf
+        @inbounds for j in 1:Ks
+            m = max(m, a[j] - u[n, sampled[j]])
+        end
+        se = 0.0
+        @inbounds for j in 1:Ks
+            e = exp(a[j] - u[n, sampled[j]] - m)
+            P[j, n] = e
+            se += e
+        end
+        logD[n] = m + log(se)
+        inv_se = inv(se)
+        @inbounds for j in 1:Ks
+            P[j, n] *= inv_se
+        end
+    end
+    sum!(s, P)
+    return logD
+end
+
+mbar_residual(s, Ns) = maximum(j -> abs(s[j] / Ns[j] - 1), eachindex(s))
+
+# Self-consistent step of Eq C3 for the sampled states, f_j ← f_j - log(∑_n W[n,j]), gauged
+#   to the first sampled state. States whose posterior weights sum to a value near underflow
+#   use the log-sum-exp form, which stays finite far from the solution.
+function mbar_newton_fixed_point_step!(step, s, Ns, u, a, logD, sampled)
+    Threads.@threads for j in eachindex(sampled)
+        if s[j] > sqrt(floatmin(Float64))
+            step[j] = -log(s[j] / Ns[j])
+        else
+            k = sampled[j]
+            m = -Inf
+            @inbounds for n in axes(u, 1)
+                m = max(m, a[j] - u[n, k] - logD[n])
+            end
+            se = 0.0
+            @inbounds for n in axes(u, 1)
+                se += exp(a[j] - u[n, k] - logD[n] - m)
+            end
+            step[j] = -(m + log(se) - log(Ns[j]))
+        end
+    end
+    step .-= step[1]
+    return step
+end
+
+# Returns the free energies of all K states, gauge-fixed to f[1] = 0, and a named tuple with
+#   the number of iterations, the number of fixed-point steps taken in place of Newton steps
+#   and the final normalization residual
+function mbar_newton(u::AbstractMatrix, f_init::AbstractVector, N_counts::AbstractVector,
+                     logN::AbstractVector; atol=1e-10, max_iter::Integer=10_000)
+    N, K = size(u)
+    sampled = findall(>(0), N_counts)
+    Ks = length(sampled)
+    Ns = Float64.(N_counts[sampled])
+    logNs = logN[sampled]
+
+    f = Float64.(f_init[sampled])
+    f .-= f[1]
+    trial, step, g, a = similar(f), similar(f), similar(f), similar(f)
+    logD, logD_trial = Vector{Float64}(undef, N), Vector{Float64}(undef, N)
+    P, P_trial = Matrix{Float64}(undef, Ks, N), Matrix{Float64}(undef, Ks, N)
+    s, s_trial = similar(f), similar(f)
+    PPt = Matrix{Float64}(undef, Ks, Ks)
+    M = Matrix{Float64}(undef, Ks - 1, Ks - 1)
+
+    a .= logNs .+ f
+    mbar_newton_pass!(logD, P, s, u, a, sampled)
+    residual = mbar_residual(s, Ns)
+    μ = 1e-6 # Levenberg-Marquardt damping, relative to the Hessian diagonal
+    iter, n_fixed_point = 0, 0
+    at_floor = false
+    while residual > atol && iter < max_iter
+        iter += 1
+        g .= s .- Ns
+        mul!(PPt, P, transpose(P))
+        # Objective differences below this are rounding error, so near the solution a step
+        #   must halve the normalization residual instead
+        noise = sum(abs, logD)
+        @inbounds for j in 1:Ks
+            noise += abs(Ns[j] * f[j])
+        end
+        noise *= 8 * eps(Float64)
+        accepted = false
+        ΔF, residual_trial = 0.0, Inf
+        for _ in 1:2
+            d_max = 0.0
+            @inbounds for j in 2:Ks, i in 2:Ks
+                M[i-1, j-1] = (i == j ? s[i] : 0.0) - PPt[i, j]
+                i == j && (d_max = max(d_max, M[i-1, i-1]))
+            end
+            @inbounds for i in 1:(Ks - 1)
+                M[i, i] += μ * (M[i, i] + 1e-12 * d_max)
+            end
+            C = cholesky!(Symmetric(M), check=false)
+            if !issuccess(C)
+                μ *= 10
+                continue
+            end
+            step[1] = 0.0
+            ldiv!(view(step, 2:Ks), C, view(g, 2:Ks))
+            step .*= -1
+            ΔF, residual_trial = mbar_newton_trial!(logD_trial, P_trial, s_trial, trial, a,
+                                                    u, f, step, logD, logNs, Ns, sampled)
+            # Armijo condition with a decrease above rounding error, or a lower residual where
+            #   the objective change is rounding error
+            if (ΔF ≤ 1e-4 * dot(g, step) && ΔF < -noise) ||
+                    (abs(ΔF) ≤ noise && residual_trial < residual / 2)
+                accepted = true
+                μ = max(μ / 10, 1e-12)
+                break
+            end
+            μ *= 4
+        end
+        if !accepted
+            a .= logNs .+ f
+            mbar_newton_fixed_point_step!(step, s, Ns, u, a, logD, sampled)
+            ΔF, residual_trial = mbar_newton_trial!(logD_trial, P_trial, s_trial, trial, a,
+                                                    u, f, step, logD, logNs, Ns, sampled)
+            # Neither step makes progress at the rounding level, so stop
+            if !(ΔF < -noise || residual_trial < residual / 2)
+                at_floor = true
+                break
+            end
+            n_fixed_point += 1
+        end
+        f, trial = trial, f
+        logD, logD_trial = logD_trial, logD
+        P, P_trial = P_trial, P
+        s, s_trial = s_trial, s
+        residual = residual_trial
+    end
+    if at_floor && !(residual ≤ atol)
+        @warn "MBAR Newton solver reached the rounding floor after $iter iterations with " *
+              "normalization residual $residual > atol ($atol), raise atol to at least the floor"
+    elseif !(residual ≤ atol)
+        @warn "MBAR Newton solver stopped at max_iter ($max_iter) with normalization " *
+              "residual $residual > atol ($atol)"
+    end
+
+    f_all = zeros(Float64, K)
+    f_all[sampled] .= f
+    mbar_unsampled_f!(f_all, u, logD, findall(iszero, N_counts))
+    f_all .-= f_all[1]
+    return f_all, (iterations=iter, fixed_point_steps=n_fixed_point, residual=residual)
+end
+
+# Unsampled states follow from the MBAR equation at the solved free energies
+function mbar_unsampled_f!(f, u, logD, unsampled)
+    Threads.@threads for k in unsampled
+        m = -Inf
+        @inbounds for n in axes(u, 1)
+            m = max(m, -u[n, k] - logD[n])
+        end
+        se = 0.0
+        @inbounds for n in axes(u, 1)
+            se += exp(-u[n, k] - logD[n] - m)
+        end
+        f[k] = -(m + log(se))
+    end
+    return f
+end
+
+# Evaluates the trial point f + step, returning the change of the objective and the residual.
+#   `step` is replaced by the step actually applied after rounding, which differs from the
+#   computed one when it is small against `f`.
+function mbar_newton_trial!(logD_trial, P_trial, s_trial, trial, a, u, f, step, logD, logNs,
+                            Ns, sampled)
+    trial .= f .+ step
+    step .= trial .- f
+    a .= logNs .+ trial
+    mbar_newton_pass!(logD_trial, P_trial, s_trial, u, a, sampled)
+    ΔF = 0.0
+    @inbounds for n in eachindex(logD)
+        ΔF += logD_trial[n] - logD[n]
+    end
+    ΔF -= dot(Ns, step)
+    return ΔF, mbar_residual(s_trial, Ns)
+end
+
+@doc raw"""
+    iterate_mbar(u, win_of, N_counts; method=:fixed_point, f_init=nothing,
+                 rtol=1e-8, atol=1e-10, max_iter=10_000)
+
+Solve the MBAR equations, see
+[Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Appendix C.
 
 The relative free energies satisfy
 ```math
 f_i = -\ln \sum_{n=1}^{N} \frac{\exp(-u_i(x_n))}{\sum_{k=1}^{K} N_k \exp(f_k - u_k(x_n))}
 ```
-where the sum over ``n`` runs over the frames from all states.
+where the sum over ``n`` runs over the frames from all states. States with no samples
+(`N_counts[i] == 0`) are allowed.
+
+`method=:fixed_point` uses the self-consistent iteration of Eq C3. `method=:newton` uses the
+Newton-Raphson method of Appendix C2, damped so that every step lowers the convex MBAR
+objective, and stops when the weights of every sampled state are normalized to within
+`atol`; it needs far fewer iterations when neighboring states overlap poorly.
 
 # Arguments
 - `u::AbstractMatrix` - `N×K` reduced potentials (`rows = frames`, `cols = states`).
@@ -445,16 +656,43 @@ where the sum over ``n`` runs over the frames from all states.
 - `N_counts::AbstractVector` - length-`K` sample counts per state.
 
 # Keyword arguments
-- `rtol::Float64=1e-8` - relative convergence tolerance.
+- `method::Symbol=:fixed_point` - the solver, `:fixed_point` or `:newton`.
+- `f_init=nothing` - length-`K` initial free energies, any gauge. By default they are
+  estimated from the mean reduced potential of each state, see Eq C4.
+- `rtol::Float64=1e-8` - relative convergence tolerance of `:fixed_point`.
+- `atol::Float64=1e-10` - normalization residual tolerance of `:newton`.
 - `max_iter::Int=10_000` - maximum iterations.
 
 # Returns
 - `f::Vector{Float64}` - relative free energies per state (gauge-fixed to `f[1]=0`).
 - `logN::Vector{Float64}` - `log.(N_counts)` for reuse downstream.
 """
-function iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter::Integer=10_000)
+function iterate_mbar(u, win_of, N_counts; method::Symbol=:fixed_point, f_init=nothing,
+                      rtol=1e-8, atol=1e-10, max_iter::Integer=10_000)
+    if !(method in (:fixed_point, :newton))
+        throw(ArgumentError("method must be :fixed_point or :newton, found $method"))
+    end
+    N, K = size(u)
     logN = log.(Float64.(N_counts))
-    f_old = mbar_init(u, win_of; gauge_ref=1, N_counts=N_counts)
+    if isnothing(f_init)
+        f_old = mbar_init(u, win_of; gauge_ref=1, N_counts=N_counts)
+    else
+        if length(f_init) != K
+            throw(DimensionMismatch("length of f_init ($(length(f_init))) must equal the " *
+                                    "number of states ($K)"))
+        end
+        if !all(isfinite, f_init)
+            throw(DomainError(f_init, "f_init must be finite"))
+        end
+        mbar_check_counts(win_of, N_counts, N, K)
+        f_old = Float64.(f_init) .- f_init[1]
+    end
+
+    if method == :newton
+        f, _ = mbar_newton(u, f_old, N_counts, logN; atol=atol, max_iter=max_iter)
+        return f, logN
+    end
+
     f_new = mbar_iteration(u, f_old, logN)
 
     rel = maximum(abs.(f_new .- f_old) ./ max.(abs.(f_old), 1.0))
@@ -711,6 +949,9 @@ function mbar_weights(mbar_generator::MBARInput)
     win_of   = mbar_generator.win_of
     shifts   = mbar_generator.shifts
 
+    if !all(>(0), N_counts)
+        throw(ArgumentError("all states must have samples, found N = $N_counts"))
+    end
     F_k, logN = iterate_mbar(u, win_of, N_counts)
 
     W, w_target, logD = mbar_weights(u, u_target, F_k, N_counts, logN; shifts=shifts, check=false)
@@ -1049,6 +1290,9 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
     win_of   = mbar_gen.win_of
     shifts   = mbar_gen.shifts
 
+    if !all(>(0), N_counts)
+        throw(ArgumentError("all states must have samples, found N = $N_counts"))
+    end
     F_k, logN = iterate_mbar(u, win_of, N_counts)
 
     pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
@@ -1056,9 +1300,9 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
 end
 
 """
-    MBARResult(u, win_of, N_counts, states; rtol=1e-8, max_iter=10_000)
-    MBARResult(u, win_of, N_counts, kBT; names=nothing, rtol=1e-8, max_iter=10_000)
-    MBARResult(input::MBARInput, states; rtol=1e-8, max_iter=10_000)
+    MBARResult(u, win_of, N_counts, states; kwargs...)
+    MBARResult(u, win_of, N_counts, kBT; names=nothing, kwargs...)
+    MBARResult(input::MBARInput, states; kwargs...)
 
 Relative free energies of `K` thermodynamic states from MBAR, with their asymptotic
 covariance, see [Shirts and Chodera 2008](https://doi.org/10.1063/1.2978177) Eq D6.
@@ -1079,7 +1323,8 @@ and [`Molly.free_energy_difference_uncertainty`](@ref) return values in energy u
 
 # Keyword arguments
 - `names=nothing` - state names, used to refer to states by name in a [`ThermodynamicCycleLeg`](@ref).
-- `rtol` and `max_iter` - passed to [`Molly.iterate_mbar`](@ref).
+- `kwargs...` - other keyword arguments, such as `method`, `rtol`, `atol` and `max_iter`, are
+  passed to [`Molly.iterate_mbar`](@ref).
 
 # Fields
 - `f::Vector{Float64}` - relative free energies in units of each state's ``k_B T``,
@@ -1108,8 +1353,7 @@ function MBARResult(input::MBARInput, states::AbstractVector{<:ThermoState}; kwa
 end
 
 function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::AbstractVector,
-                    kBT::AbstractVector; names=nothing, rtol=1e-8,
-                    max_iter::Integer=10_000)
+                    kBT::AbstractVector; names=nothing, kwargs...)
     K = size(u, 2)
     if length(kBT) != K || length(N_counts) != K
         throw(DimensionMismatch("lengths of kBT ($(length(kBT))) and N_counts " *
@@ -1122,7 +1366,7 @@ function MBARResult(u::AbstractMatrix, win_of::AbstractVector, N_counts::Abstrac
         throw(DimensionMismatch("length of names ($(length(names))) must equal the " *
                                 "number of states ($K)"))
     end
-    f, logN = iterate_mbar(u, win_of, N_counts; rtol=rtol, max_iter=max_iter)
+    f, logN = iterate_mbar(u, win_of, N_counts; kwargs...)
     W, _ = mbar_weights_sampled(u, f, logN)
     W ./= W * Float64.(N_counts) # Enforce exact normalization, ∑k N_k W[n,k] = 1
     covariance = mbar_covariance(W' * W, N_counts)

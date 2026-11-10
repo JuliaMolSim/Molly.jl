@@ -156,6 +156,120 @@ end
                         vec(mean(reduce(hcat, σ_poor); dims=2)); rtol=0.3))
 end
 
+@testset "MBAR solvers" begin
+    # Harmonic oscillators in d dimensions at inverse temperatures βs, sampled exactly through
+    #   their energy U = |x|² / 2, which gives f_k - f_1 = (d / 2) log(β_k / β_1)
+    function ladder_samples(rng, βs, d, N_k)
+        U = Float64[]
+        for (β, n) in zip(βs, N_k), _ in 1:n
+            push!(U, sum(abs2, randn(rng, d)) / (2β))
+        end
+        win_of = reduce(vcat, [fill(k, n) for (k, n) in enumerate(N_k)])
+        return U .* βs', win_of, (d / 2) .* log.(βs ./ βs[1])
+    end
+    # Largest deviation of ∑_n W[n,k] from 1 over the sampled states
+    function normalization_residual(u, f, N_k)
+        logD = Molly.mbar_logD(u, f, log.(Float64.(N_k)))
+        return maximum(k -> abs(sum(exp.(f[k] .- u[:, k] .- logD)) - 1), findall(>(0), N_k))
+    end
+    rng = Xoshiro(20)
+
+    # Well-overlapping states, where both solvers give the same free energies
+    βs = exp.(0.1 .* (0:7))
+    N_k = fill(500, 8)
+    u, win_of, f_exact = ladder_samples(rng, βs, 20, N_k)
+    f_fp, logN = Molly.iterate_mbar(u, win_of, N_k; rtol=1e-13, max_iter=100_000)
+    f_newton, logN_newton = Molly.iterate_mbar(u, win_of, N_k; method=:newton)
+    @test f_newton ≈ f_fp atol=1e-9
+    @test f_newton[1] == 0
+    @test logN_newton == logN
+    @test f_newton ≈ f_exact atol=0.25
+    @test normalization_residual(u, f_newton, N_k) ≤ 1e-10
+    @test Molly.MBARResult(u, win_of, N_k, ones(8); method=:newton).f == f_newton
+    @test_throws ArgumentError Molly.iterate_mbar(u, win_of, N_k; method=:bisection)
+    @test_throws DimensionMismatch Molly.iterate_mbar(u, win_of, N_k; f_init=zeros(3))
+
+    # A long ladder of weakly overlapping states, where the weights are normalized to atol
+    βs = exp.(0.06 .* (0:29))
+    N_k = fill(100, 30)
+    logN = log.(Float64.(N_k))
+    u, win_of, f_exact = ladder_samples(rng, βs, 1000, N_k)
+    f_newton, _ = Molly.iterate_mbar(u, win_of, N_k; method=:newton)
+    @test normalization_residual(u, f_newton, N_k) ≤ 1e-10
+    @test f_newton ≈ f_exact atol=12
+    f_loose, _ = Molly.iterate_mbar(u, win_of, N_k; method=:newton, atol=1e-3)
+    @test 1e-10 < normalization_residual(u, f_loose, N_k) ≤ 1e-3
+
+    # Warm starts: the free energies of all frames are a good start for a subset of them, as
+    #   in a jackknife, and the fixed point started at the solution stays there
+    _, cold = Molly.mbar_newton(u, Molly.mbar_init(u, win_of), N_k, logN)
+    keep = [n for n in eachindex(win_of) if n % 10 != 0]
+    N_keep = [count(==(k), win_of[keep]) for k in 1:30]
+    f_keep, warm = Molly.mbar_newton(u[keep, :], f_newton, N_keep, log.(Float64.(N_keep)))
+    @test warm.iterations ≤ 5 < cold.iterations
+    @test warm.residual ≤ 1e-10
+    @test first(Molly.iterate_mbar(u[keep, :], win_of[keep], N_keep; method=:newton,
+                                   f_init=f_newton .+ 3.0)) ≈ f_keep atol=1e-12
+    @test first(Molly.iterate_mbar(u[keep, :], win_of[keep], N_keep; method=:newton)) ≈ f_keep atol=1e-8
+    @test first(Molly.iterate_mbar(u, win_of, N_k; f_init=f_newton)) ≈ f_newton atol=1e-6
+
+    # States without samples, including the first, are normalized by the solved free energies
+    βs = exp.(0.1 .* (0:8))
+    N_k = [0, 500, 500, 500, 0, 500, 500, 500, 500]
+    u, win_of, f_exact = ladder_samples(rng, βs, 20, N_k)
+    f_fp, _ = Molly.iterate_mbar(u, win_of, N_k; rtol=1e-13, max_iter=100_000)
+    f_newton, _ = Molly.iterate_mbar(u, win_of, N_k; method=:newton)
+    @test f_newton ≈ f_fp atol=1e-9
+    @test f_newton[1] == 0
+    @test f_newton ≈ f_exact atol=0.4
+    logD = Molly.mbar_logD(u, f_newton, log.(Float64.(N_k)))
+    @test all(k -> sum(exp.(f_newton[k] .- u[:, k] .- logD)) ≈ 1, (1, 5))
+    # The fixed point started away from the solution reaches the same free energies
+    @test first(Molly.iterate_mbar(u, win_of, N_k; f_init=f_exact, rtol=1e-13,
+                                   max_iter=100_000)) ≈ f_fp atol=1e-9
+    result = Molly.MBARResult(u, win_of, N_k, ones(9); method=:newton)
+    Θ = result.covariance
+    @test result.f == f_newton
+    @test all(j -> isfinite(Θ[1, j]) && Θ[1, 1] + Θ[j, j] - 2Θ[1, j] > 0, 2:9)
+    # Weights for a target state need samples in every state
+    @test_throws ArgumentError Molly.mbar_weights(
+                                    Molly.MBARInput(u, u[:, 1], N_k, win_of, nothing))
+
+    # Nearly degenerate states, two identical states and two ladders joined by a weak link,
+    #   started far from the solution, where Newton steps fail and fixed-point steps take over
+    βs = vcat(exp.(0.1 .* (0:4)), exp.(1.4 .+ 0.1 .* (0:4)), exp(0.4))
+    N_k = fill(300, 11)
+    logN = log.(Float64.(N_k))
+    u, win_of, f_exact = ladder_samples(rng, βs, 20, N_k)
+    f, info = Molly.mbar_newton(u, zeros(11), N_k, logN)
+    @test info.fixed_point_steps > 0 # This case is chosen to cover the fallback
+    @test info.residual ≤ 1e-10
+    @test f[11] ≈ f[5] atol=1e-8
+    @test f ≈ f_exact atol=1.2
+
+    # Asked for a residual below rounding error, the solver stops at the floor with a warning
+    #   instead of running to max_iter
+    f_floor, floor_info = @test_logs (:warn, r"normalization residual") Molly.mbar_newton(
+                                        u, f, N_k, logN; atol=0.0)
+    @test floor_info.iterations < 20
+    @test f_floor ≈ f atol=1e-9
+
+    # Free energies of order 1e7, where steps far below the rounding of f are not applied
+    #   and the floor is above the default atol: the solver stops there and says so
+    βs = exp.(0.1 .* (0:9))
+    N_k = fill(200, 10)
+    logN = log.(Float64.(N_k))
+    u, win_of, _ = ladder_samples(rng, βs, 50, N_k)
+    offsets = 1e6 .* (0:9)
+    f, _ = Molly.mbar_newton(u, Molly.mbar_init(u, win_of), N_k, logN)
+    f_large, large_info = @test_logs (:warn, r"rounding floor") Molly.mbar_newton(
+                                        u .+ offsets', Molly.mbar_init(u .+ offsets', win_of),
+                                        N_k, logN)
+    @test large_info.iterations < 20
+    @test large_info.residual ≤ 1e-8
+    @test f_large .- offsets ≈ f atol=1e-6
+end
+
 @testset "Statistical inefficiency" begin
     # An AR(1) series with coefficient φ has statistical inefficiency (1 + φ) / (1 - φ)
     rng = Xoshiro(11)
