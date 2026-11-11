@@ -63,6 +63,7 @@ EnzymeRules.inactive(::typeof(Molly.needs_virial_schedule), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.parse_splitting), args...) = nothing
 EnzymeRules.inactive(::typeof(use_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.prepare_QEq_csr_cpu!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.refind_neighbors), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.tracks_displacements), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.uses_neighbor_list), args...) = nothing
