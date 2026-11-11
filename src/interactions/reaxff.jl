@@ -4136,7 +4136,8 @@ end
     atid,
     hbond_dist_cutoff,
     h_bond_donors,
-    h_bond_acceptors
+    h_bond_acceptors,
+    hbond_args,
 ) where T
     ti = @index(Global, Linear)
 
@@ -4182,12 +4183,23 @@ end
                     hbdp_ijk = hbdp[atid_i, atid_j, atid_k]
                     hbdp_ijk.is_defined || continue
 
-                    valid_hbond_idx = Atomix.@atomic n_valid_hbonds[1] += 1
+                    if isnothing(hbond_args)
+                        valid_hbond_idx = Atomix.@atomic n_valid_hbonds[1] += 1
 
-                    if valid_hbond_idx <= size(valid_hbonds, 2)
-                        valid_hbonds[1, valid_hbond_idx] = j
-                        valid_hbonds[2, valid_hbond_idx] = k
-                        valid_hbonds[3, valid_hbond_idx] = idx_i
+                        if valid_hbond_idx <= size(valid_hbonds, 2)
+                            valid_hbonds[1, valid_hbond_idx] = j
+                            valid_hbonds[2, valid_hbond_idx] = k
+                            valid_hbonds[3, valid_hbond_idx] = idx_i
+                        end
+                    else
+                        reverse_nbrs, S_dE_dBO, forces, hb_energies, smoothness = hbond_args
+
+                        hbond_pair!(
+                            j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
+                            coords, boundary, hbdp, atid, S_dE_dBO, forces,
+                            hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
+                            smoothness,
+                        )
                     end
                 end
             end
@@ -4221,6 +4233,35 @@ end
         k     = valid_hbonds[2, ti]
         idx_i = valid_hbonds[3, ti]
 
+        hbond_pair!(
+            j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
+            coords, boundary, hbdp, atid, S_dE_dBO, forces,
+            hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
+            Val(smoothness_correction),
+        )
+    end
+end
+
+@inline function hbond_pair!(
+    j,
+    k,
+    idx_i,
+    nbrs,
+    BO,
+    reverse_nbrs,
+    conv_factor::T,
+    coords,
+    boundary,
+    hbdp,
+    atid,
+    S_dE_dBO,
+    forces,
+    hb_energies,
+    hbond_bo_cutoff,
+    hbond_dist_cutoff,
+    ::Val{smoothness_correction},
+) where {T, smoothness_correction}
+    @inbounds begin
         i = nbrs[idx_i, j]
 
         c_j = coords[j]
@@ -4335,6 +4376,7 @@ end
 
         Atomix.@atomic hb_energies[j] += energy_pair
     end
+    return nothing
 end
 
 
@@ -4369,6 +4411,17 @@ function hydrogen_bonds!(
     hb_energies = inter.state.thread_atom_energies_1
     fill!(hb_energies, zero(T))
 
+    hbond_args = nothing
+    if backend isa KernelAbstractions.CPU
+        hbond_args = (
+            reverse_nbrs,
+            inter.state.S_dE_dBO,
+            inter.state.forces,
+            hb_energies,
+            inter.smoothness_correction,
+        )
+    end
+
     fill!(inter.state.n_valid_hbonds, 0)
 
     # this continues counting even when capacity of valid hbonds is reached => reports exact required size
@@ -4390,7 +4443,8 @@ function hydrogen_bonds!(
             atid,
             hbond_dist_cutoff,
             h_bond_donors,
-            h_bond_acceptors;
+            h_bond_acceptors,
+            hbond_args;
             ndrange=length(far_nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(far_nbrs), n_threads)
         )
@@ -4423,7 +4477,8 @@ function hydrogen_bonds!(
             atid,
             hbond_dist_cutoff,
             h_bond_donors,
-            h_bond_acceptors;
+            h_bond_acceptors,
+            hbond_args;
             ndrange=length(far_nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(far_nbrs), n_threads)
         )

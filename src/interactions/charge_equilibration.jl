@@ -270,8 +270,14 @@ end
     @inbounds begin
         i, j, _ = neighbors[ti]
         
-        Atomix.@atomic row_counts[i] += 1
-        Atomix.@atomic row_counts[j] += 1
+        if row_counts isa AbstractMatrix
+            group = @index(Group, Linear)
+            row_counts[i, group] += 1
+            row_counts[j, group] += 1
+        else
+            Atomix.@atomic row_counts[i] += 1
+            Atomix.@atomic row_counts[j] += 1
+        end
     end
 end
 
@@ -322,8 +328,17 @@ end
         
         hij = eem_hij(coupling, r, type_i, type_j)
 
-        write_ptr_i = first(Atomix.@atomic(write_ptr[i] + 1))
-        write_ptr_j = first(Atomix.@atomic(write_ptr[j] + 1))
+        if write_ptr isa AbstractMatrix
+            group = @index(Group, Linear)
+            write_ptr_i = write_ptr[i, group]
+            write_ptr[i, group] += 1
+            write_ptr_j = write_ptr[j, group]
+            write_ptr[j, group] += 1
+        else
+            write_ptr_i = first(Atomix.@atomic(write_ptr[i] + 1))
+            write_ptr_j = first(Atomix.@atomic(write_ptr[j] + 1))
+        end
+
         colidx[write_ptr_i] = j
         colidx[write_ptr_j] = i
         H_nonzero[write_ptr_i] = hij
@@ -431,7 +446,7 @@ end
         row_start = rowptr[ti]
         row_end = rowptr[ti + 1] - 1
 
-        for idx in row_start:row_end    # off-diagonal contribution
+        @simd for idx in row_start:row_end    # off-diagonal contribution
             c = colidx[idx]
             y_ti += H_nonzero[idx] * x[c]
         end
@@ -871,6 +886,58 @@ function shift_history!(
 end
 
 
+@kernel function create_csr_cursors_cpu!(
+    rowptr,
+    row_counts,
+    cursors,
+)
+    offset = 1
+
+    @inbounds for i in eachindex(row_counts)
+        rowptr[i] = offset
+
+        for group in axes(cursors, 2)
+            count = cursors[i, group]
+            cursors[i, group] = offset
+            offset += count
+        end
+
+        row_counts[i] = offset - 1
+    end
+
+    rowptr[end] = offset
+end
+
+
+function prepare_QEq_csr_cpu!(state, neighbors, n_groups, group_size)
+    backend = KernelAbstractions.CPU()
+    n_atoms = length(state.row_counts)
+
+    resize!(state.write_ptr, n_atoms * n_groups)
+    cursors = reshape(state.write_ptr, n_atoms, n_groups)
+    fill!(cursors, 0)
+
+    count_csr_kernel! = count_QEq_csr_rows!(backend)
+    count_csr_kernel!(
+        cursors,
+        neighbors.list;
+        ndrange=length(neighbors),
+        workgroupsize=group_size,
+    )
+
+    create_cursors_kernel! = create_csr_cursors_cpu!(backend)
+    create_cursors_kernel!(
+        state.rowptr,
+        state.row_counts,
+        cursors;
+        ndrange=1,
+        workgroupsize=1,
+    )
+
+    return nothing
+end
+
+
 function charge_equilibration!(
     eem::ElectronegativityEqualizationMethod{C, VI, VQ, QT},
     sys::System,
@@ -895,8 +962,19 @@ function charge_equilibration!(
     end
 
     requires_rebuild = true
+    write_ptr = eem.state.write_ptr
 
-    if requires_rebuild
+    cpu_rebuild = backend isa KernelAbstractions.CPU && n_threads > 1 && n_pairs >= 1024 * n_threads
+
+    if cpu_rebuild
+        n_tasks = min(n_threads, Threads.nthreads())
+        pair_workgroupsize = backend_workgroupsize(backend, n_pairs, n_tasks)
+
+        prepare_QEq_csr_cpu!(eem.state, neighbors, n_tasks, pair_workgroupsize)
+        write_ptr = reshape(eem.state.write_ptr, n_atoms, n_tasks)
+    end
+
+    if requires_rebuild && !cpu_rebuild
         use_geometric_counts =
             neighbors isa GPUCellListNeighborList &&
             has_ragged_neighbors(neighbors) &&
@@ -944,7 +1022,7 @@ function charge_equilibration!(
         update_csr_kernel!(
             eem.state.H_nonzero,
             eem.state.colidx,
-            eem.state.write_ptr,
+            write_ptr,
             eem.coupling,
             neighbors.list,
             eem.type_ids,
@@ -1002,6 +1080,12 @@ function charge_equilibration!(
 
     # calculate H*q
     smm_kernel!, smm_kernel_ndrange = sparse_mat_mul_kernel(backend, n_atoms)
+    matvec_workgroupsize = atom_workgroupsize
+
+    if backend isa KernelAbstractions.CPU
+        matvec_workgroupsize = backend_workgroupsize(backend, n_atoms, n_threads)
+    end
+    
     smm_kernel!(
         eem.state.Hq,
         eem.state.H_diag,
@@ -1010,7 +1094,7 @@ function charge_equilibration!(
         eem.state.colidx,
         eem.state.q;
         ndrange=smm_kernel_ndrange,     # global range might be (32, 13200) but workgroup size is (32, 8)
-        workgroupsize=atom_workgroupsize
+        workgroupsize=matvec_workgroupsize
     )
 
     # calculate initial unprojected residual r_0 = -χ - Hq and its sum
@@ -1076,7 +1160,7 @@ function charge_equilibration!(
             eem.state.colidx,
             eem.state.d;
             ndrange=smm_kernel_ndrange,
-            workgroupsize=atom_workgroupsize
+            workgroupsize=matvec_workgroupsize
         )
         
         # calculate dHd, the denominator of α
