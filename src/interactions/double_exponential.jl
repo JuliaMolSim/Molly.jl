@@ -396,7 +396,8 @@ recomputes the correction from injected σ, ϵ, `α` and `β`, which share their
 pairwise interaction, including its gradients.
 Only compatible with 3D systems.
 """
-struct DExpDispersionCorrection{F, EC, C, T, S, E, P}
+mutable struct DExpDispersionCorrection{F, EC, C, T, S, E, P}
+    # Mutable for the reason given in `LJDispersionCorrection`
     factor::F
     factor_vir::F
     energy_const::EC
@@ -595,7 +596,8 @@ The number of atoms is otherwise assumed not to change after setup, and
 [`DExpDispersionCorrection`](@ref).
 Only compatible with 3D systems.
 """
-struct DExpDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
+mutable struct DExpDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
+    # Mutable for the reason given in `LJDispersionCorrection`
     factor::F
     factor_vir::F
     energy_const::EC

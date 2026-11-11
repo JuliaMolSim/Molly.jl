@@ -1364,7 +1364,7 @@ end
     # O2 is the water oxygen, O1 the ethanol oxygen
     charges_mod = ("O2" => -0.95, "O1" => -0.6)
     garnet_file_mod = ff_file_with_charges(garnet_file, charges_mod)
-    function ethanol_solv_sys(ff_file, nonbonded_method; grad_safe=false)
+    function ethanol_solv_sys(ff_file, nonbonded_method; grad_safe=false, kwargs...)
         ff = MolecularForceField(
             ff_file;
             custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
@@ -1380,6 +1380,7 @@ end
             grad_safe=grad_safe,
             dispersion_correction=true,
             strictness=:nowarn,
+            kwargs...,
         )
     end
 
@@ -1477,6 +1478,42 @@ end
                             copy(sys.coords), neighbors, gis)
             end
             @test abs(grads_enzyme[key] - grad_fd) <= 1e-5 * abs(grad_fd)
+        end
+    end
+
+    # Injecting into a system that is itself differentiated copies its neighbor finder
+    #   through differentiated memory, which Enzyme could not type when the neighbor finder
+    #   was an immutable struct with a Bool field stored inline in the system. The σ, ϵ and β
+    #   gradients include those of the dispersion correction after the PME, which Enzyme
+    #   dropped while the correction was stored inline next to the PME in the tuple of
+    #   general interactions
+    @testset "Gradients through a Duplicated system with $NF" for NF in (
+                DistanceNeighborFinder, TreeNeighborFinder)
+        sys = ethanol_solv_sys(garnet_file, SetupPME(); grad_safe=true,
+                               neighbor_finder_type=NF)
+        @test sys.neighbor_finder isa NF
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        pe_sys_injected(params_dic, sys, plan, neighbors) = potential_energy(
+                inject_gradients(sys, params_dic, plan), neighbors; n_threads=1)
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_sys_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Duplicated(sys, Enzyme.make_zero(sys)),
+            Const(plan),
+            Const(neighbors),
+        )
+        @test last(values(sys.general_inters)) isa DExpDispersionCorrection
+        for key in ("atom_O2_charge", "atom_O1_charge", "atom_C1_σ", "atom_O2_σ",
+                    "atom_O2_ϵ", "inter_DEXP_beta")
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+                pe_sys_injected(merge(params_dic, Dict(key => val)), sys, plan, neighbors)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
         end
     end
 
@@ -1625,16 +1662,23 @@ end
         return potential_energy(sys, nothing; n_threads=1, pairwise_inters=(),
                                 specific_inter_lists=())
     end
-    function build(ff_files, pdb; kwargs...)
+    function build(ff_files, pdb; nonbonded_method=SetupCoulombReactionField(), kwargs...)
         ff = MolecularForceField(joinpath.(ff_dir, ff_files)...; units=false, kwargs...)
         return System(joinpath(data_dir, pdb), ff; units=false, float_type=Float64,
-                      nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0,
-                      dispersion_correction=true, strictness=:nowarn)
+                      nonbonded_method=nonbonded_method, dist_cutoff=1.0,
+                      grad_safe=(nonbonded_method isa SetupPME), dispersion_correction=true,
+                      strictness=:nowarn)
     end
     garnet_templates = joinpath(ff_dir, "ethanol_garnet_residues.xml")
     sys_dexp = build(["ethanol_garnet.xml"], "ethanol_solv.pdb";
                      custom_residue_templates=garnet_templates)
     sys_lj = build(["tip3p_standard.xml", "benzene.xml"], "benzene_solv.pdb")
+    # A PME comes before the correction in the general interactions
+    sys_dexp_pme = build(["ethanol_garnet.xml"], "ethanol_solv.pdb";
+                         custom_residue_templates=garnet_templates,
+                         nonbonded_method=SetupPME())
+    sys_lj_pme = build(["tip3p_standard.xml", "benzene.xml"], "benzene_solv.pdb";
+                       nonbonded_method=SetupPME())
     cases = (
         ("DEXP", sys_dexp, ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
          DExpDispersionCorrection),
@@ -1645,9 +1689,15 @@ end
          LJDispersionCorrection),
         ("LJ λ", AbsoluteFESystem(sys_lj, 0.8, collect(1:12)),
          ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_ϵ"), Molly.LJDispersionCorrectionλ),
+        ("DEXP PME", sys_dexp_pme,
+         ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
+         DExpDispersionCorrection),
+        ("LJ PME", sys_lj_pme, ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_σ"),
+         LJDispersionCorrection),
     )
     @testset "$name" for (name, sys, ks, DC) in cases
-        @test only(sys.general_inters) isa DC
+        @test last(values(sys.general_inters)) isa DC
+        @test count(gi -> gi isa DC, values(sys.general_inters)) == 1
         params_dic = extract_parameters(sys; strictness=:nowarn)
         plan = ParameterPlan(sys, params_dic)
         grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
