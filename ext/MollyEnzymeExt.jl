@@ -219,6 +219,238 @@ function EnzymeRules.reverse(config::RevConfig, func::Const{typeof(Molly.dict_ge
     return (nothing, nothing, dict_get_default_cotangent(default, dret, tape))
 end
 
+# Reverse rule for the CPU pairwise potential energy loop
+#
+# Enzyme can differentiate `pairwise_pe_loop` itself, but the reverse of the threaded loop
+# accumulates the cotangent of every coordinate and atom parameter it touches with an atomic
+# operation, since the threads share the shadow arrays, and it keeps a tape entry for every
+# neighbour pair. The atomics contend on the cache lines of the shadows and cost more than
+# the derivative arithmetic. Here the reverse pass walks the pairs in the same blocks as the
+# primal, differentiating one block at a time with Enzyme so that the tape of a block stays
+# in cache, and each task accumulates into its own copy of the shadows, which are summed
+# into the real shadows afterwards. The primal is unchanged and nothing is recorded in the
+# augmented forward pass. The rule covers systems without units whose interactions do not
+# use the velocities; anything else is differentiated by Enzyme as before.
+
+# Pairs per block of the reverse pass, larger than the blocks of the primal as each block is
+#   one Enzyme call
+const cpu_pairwise_block_size = 2048
+
+# The block energy scaled by the incoming cotangent, so the block adjoint is seeded by it
+@inline function cpu_pairwise_nl_block_scaled(atoms, coords, velocities, boundary, neighbors,
+                                              inters, step_n, block_start, block_stop, th,
+                                              use_vel, seed)
+    return seed * Molly.pairwise_pe_nl_block(atoms, coords, velocities, boundary, neighbors,
+                                             NoUnits, inters, step_n, block_start, block_stop,
+                                             th, use_vel)
+end
+
+@inline function cpu_pairwise_nonl_range_scaled(atoms, coords, velocities, boundary, inters,
+                                                step_n, range_i, n_ranges, n_atoms, th,
+                                                use_vel, seed)
+    return seed * Molly.pairwise_pe_nonl_range(atoms, coords, velocities, boundary, NoUnits,
+                                               inters, step_n, range_i, n_ranges, n_atoms, th,
+                                               use_vel)
+end
+
+@inline cpu_add_cotangent(x, ::Nothing) = x
+@inline cpu_add_cotangent(x, y) = Enzyme.Compiler.recursive_add(x, y)
+
+# Per-task copies of the shadows of the coordinates and atoms, reused across calls so that a
+#   gradient does not allocate and touch new pages every time
+function cpu_pairwise_chunks(coords::AbstractVector, atoms::AbstractVector, n_chunks::Integer)
+    key = (:molly_cpu_pairwise_grad, typeof(coords), length(coords), typeof(atoms),
+           length(atoms), n_chunks)
+    return get!(task_local_storage(), key) do
+        ([zero(coords) for _ in 1:n_chunks], [Enzyme.make_zero(atoms) for _ in 1:n_chunks])
+    end::Tuple{Vector{typeof(coords)}, Vector{typeof(atoms)}}
+end
+
+@inline cpu_chunk_shadow(chunks, chunk_i, ::Nothing) = nothing
+@inline cpu_chunk_shadow(chunks, chunk_i, shadow) = @inbounds chunks[chunk_i]
+
+@inline cpu_zero_chunk!(::Nothing) = nothing
+@inline function cpu_zero_chunk!(chunk::AbstractVector)
+    isempty(chunk) && return nothing
+    fill!(chunk, Enzyme.make_zero(first(chunk)))
+    return nothing
+end
+
+# Adjoints of the blocks of pairs claimed by one task, accumulated into its shadow copies and
+#   returned for the interactions and the boundary, which are passed by value
+function cpu_pairwise_chunk_adjoint!(dcoords_c, datoms_c, next_block, n_blocks, n_nbs, cs, as,
+                                     vels, bnd, ::Type{BA}, nbs, inters, ::Type{IA}, step_n,
+                                     ::Val{TH}, seed) where {BA, IA, TH}
+    dinters = Enzyme.make_zero(inters)
+    dbnd = Enzyme.make_zero(bnd)
+    while true
+        b = Threads.atomic_add!(next_block, 1)
+        b > n_blocks && break
+        block_start = (b - 1) * cpu_pairwise_block_size + 1
+        block_stop = min(b * cpu_pairwise_block_size, n_nbs)
+        res = autodiff(Reverse, cpu_pairwise_nl_block_scaled, Active, dup(as, datoms_c),
+                       dup(cs, dcoords_c), Const(vels), BA(bnd), Const(nbs), IA(inters),
+                       Const(step_n), Const(block_start), Const(block_stop), Const(Val(TH)),
+                       Const(Val(false)), Const(seed))[1]
+        dbnd = cpu_add_cotangent(dbnd, res[4])
+        dinters = cpu_add_cotangent(dinters, res[6])
+    end
+    return dinters, dbnd
+end
+
+function cpu_pairwise_nonl_chunk_adjoint!(dcoords_c, datoms_c, next_range, n_ranges, n_atoms,
+                                          cs, as, vels, bnd, ::Type{BA}, inters, ::Type{IA},
+                                          step_n, ::Val{TH}, seed) where {BA, IA, TH}
+    dinters = Enzyme.make_zero(inters)
+    dbnd = Enzyme.make_zero(bnd)
+    while true
+        r = Threads.atomic_add!(next_range, 1)
+        r > n_ranges && break
+        res = autodiff(Reverse, cpu_pairwise_nonl_range_scaled, Active, dup(as, datoms_c),
+                       dup(cs, dcoords_c), Const(vels), BA(bnd), IA(inters), Const(step_n),
+                       Const(r), Const(n_ranges), Const(n_atoms), Const(Val(TH)),
+                       Const(Val(false)), Const(seed))[1]
+        dbnd = cpu_add_cotangent(dbnd, res[4])
+        dinters = cpu_add_cotangent(dinters, res[5])
+    end
+    return dinters, dbnd
+end
+
+# Sum the shadow copies of the tasks into the real shadows
+function cpu_reduce_chunks!(dcoords, datoms, dcoords_chunks, datoms_chunks, n_chunks)
+    n = (isnothing(dcoords) ? length(datoms) : length(dcoords))
+    Threads.@threads for i in 1:n
+        if !isnothing(dcoords)
+            @inbounds begin
+                s = dcoords[i]
+                for c in 1:n_chunks
+                    s += dcoords_chunks[c][i]
+                end
+                dcoords[i] = s
+            end
+        end
+        if !isnothing(datoms)
+            @inbounds begin
+                a = datoms[i]
+                for c in 1:n_chunks
+                    a = Enzyme.Compiler.recursive_add(a, datoms_chunks[c][i])
+                end
+                datoms[i] = a
+            end
+        end
+    end
+    return nothing
+end
+
+@inline cpu_annotation_type(::Const) = Const
+@inline cpu_annotation_type(::Annotation) = Active
+
+const cpu_pairwise_coords_type = Vector{<:SVector{<:Any, <:Union{Float32, Float64}}}
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.pairwise_pe_loop)},
+                                      ::Type{<:Active}, atoms::Annotation{<:Vector},
+                                      coords::Annotation{<:cpu_pairwise_coords_type},
+                                      velocities::Annotation, boundary::Annotation,
+                                      neighbors::Const, energy_units::Const{typeof(NoUnits)},
+                                      n_atoms::Const, pis_nonl::Annotation{<:Tuple},
+                                      pis_nl::Annotation{<:Tuple}, step_n::Const,
+                                      th::Const{<:Val}, nt::Const{<:Val},
+                                      use_vel::Const{Val{false}}, grad_safe::Const{<:Val})
+    EnzymeRules.width(config) == 1 ||
+        error("the Molly pairwise_pe_loop reverse rule does not support batch mode")
+    pe = func.val(atoms.val, coords.val, velocities.val, boundary.val, neighbors.val,
+                  energy_units.val, n_atoms.val, pis_nonl.val, pis_nl.val, step_n.val, th.val,
+                  nt.val, use_vel.val, grad_safe.val)
+    primal = (EnzymeRules.needs_primal(config) ? pe : nothing)
+    return EnzymeRules.AugmentedReturn(primal, nothing, nothing)
+end
+
+function EnzymeRules.reverse(config::RevConfig, func::Const{typeof(Molly.pairwise_pe_loop)},
+                             dret::Active, tape::Nothing, atoms::Annotation{<:Vector},
+                             coords::Annotation{<:cpu_pairwise_coords_type},
+                             velocities::Annotation, boundary::Annotation, neighbors::Const,
+                             energy_units::Const{typeof(NoUnits)}, n_atoms::Const,
+                             pis_nonl::Annotation{<:Tuple}, pis_nl::Annotation{<:Tuple},
+                             step_n::Const, th::Const{Val{TH}}, nt::Const{<:Val},
+                             use_vel::Const{Val{false}}, grad_safe::Const{<:Val}) where TH
+    seed = dret.val
+    cs, as, vels, bnd = coords.val, atoms.val, velocities.val, boundary.val
+    dcoords, datoms = whole_shadow(coords), whole_shadow(atoms)
+    BA = cpu_annotation_type(boundary)
+    n_chunks = Threads.nthreads()
+    chunked = (n_chunks > 1) && !(isnothing(dcoords) && isnothing(datoms))
+    if chunked
+        dcoords_chunks, datoms_chunks = cpu_pairwise_chunks(cs, as, n_chunks)
+    end
+    dinters_nl = Enzyme.make_zero(pis_nl.val)
+    dinters_nonl = Enzyme.make_zero(pis_nonl.val)
+    dbnd = Enzyme.make_zero(bnd)
+
+    if length(pis_nl.val) > 0 && !isnothing(neighbors.val) && length(neighbors.val) > 0
+        n_nbs = length(neighbors.val)
+        n_blocks = cld(n_nbs, cpu_pairwise_block_size)
+        next_block = Threads.Atomic{Int}(1)
+        IA = cpu_annotation_type(pis_nl)
+        if chunked
+            dinters_chunks = Vector{typeof(dinters_nl)}(undef, n_chunks)
+            dbnd_chunks = Vector{typeof(dbnd)}(undef, n_chunks)
+            Threads.@threads :dynamic for chunk_i in 1:n_chunks
+                dcoords_c = cpu_chunk_shadow(dcoords_chunks, chunk_i, dcoords)
+                datoms_c = cpu_chunk_shadow(datoms_chunks, chunk_i, datoms)
+                cpu_zero_chunk!(dcoords_c)
+                cpu_zero_chunk!(datoms_c)
+                dinters_chunks[chunk_i], dbnd_chunks[chunk_i] = cpu_pairwise_chunk_adjoint!(
+                        dcoords_c, datoms_c, next_block, n_blocks, n_nbs, cs, as, vels, bnd,
+                        BA, neighbors.val, pis_nl.val, IA, step_n.val, Val(TH), seed)
+            end
+            cpu_reduce_chunks!(dcoords, datoms, dcoords_chunks, datoms_chunks, n_chunks)
+            for chunk_i in 1:n_chunks
+                dinters_nl = cpu_add_cotangent(dinters_nl, dinters_chunks[chunk_i])
+                dbnd = cpu_add_cotangent(dbnd, dbnd_chunks[chunk_i])
+            end
+        else
+            dinters_nl, dbnd_nl = cpu_pairwise_chunk_adjoint!(dcoords, datoms, next_block,
+                        n_blocks, n_nbs, cs, as, vels, bnd, BA, neighbors.val, pis_nl.val, IA,
+                        step_n.val, Val(TH), seed)
+            dbnd = cpu_add_cotangent(dbnd, dbnd_nl)
+        end
+    end
+
+    if length(pis_nonl.val) > 0
+        n_ranges = 4 * n_chunks
+        next_range = Threads.Atomic{Int}(1)
+        IA = cpu_annotation_type(pis_nonl)
+        if chunked
+            dinters_chunks = Vector{typeof(dinters_nonl)}(undef, n_chunks)
+            dbnd_chunks = Vector{typeof(dbnd)}(undef, n_chunks)
+            Threads.@threads :dynamic for chunk_i in 1:n_chunks
+                dcoords_c = cpu_chunk_shadow(dcoords_chunks, chunk_i, dcoords)
+                datoms_c = cpu_chunk_shadow(datoms_chunks, chunk_i, datoms)
+                cpu_zero_chunk!(dcoords_c)
+                cpu_zero_chunk!(datoms_c)
+                dinters_chunks[chunk_i], dbnd_chunks[chunk_i] = cpu_pairwise_nonl_chunk_adjoint!(
+                        dcoords_c, datoms_c, next_range, n_ranges, n_atoms.val, cs, as, vels,
+                        bnd, BA, pis_nonl.val, IA, step_n.val, Val(TH), seed)
+            end
+            cpu_reduce_chunks!(dcoords, datoms, dcoords_chunks, datoms_chunks, n_chunks)
+            for chunk_i in 1:n_chunks
+                dinters_nonl = cpu_add_cotangent(dinters_nonl, dinters_chunks[chunk_i])
+                dbnd = cpu_add_cotangent(dbnd, dbnd_chunks[chunk_i])
+            end
+        else
+            dinters_nonl, dbnd_nonl = cpu_pairwise_nonl_chunk_adjoint!(dcoords, datoms,
+                        next_range, n_ranges, n_atoms.val, cs, as, vels, bnd, BA, pis_nonl.val,
+                        IA, step_n.val, Val(TH), seed)
+            dbnd = cpu_add_cotangent(dbnd, dbnd_nonl)
+        end
+    end
+
+    return (nothing, nothing, nothing, value_cotangent!(boundary, dbnd), nothing, nothing,
+            nothing, value_cotangent!(pis_nonl, dinters_nonl),
+            value_cotangent!(pis_nl, dinters_nl), nothing, nothing, nothing, nothing, nothing)
+end
+
 # Reverse-mode rules for the GPU force and energy kernel launchers
 #
 # The adjoint kernels do not differentiate the primal kernel. They call
