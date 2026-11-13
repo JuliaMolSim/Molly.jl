@@ -1263,10 +1263,11 @@ end
         λ = constraint_virial_lambda(atoms, a1, a2)
         B_i = B[i]
         coeff = λ * virial_scale * (-lengths[i] * factor_sum[i])
+        slot = virial_slot(i, size(constraint_virial_nounits, 3))
 
         for alpha in 1:3
             for beta in 1:3
-                Atomix.@atomic constraint_virial_nounits[alpha, beta] +=
+                Atomix.@atomic constraint_virial_nounits[alpha, beta, slot] +=
                     coeff * B_i[alpha] * B_i[beta]
             end
         end
@@ -1575,9 +1576,11 @@ function accumulate_lincs_position_virial_gpu!(data, ws, context, backend, block
     end
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
-    launch_kernel!(virial_kern!, context.buffers.constraint_virial_nounits, ws.B, data.lengths,
+    launch_kernel!(virial_kern!, context.buffers.constraint_virial_slots, ws.B, data.lengths,
                  data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
+    fold_virial_slots!(context.buffers.constraint_virial_nounits,
+                       context.buffers.constraint_virial_slots)
     return context
 end
 
@@ -1591,9 +1594,11 @@ function accumulate_lincs_velocity_virial_gpu!(data, ws, context, backend, block
     end
     virial_kern! = lincs_accumulate_virial_kernel!(backend, block_size)
     virial_scale = eltype(data.lengths)(ustrip(context.virial_scale))
-    launch_kernel!(virial_kern!, context.buffers.constraint_virial_nounits, ws.B, data.lengths,
+    launch_kernel!(virial_kern!, context.buffers.constraint_virial_slots, ws.B, data.lengths,
                  data.sdiag, ws.factor_sum, data.atom1, data.atom2, context.atoms, virial_scale;
                  ndrange=length(data.atom1))
+    fold_virial_slots!(context.buffers.constraint_virial_nounits,
+                       context.buffers.constraint_virial_slots)
     return context
 end
 

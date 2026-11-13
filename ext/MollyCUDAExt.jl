@@ -545,7 +545,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
     if force_maxregs_override === nothing
         return @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) force_kernel!(
             buffers.fs_mat_reordered,
-            buffers.virial_nounits,
+            buffers.virial_slots,
             buffers.coords_reordered,
             buffers.velocities_reordered,
             buffers.atoms_reordered,
@@ -573,7 +573,7 @@ function autotune_force_kernel(buffers, sys::System{D, <:CuArray, T, TH}, pairwi
     fm = pairwise_fastmath(T)
     return @cuda launch=false maxregs=force_maxregs_override always_inline=true fastmath=fm force_kernel!(
         buffers.fs_mat_reordered,
-        buffers.virial_nounits,
+        buffers.virial_slots,
         buffers.coords_reordered,
         buffers.velocities_reordered,
         buffers.atoms_reordered,
@@ -702,11 +702,11 @@ function autotune_force_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pair
         ms = autotune_benchmark_ms!(
             () -> begin
                 fill!(buffers.fs_mat_reordered, zero(T))
-                fill!(buffers.virial_nounits, zero(T))
+                fill!(buffers.virial_slots, zero(TH))
             end,
             () -> kernel(
                 buffers.fs_mat_reordered,
-                buffers.virial_nounits,
+                buffers.virial_slots,
                 buffers.coords_reordered,
                 buffers.velocities_reordered,
                 buffers.atoms_reordered,
@@ -776,6 +776,7 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pai
         buffers.interacting_tiles_diag,
         buffers.num_interacting_tiles,
         buffers.interacting_tiles_overflow,
+        nothing,
     )
     candidates = autotune_block_y_candidates(kernel, 4, AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES)
     num_pairs = buffers.num_pairs
@@ -810,7 +811,8 @@ function autotune_energy_block_y!(buffers, sys::System{D, <:CuArray, T, TH}, pai
                 buffers.interacting_tiles_type,
                 buffers.interacting_tiles_diag,
                 buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow;
+                buffers.interacting_tiles_overflow,
+                nothing;
                 blocks=n_blocks_launch,
                 threads=(32, block_y),
                 shmem=shmem,
@@ -1397,10 +1399,8 @@ end
 
 # The part of the gap between the cutoff of the interactions and that of the tile list
 #   that is between the cutoff of the interactions and the inner cutoff. Smaller fractions
-#   prune more pairs but the masks are found again more often, and a third was fastest
-#   for a solvated protein with steps of 2 fs and within 1% of the fastest with steps
-#   of 0.5 fs.
-const inner_cutoff_fraction = 1/3
+#   prune more pairs but the masks are found again more often.
+const inner_cutoff_fraction = 0.2
 
 # The inner cutoff of the dynamic pruning without units, or `nothing` if it is not used
 function inner_tile_cutoff(sys, pairwise_inters, ::Type{T}) where T
@@ -1656,17 +1656,17 @@ end
 #=
 Wait for the check pending on `ref` and record its result, returning whether the atoms
 have moved too far for the tile list.
-`uses_inner` is whether the check was of the inner masks too, in which case the kernel
-launched after it found them again if the check says so and the tile list is valid. The
+`refreshed_inner` is whether the check was of the inner masks too and the kernel launched
+after it found them again if the check says so and the tile list is valid. The
 coordinates it found them from are then recorded.
 =#
 function resolve_tile_check!(ref::TileReference, check::CUDADisplacementScratch, buffers,
-                             sys, uses_inner::Bool)
+                             sys, refreshed_inner::Bool)
     ref.pending_check = nothing
     max_sq_1, max_sq_2, moved = wait_displacement_check(check)
     record_tile_check!(ref, max_sq_1, max_sq_2)
     inner = ref.inner
-    if uses_inner && !isnothing(inner) && !moved && !iszero(@inbounds check.result_host[6])
+    if refreshed_inner && !isnothing(inner) && !moved && !iszero(@inbounds check.result_host[6])
         copyto!(inner.coords, buffers.coords_reordered)
         inner.boundary = sys.boundary
         inner.valid = true
@@ -1688,13 +1688,16 @@ With `defer`, the host does not wait for the check here but leaves it pending in
 reference, and `finish_tile_check!` must be called before the results of the kernel are
 used. A check left pending, for example by an error before it was finished, is finished
 at the next call.
-`uses_inner` is whether the kernel is the force kernel, which uses the inner masks of the
-dynamic pruning, see `InnerTileMasks`.
+`uses_inner` is whether the kernel uses the inner masks of the dynamic pruning, see
+`InnerTileMasks`, in which case the check is of the inner masks too, and `refreshes_inner`
+is whether it finds them again when they are stale, as the force kernel does and the
+energy kernel does not.
 =#
 # Inlined so that the closure is not allocated
 @inline function run_tiled_kernel!(launch_kernel!::K, buffers, sys, nf::GPUNeighborFinder,
                                    pairwise_inters, step_n, sync_reorder::Bool,
-                                   uses_inner::Bool, defer::Bool=false) where K
+                                   uses_inner::Bool, refreshes_inner::Bool,
+                                   defer::Bool=false) where K
     # Whether the atoms have moved too far for the tile list, the only reason to rebuild it
     #   that is not recorded by the generation counts
     moved = false
@@ -1724,7 +1727,7 @@ dynamic pruning, see `InnerTileMasks`.
                     ref.pending_check = check
                     return buffers
                 end
-                moved = resolve_tile_check!(ref, check, buffers, sys, uses_inner)
+                moved = resolve_tile_check!(ref, check, buffers, sys, refreshes_inner)
                 # Otherwise the kernel did nothing, so it is run again below once the tile
                 #   list is rebuilt, which also clears the overflow flag
                 moved || return buffers
@@ -1734,7 +1737,7 @@ dynamic pruning, see `InnerTileMasks`.
     refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n,
                        gpu_neighbor_refresh_flags(buffers, nf, moved), sync_reorder)
     launch_kernel!()
-    (uses_inner && nf.auto_update) && record_inner_refresh!(tile_reference(buffers, sys))
+    (refreshes_inner && nf.auto_update) && record_inner_refresh!(tile_reference(buffers, sys))
     return buffers
 end
 
@@ -2050,7 +2053,7 @@ function tiled_pairwise_forces!(buffers, sys, pairwise_inters, ::Val{needs_vir},
     launch_kernel! = () -> launch_force_kernel!(buffers, sys, pairwise_inters, r_cut2,
                                                 Val(needs_vir), step_n)
     run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, false, true,
-                      defer)
+                      true, defer)
     defer || reverse_reorder_forces_gpu!(buffers, sys)
     return buffers
 end
@@ -2074,7 +2077,7 @@ function launch_force_kernel!(buffers, sys::System{D, <:CuArray, T, TH}, pairwis
                               r_cut2, ::Val{needs_vir}, step_n,
                               inner) where {D, T, TH, needs_vir}
     N = length(sys.coords)
-    args = (buffers.fs_mat_reordered, buffers.virial_nounits, buffers.coords_reordered,
+    args = (buffers.fs_mat_reordered, buffers.virial_slots, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2),
             Val(sys.force_units), pairwise_inters, sys.boundary, step_n,
             tile_exceptions(buffers, sys.neighbor_finder), Val(needs_vir), Val(T), Val(TH),
@@ -2120,7 +2123,10 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:C
     nf = sys.neighbor_finder
     launch_kernel! = () -> launch_energy_kernel!(pe_vec_nounits, buffers, sys, pairwise_inters,
                                                  r_cut2, step_n)
-    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, true, false)
+    # The energy kernel uses the inner masks when they are current but does not find them
+    #   again when they are not
+    run_tiled_kernel!(launch_kernel!, buffers, sys, nf, pairwise_inters, step_n, true, true,
+                      false)
     return pe_vec_nounits
 end
 
@@ -2128,13 +2134,14 @@ end
 function launch_energy_kernel!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T, TH},
                                pairwise_inters, r_cut2, step_n) where {D, T, TH}
     N = length(sys.coords)
+    inner = inner_kernel_args(buffers, sys, r_cut2)
     kernel = @cuda launch=false always_inline=true fastmath=pairwise_fastmath(T) energy_kernel!(
             pe_vec_nounits, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
             Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
-            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow)
+            buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, inner)
     block_y = energy_launch_params(sys, kernel)
 
     uses_vel = Molly.any_uses_velocity(pairwise_inters)
@@ -2151,7 +2158,7 @@ function launch_energy_kernel!(pe_vec_nounits, buffers, sys::System{D, <:CuArray
                 sys.boundary, step_n, tile_exceptions(buffers, sys.neighbor_finder),
                 Val(T), Val(TH), Val(D), buffers.interacting_tiles_i, buffers.interacting_tiles_j,
                 buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
-                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow;
+                buffers.num_interacting_tiles, buffers.interacting_tiles_overflow, inner;
                 blocks=n_blocks_launch, threads=(32, block_y), shmem=shmem)
     end
     return pe_vec_nounits
@@ -3587,37 +3594,39 @@ function force_kernel!(
             offset_val ÷= 2
         end
 
-        # The virial is column-major, element (α, β) is at α + (β - 1) * D
+        # The virial is column-major, element (α, β) is at α + (β - 1) * D in the slot of
+        #   the tile, see `Molly.virial_slot`
         if lane == 1
+            vir_off = (Molly.virial_slot(idx, size(global_virial, 3)) - 1) * D * D
             if vir_xx != zero(T)
-                CUDA.atomic_add!(pointer(global_virial, 1), TH(vir_xx))
+                CUDA.atomic_add!(pointer(global_virial, vir_off + 1), TH(vir_xx))
             end
             if D >= 2
                 if vir_yy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, D + 2), TH(vir_yy))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + D + 2), TH(vir_yy))
                 end
                 if vir_xy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, D + 1), TH(vir_xy))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + D + 1), TH(vir_xy))
                 end
                 if vir_yx != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2), TH(vir_yx))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + 2), TH(vir_yx))
                 end
             end
             if D >= 3
                 if vir_zz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 3), TH(vir_zz))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + 2 * D + 3), TH(vir_zz))
                 end
                 if vir_xz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 1), TH(vir_xz))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + 2 * D + 1), TH(vir_xz))
                 end
                 if vir_zx != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 3), TH(vir_zx))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + 3), TH(vir_zx))
                 end
                 if vir_yz != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, 2 * D + 2), TH(vir_yz))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + 2 * D + 2), TH(vir_yz))
                 end
                 if vir_zy != zero(T)
-                    CUDA.atomic_add!(pointer(global_virial, D + 3), TH(vir_zy))
+                    CUDA.atomic_add!(pointer(global_virial, vir_off + D + 3), TH(vir_zy))
                 end
             end
         end
@@ -3644,7 +3653,8 @@ end
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
                    inters_tuple, boundary, step_n, tile_exceptions, T, D,
                    interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                   interacting_tiles_diag, num_interacting_tiles)
+                   interacting_tiles_diag, num_interacting_tiles, interacting_tiles_overflow,
+                   inner)
 
 Compute pairwise potential energies for the compact list of interacting 32x32
 tiles produced by `find_interacting_blocks_kernel!`.
@@ -3654,6 +3664,10 @@ four tile-shape cases, and the same CLEAN-vs-mask-backed fast path. The main
 difference is the reduction target: each warp accumulates energy into shared
 memory and performs a warp reduction before the final atomic add to
 `energy_nounits`.
+
+`inner` is `nothing` or the inner masks of the dynamic pruning, see `InnerTileMasks`,
+which are used for the full tiles when they are current. Unlike `force_kernel!` the
+masks are not found again when they are stale, the masks of the list are used instead.
 """
 function energy_kernel!(
     energy_nounits,
@@ -3672,7 +3686,7 @@ function energy_kernel!(
     ::Val{D},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
-    interacting_tiles_overflow) where {N, r_cut2, A, energy_units, T, TH, D}
+    interacting_tiles_overflow, inner) where {N, r_cut2, A, energy_units, T, TH, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -3711,6 +3725,17 @@ function energy_kernel!(
         return nothing
     end
     @inbounds diag_mask = tiles_diag_ro[idx]
+
+    # The inner masks of the dynamic pruning are used for the full tiles, the only ones
+    #   with masks, when they are current, see `InnerTileMasks`
+    if !isnothing(inner) && j < n_blocks && i < j
+        if (@inbounds inner.stale[1]) == Int32(0)
+            @inbounds diag_mask = inner.masks[idx]
+            if diag_mask == UInt32(0)
+                return nothing
+            end
+        end
+    end
 
     i_0_tile = (i - a) * warpsize()
     index_i = i_0_tile + lane
@@ -3927,7 +3952,8 @@ function energy_kernel!(
     end
 
     if lane == a && sum_E != zero(T)
-        CUDA.atomic_add!(pointer(energy_nounits), TH(sum_E))
+        CUDA.atomic_add!(pointer(energy_nounits, Molly.energy_slot(idx, length(energy_nounits))),
+                         TH(sum_E))
     end
 
     return nothing
