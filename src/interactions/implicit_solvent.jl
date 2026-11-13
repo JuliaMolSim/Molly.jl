@@ -1099,8 +1099,8 @@ end
 #=
 The functions below are shared between the CPU and the GPU implementations.
 The per-pair functions are used by both, and the loops that sum the contribution to
-atom `i` over a range of the other atoms are used by the GPU kernels and, where the
-CPU does not benefit from only looking at each pair once, by the CPU loops too.
+atom `i` over a range of the other atoms are used by the CPU loops where the CPU does not
+benefit from only looking at each pair once.
 =#
 
 # Parameters that are the same for every atom are stored as a scalar rather than an array
@@ -1209,10 +1209,20 @@ end
 
 @inline neck_integral(     ::Nothing, i, j, r, ori, orj) = zero(r)
 @inline neck_integral_grad(::Nothing, i, j, r, ori, orj) = zero(r)
+@inline neck_integral_classes(     ::Nothing, ci, cj, r, ori, orj) = zero(r)
+@inline neck_integral_grad_classes(::Nothing, ci, cj, r, ori, orj) = zero(r)
+
+# Whether the neck term of a pair is non-zero, so that the GPU kernels can skip it; the
+#   check is symmetric in the two atoms
+@inline neck_active(::Nothing, r, ori, orj) = false
+@inline neck_active(neck, r, ori, orj) = neck_in_range(neck, r, ori, orj)
+
+# The radius class of an atom, used to look up the neck parameters, zero without a neck term
+@inline neck_class(::Nothing, i) = Int32(0)
+@inline neck_class(neck, i) = @inbounds Int32(neck.classes[i])
 
 # The neck lookup only depends on the radius class of the two atoms
-@inline function neck_d0_m0(neck, i, j)
-    @inbounds ci, cj = neck.classes[i], neck.classes[j]
+@inline function neck_d0_m0(neck, ci, cj)
     @inbounds return ustrip(neck.lu, neck.d0s[ci, cj]), ustrip(inv(neck.lu), neck.m0s[ci, cj])
 end
 
@@ -1220,26 +1230,46 @@ end
     return r < (ori + orj + 2 * neck.offset + neck.cut)
 end
 
-@inline function neck_integral(neck, i, j, r, ori, orj)
-    d0, m0 = neck_d0_m0(neck, i, j)
+# The integrals take the radius classes of the atoms directly, so the GPU tile kernels can
+#   keep the classes in registers and shared memory rather than reading them for every pair,
+#   and the unchecked versions are for pairs already known to be in range of the neck term
+@inline function neck_integral_unchecked(neck, ci, cj, r)
+    d0, m0 = neck_d0_m0(neck, ci, cj)
     rd = neck.dist_scale * (r - d0)
     rd2 = rd * rd
     denom = 1 + rd2 + 3 * rd2 * rd2 * rd2 / 10
-    I = neck.scale * m0 / denom
+    return neck.scale * m0 / denom
+end
+
+@inline function neck_integral_classes(neck, ci, cj, r, ori, orj)
+    I = neck_integral_unchecked(neck, ci, cj, r)
     return ifelse(neck_in_range(neck, r, ori, orj), I, zero(I))
 end
 
 # Derivative of the neck integral with respect to the atomic distance
-@inline function neck_integral_grad(neck, i, j, r, ori, orj)
-    d0, m0 = neck_d0_m0(neck, i, j)
+@inline function neck_integral_grad_unchecked(neck, ci, cj, r)
+    d0, m0 = neck_d0_m0(neck, ci, cj)
     rd = neck.dist_scale * (r - d0)
     rd2 = rd * rd
     rd4 = rd2 * rd2
     denom = 1 + rd2 + 3 * rd4 * rd2 / 10
     numer = 2 * rd + 9 * rd4 * rd / 5
     denom_inv = gb_inv(denom)
-    I_grad = -neck.dist_scale * neck.scale * m0 * numer * denom_inv * denom_inv
+    return -neck.dist_scale * neck.scale * m0 * numer * denom_inv * denom_inv
+end
+
+@inline function neck_integral_grad_classes(neck, ci, cj, r, ori, orj)
+    I_grad = neck_integral_grad_unchecked(neck, ci, cj, r)
     return ifelse(neck_in_range(neck, r, ori, orj), I_grad, zero(I_grad))
+end
+
+@inline function neck_integral(neck, i, j, r, ori, orj)
+    return neck_integral_classes(neck, neck_class(neck, i), neck_class(neck, j), r, ori, orj)
+end
+
+@inline function neck_integral_grad(neck, i, j, r, ori, orj)
+    return neck_integral_grad_classes(neck, neck_class(neck, i), neck_class(neck, j), r, ori,
+                                      orj)
 end
 
 # Non-polar solvation force from the ACE approximation, the ratio is raised to the
@@ -1313,38 +1343,6 @@ end
     return dGpol_dr, dGpol_dalpha2_ij
 end
 
-# Born force and direct force on atom i from the atoms in jrange
-# The self term is included when jrange contains i
-@inline function gb_force_1_partial(coords, charges, Bs, sqdist_cutoff, factor_solute,
-                                    factor_solvent, kappa, dist_cutoff_inv, boundary, lu,
-                                    i, jrange)
-    @inbounds begin
-        coord_i, charge_i, Bi = ustrip.(lu, coords[i]), charges[i], ustrip(lu, Bs[i])
-        f_i = zero(coord_i)
-        born_force_i = zero(eltype(coord_i))
-        for j in jrange
-            if j == i
-                _, dGpol_dalpha2_ij = gb_pair_gpol(zero(born_force_i), charge_i^2, Bi, Bi,
-                                                   factor_solute, factor_solvent, kappa,
-                                                   zero(dist_cutoff_inv))
-                born_force_i += dGpol_dalpha2_ij * Bi
-            else
-                dr = vector(coord_i, ustrip.(lu, coords[j]), boundary)
-                r2 = sum(abs2, dr)
-                if r2 > sqdist_cutoff
-                    continue
-                end
-                Bj = ustrip(lu, Bs[j])
-                dGpol_dr, dGpol_dalpha2_ij = gb_pair_gpol(r2, charge_i * charges[j], Bi, Bj,
-                                    factor_solute, factor_solvent, kappa, dist_cutoff_inv)
-                born_force_i += dGpol_dalpha2_ij * Bj
-                f_i += dr * dGpol_dr
-            end
-        end
-        return born_force_i, f_i
-    end
-end
-
 # Chain rule term for the derivative of the Born radius of atom i with respect to
 #   the distance to atom j
 @inline function gb_force_2_de(r, rinv, r2inv, ori, srj, bi, I_grad)
@@ -1355,32 +1353,6 @@ end
     t3 = (1 + srj*srj*r2inv)*(L*L - U*U)/8 + gb_log(Lval*U)*r2inv/4
     t3 = ifelse(ori < rsrj, t3, zero(t3))
     return bi * (t3 - I_grad) * rinv
-end
-
-# Force on atom i from the change in the Born radii of atom i and of the atoms in jrange
-@inline function gb_force_2_partial(coords, or, sor, born_forces_scaled, neck,
-                                    sqdist_cutoff, boundary, i, jrange)
-    lu = unit(eltype(or))
-    @inbounds begin
-        coord_i, ori = ustrip.(lu, coords[i]), ustrip(lu, or[i])
-        sori, bfi = ustrip(lu, sor[i]), ustrip(born_forces_scaled[i])
-        f_i = zero(coord_i)
-        @simd for j in jrange
-            dr = vector(coord_i, ustrip.(lu, coords[j]), boundary)
-            r2 = sum(abs2, dr)
-            in_range = (j != i) & !iszero(r2) & (r2 <= sqdist_cutoff)
-            r = sqrt(ifelse(in_range, r2, one(r2)))
-            rinv = gb_inv(r)
-            r2inv = rinv * rinv
-            orj = ustrip(lu, or[j])
-            de = gb_force_2_de(r, rinv, r2inv, ori, ustrip(lu, sor[j]), bfi,
-                               neck_integral_grad(neck, i, j, r, ori, orj)) +
-                 gb_force_2_de(r, rinv, r2inv, orj, sori, ustrip(born_forces_scaled[j]),
-                               neck_integral_grad(neck, j, i, r, orj, ori))
-            f_i -= dr * ifelse(in_range, de, zero(de))
-        end
-        return f_i
-    end
 end
 
 # Energy of atom i with the atoms in jrange, the self term is included when jrange
@@ -1675,56 +1647,191 @@ end
 end
 
 #=
-GPU implementation, one thread deals with one atom and a strided slice of the other
-atoms, meaning that the only atomic operations are one per thread at the end.
+GPU implementation. The atoms are split into blocks of 32 and each warp of a workgroup
+works through a contiguous range of the tiles, the pairs of blocks `(bx, by)` with
+`bx <= by`, so that the `i` atom of each lane stays in registers along a row of tiles. The
+`j` atoms of a tile are loaded into shared memory, and each lane walks the tile reading the
+`j` atom rotated by its lane index so that no two lanes read or update the same entry at
+once. This follows the OpenMM kernels: every pair is only looked at once, with the term for
+atom `i` kept in a register and the term for atom `j` accumulated in shared memory. The
+results are added to the global arrays with one atomic operation per atom per tile, or per
+row of tiles for the `i` atom. Diagonal tiles look at every pair in both directions and only
+accumulate the `i` term, which keeps the code the same for every tile and costs little as
+there is one diagonal tile per row.
+
+The workgroup barrier after every rotation is uniform across the workgroup since every warp
+walks the same number of tiles, those past the end being skipped by the validity flags, and
+the kernels are launched with a number of workitems that is a multiple of the group size.
+Indices are kept as `Int32`, as a mix of `Int32` and `Int64` on different paths makes the
+kernel box the value and fail with an illegal address.
 =#
 
-# Number of slices of the other atoms, chosen to give enough threads to fill the GPU
-#   while leaving each thread with a reasonable number of pairs to work on
-function gbsa_n_chunks(n_atoms::Integer)
-    n_threads_min = gpu_threads_env("MOLLY_GPUMINTHREADS_IMPLICIT", 128000)
-    max_chunks = max(cld(n_atoms, 4), 1)
-    return clamp(cld(n_threads_min, max(n_atoms, 1)), 1, max_chunks)
-end
+const gb_tile_size = 32
+const gb_tile_group_size = 128
+const gb_warps_per_group = gb_tile_group_size ÷ gb_tile_size
+
+# Number of tiles each warp works through, a small number gives the most warps to balance
+#   across the device at the cost of more atomic operations and reloads for the i atoms
+gb_tiles_per_warp() = gpu_threads_env("MOLLY_GPUTILES_IMPLICIT", 2)
 
 gpu_threads_gbsa() = gpu_threads_env("MOLLY_GPUNTHREADS_IMPLICIT", 128)
 
-@inline function gbsa_atom_chunk(idx, n_atoms)
-    # Consecutive threads deal with consecutive atoms to keep the writes coalesced
-    return (idx - 1) % n_atoms + 1, (idx - 1) ÷ n_atoms + 1
+# The first tile of row bx, with the tiles of a row being (bx, bx) to (bx, n_blocks - 1)
+@inline function gb_tile_start(bx::T, n_blocks::T) where {T <: Integer}
+    return bx * n_blocks - (bx * (bx - one(T))) ÷ T(2)
+end
+
+# Block indices (bx, by) of tile t, both zero-based, or (n_blocks, n_blocks) past the end
+@inline function gb_tile_decode(t::Int32, n_blocks::Int32)
+    n_tiles = gb_tile_start(n_blocks, n_blocks)
+    if t >= n_tiles
+        return n_blocks, n_blocks
+    end
+    s = Float32(n_blocks) + 0.5f0
+    bx = unsafe_trunc(Int32, floor(s - sqrt(max(s * s - 2 * Float32(t), 0.0f0))))
+    bx = clamp(bx, Int32(0), n_blocks - Int32(1))
+    # Correct the rounding of the square root
+    while bx > 0 && gb_tile_start(bx, n_blocks) > t
+        bx -= Int32(1)
+    end
+    while bx < n_blocks - Int32(1) && gb_tile_start(bx + Int32(1), n_blocks) <= t
+        bx += Int32(1)
+    end
+    by = bx + (t - gb_tile_start(bx, n_blocks))
+    return bx, by
+end
+
+# Launch parameters for the tile kernels: the number of blocks of atoms, the number of
+#   tiles per warp and the number of workitems
+function gb_tile_launch(n_atoms::Integer)
+    n_blocks = cld(n_atoms, gb_tile_size)
+    n_tiles = n_blocks * (n_blocks + 1) ÷ 2
+    n_warps = cld(n_tiles, gb_tiles_per_warp())
+    n_groups = cld(n_warps, gb_warps_per_group)
+    n_per_warp = cld(n_tiles, n_groups * gb_warps_per_group)
+    return Int32(n_blocks), Int32(n_per_warp), n_groups * gb_tile_group_size
+end
+
+# The lane, the first shared memory entry of the warp and the global warp index of a
+#   workitem, all zero-based
+@inline function gb_tile_lane(li, gi)
+    lane = Int32((li - 1) & (gb_tile_size - 1))
+    warp_in_group = Int32((li - 1) ÷ gb_tile_size)
+    sbase = warp_in_group * Int32(gb_tile_size)
+    warp = Int32(gi - 1) * Int32(gb_warps_per_group) + warp_in_group
+    return lane, sbase, warp
 end
 
 function born_radii_and_grad!(inter::AbstractGBSA, coords::AbstractGPUArray, boundary,
                               n_threads::Integer)
     n_atoms = length(coords)
-    n_chunks = gbsa_n_chunks(n_atoms)
     backend = get_backend(coords)
     lu = gb_length_unit(inter)
     Is_nounits = inter.buffer_Is_nounits
+    n_blocks, n_per_warp, n_items = gb_tile_launch(n_atoms)
 
-    kernel_1! = gbsa_born_kernel!(backend, gpu_threads_gbsa())
-    kernel_1!(Is_nounits, coords, inter.offset_radii, inter.scaled_offset_radii,
-              gb_neck_data(inter), gb_sqdist_cutoff(inter), ustrip(lu, boundary), n_chunks;
-              ndrange=(n_atoms * n_chunks))
+    kernel_1! = gbsa_born_tile_kernel!(backend, gb_tile_group_size)
+    launch_kernel!(kernel_1!, Is_nounits, coords, inter.offset_radii, inter.scaled_offset_radii,
+                   gb_neck_data(inter), gb_sqdist_cutoff(inter), ustrip(lu, boundary),
+                   n_blocks, n_per_warp; ndrange=n_items)
 
     kernel_2! = gbsa_born_sum_kernel!(backend, gpu_threads_gbsa())
-    kernel_2!(inter.buffer_Bs, inter.buffer_B_grads, Is_nounits, inter.offset_radii,
-              ustrip(lu, inter.offset), gb_αs(inter), gb_βs(inter), gb_γs(inter),
-              oneunit(eltype(inter.buffer_Bs)), lu; ndrange=n_atoms)
+    launch_kernel!(kernel_2!, inter.buffer_Bs, inter.buffer_B_grads, Is_nounits,
+                   inter.offset_radii, ustrip(lu, inter.offset), gb_αs(inter), gb_βs(inter),
+                   gb_γs(inter), oneunit(eltype(inter.buffer_Bs)), lu; ndrange=n_atoms)
 
     return inter.buffer_Bs, inter.buffer_B_grads
 end
 
-@kernel inbounds=true function gbsa_born_kernel!(Is_nounits, @Const(coords), @Const(or),
-                            @Const(sor), neck, sqdist_cutoff, boundary, n_chunks)
-    idx = @index(Global, Linear)
-    n_atoms = length(coords)
+@kernel inbounds=true function gbsa_born_tile_kernel!(Is_nounits, @Const(coords), @Const(or),
+                            @Const(sor), neck, sqdist_cutoff, boundary, n_blocks::Int32,
+                            n_per_warp::Int32)
+    li = @index(Local, Linear)
+    gi = @index(Group, Linear)
+    sh_x   = @localmem eltype(Is_nounits) (gb_tile_group_size,)
+    sh_y   = @localmem eltype(Is_nounits) (gb_tile_group_size,)
+    sh_z   = @localmem eltype(Is_nounits) (gb_tile_group_size,)
+    sh_or  = @localmem eltype(Is_nounits) (gb_tile_group_size,)
+    sh_sor = @localmem eltype(Is_nounits) (gb_tile_group_size,)
+    sh_cls = @localmem Int32 (gb_tile_group_size,)
+    sh_acc = @localmem eltype(Is_nounits) (gb_tile_group_size,)
 
-    if idx <= n_atoms * n_chunks
-        i, chunk_i = gbsa_atom_chunk(idx, n_atoms)
-        I_sum = born_radii_partial(coords, or, sor, neck, sqdist_cutoff, boundary, i,
-                                   chunk_i:n_chunks:n_atoms)
-        Atomix.@atomic Is_nounits[i] += convert(eltype(Is_nounits), I_sum)
+    T = eltype(Is_nounits)
+    lu = unit(eltype(or))
+    lane, sbase, warp = gb_tile_lane(li, gi)
+    slot = sbase + lane + Int32(1)
+    n_atoms = Int32(length(coords))
+    bx, by = gb_tile_decode(warp * n_per_warp, n_blocks)
+
+    i = bx * Int32(gb_tile_size) + lane
+    i_valid = i < n_atoms
+    ii = ifelse(i_valid, i + Int32(1), Int32(1))
+    coord_i = ustrip.(lu, coords[ii])
+    ori, sori = ustrip(lu, or[ii]), ustrip(lu, sor[ii])
+    ci = neck_class(neck, ii)
+    acc_i = zero(T)
+
+    for _ in Int32(1):n_per_warp
+        tile_valid = bx < n_blocks
+        j = by * Int32(gb_tile_size) + lane
+        j_valid = tile_valid & (j < n_atoms)
+        jl = ifelse(j_valid, j + Int32(1), Int32(1))
+        coord_j = ustrip.(lu, coords[jl])
+        sh_x[slot] = coord_j[1]
+        sh_y[slot] = coord_j[2]
+        sh_z[slot] = coord_j[3]
+        sh_or[slot] = ustrip(lu, or[jl])
+        sh_sor[slot] = ustrip(lu, sor[jl])
+        sh_cls[slot] = neck_class(neck, jl)
+        sh_acc[slot] = zero(T)
+        diag = (bx == by)
+        j_base = by * Int32(gb_tile_size)
+        for tj in Int32(0):Int32(gb_tile_size - 1)
+            @synchronize
+            jj = (lane + tj) & Int32(gb_tile_size - 1)
+            js = sbase + jj + Int32(1)
+            dr = vector(coord_i, SVector(sh_x[js], sh_y[js], sh_z[js]), boundary)
+            r2 = sum(abs2, dr)
+            in_range = i_valid & tile_valid & ((j_base + jj) < n_atoms) &
+                       (!diag | (jj != lane)) & !iszero(r2) & (r2 <= sqdist_cutoff)
+            r = sqrt(ifelse(in_range, r2, one(r2)))
+            rinv = gb_inv(r)
+            orj, sorj, cj = sh_or[js], sh_sor[js], sh_cls[js]
+            I_ij = born_integral(r, rinv, ori, sorj)
+            I_ji = born_integral(r, rinv, orj, sori)
+            # The neck term is short-ranged and the atoms of a block are usually close in
+            #   space, so most warps skip it together
+            if neck_active(neck, r, ori, orj)
+                I_ij += neck_integral_unchecked(neck, ci, cj, r)
+                I_ji += neck_integral_unchecked(neck, cj, ci, r)
+            end
+            acc_i += ifelse(in_range, I_ij, zero(I_ij))
+            if !diag
+                sh_acc[js] += ifelse(in_range, I_ji, zero(I_ji))
+            end
+        end
+        @synchronize
+        if j_valid & !diag
+            Atomix.@atomic Is_nounits[j + 1] += sh_acc[slot]
+        end
+        by += Int32(1)
+        if by == n_blocks
+            if i_valid
+                Atomix.@atomic Is_nounits[i + 1] += acc_i
+            end
+            acc_i = zero(T)
+            bx += Int32(1)
+            by = bx
+            i = bx * Int32(gb_tile_size) + lane
+            i_valid = i < n_atoms
+            ii = ifelse(i_valid, i + Int32(1), Int32(1))
+            coord_i = ustrip.(lu, coords[ii])
+            ori, sori = ustrip(lu, or[ii]), ustrip(lu, sor[ii])
+            ci = neck_class(neck, ii)
+        end
+    end
+    if i_valid
+        Atomix.@atomic Is_nounits[i + 1] += acc_i
     end
 end
 
@@ -1746,7 +1853,6 @@ end
 function forces_gbsa!(fs, born_forces, sys::System{D, <:AbstractGPUArray, T}, inter, Bs,
                       B_grads, atom_charges, n_threads::Integer) where {D, T}
     n_atoms = length(sys)
-    n_chunks = gbsa_n_chunks(n_atoms)
     backend = get_backend(sys.coords)
     lu = gb_length_unit(inter)
     force_units = gbsa_force_units(inter, sys.force_units)
@@ -1754,43 +1860,139 @@ function forces_gbsa!(fs, born_forces, sys::System{D, <:AbstractGPUArray, T}, in
     # The accumulators are zeroed by gbsa_setup!
     fs_mat = inter.buffer_fs_mat
     born_forces_mod = inter.buffer_born_forces_mod
+    n_blocks, n_per_warp, n_items = gb_tile_launch(n_atoms)
 
-    kernel_1! = gbsa_force_1_kernel!(backend, gpu_threads_gbsa())
-    kernel_1!(fs_mat, born_forces_mod, sys.coords, atom_charges, Bs, bnd, sqdist_cutoff,
-              ustrip(inter.factor_solute), ustrip(inter.factor_solvent),
-              ustrip(inv(lu), inter.kappa), gb_dist_cutoff_inv(inter), lu, n_chunks, Val(D);
-              ndrange=(n_atoms * n_chunks))
+    kernel_1! = gbsa_force_1_tile_kernel!(backend, gb_tile_group_size)
+    launch_kernel!(kernel_1!, fs_mat, born_forces_mod, sys.coords, atom_charges, Bs, bnd,
+                   sqdist_cutoff, ustrip(inter.factor_solute), ustrip(inter.factor_solvent),
+                   ustrip(inv(lu), inter.kappa), gb_dist_cutoff_inv(inter), lu, n_blocks,
+                   n_per_warp; ndrange=n_items)
 
     kernel_s! = gbsa_born_scale_kernel!(backend, gpu_threads_gbsa())
-    kernel_s!(born_forces, inter.buffer_born_forces_scaled, born_forces_mod, Bs, B_grads,
-              unit(eltype(born_forces)); ndrange=n_atoms)
+    launch_kernel!(kernel_s!, born_forces, inter.buffer_born_forces_scaled, born_forces_mod,
+                   Bs, B_grads, unit(eltype(born_forces)); ndrange=n_atoms)
 
-    kernel_2! = gbsa_force_2_kernel!(backend, gpu_threads_gbsa())
-    kernel_2!(fs_mat, sys.coords, inter.offset_radii, inter.scaled_offset_radii,
-              inter.buffer_born_forces_scaled, gb_neck_data(inter), bnd, sqdist_cutoff,
-              n_chunks, Val(D); ndrange=(n_atoms * n_chunks))
+    kernel_2! = gbsa_force_2_tile_kernel!(backend, gb_tile_group_size)
+    launch_kernel!(kernel_2!, fs_mat, sys.coords, inter.offset_radii,
+                   inter.scaled_offset_radii, inter.buffer_born_forces_scaled,
+                   gb_neck_data(inter), bnd, sqdist_cutoff, n_blocks, n_per_warp;
+                   ndrange=n_items)
 
     kernel_a! = gbsa_add_forces_kernel!(backend, gpu_threads_gbsa())
-    kernel_a!(fs, fs_mat, Val(D), Val(T), Val(force_units); ndrange=n_atoms)
+    launch_kernel!(kernel_a!, fs, fs_mat, Val(D), Val(T), Val(force_units); ndrange=n_atoms)
     return fs
 end
 
-@kernel inbounds=true function gbsa_force_1_kernel!(fs_mat, born_forces_mod, @Const(coords),
-                            @Const(charges), @Const(Bs), boundary, sqdist_cutoff,
-                            factor_solute, factor_solvent, kappa, dist_cutoff_inv, lu,
-                            n_chunks, ::Val{D}) where D
-    idx = @index(Global, Linear)
-    n_atoms = length(coords)
+# Polarisation forces and Born forces, the pair term is symmetric so the force on j is the
+#   negative of the force on i
+@kernel inbounds=true function gbsa_force_1_tile_kernel!(fs_mat, born_forces_mod,
+                            @Const(coords), @Const(charges), @Const(Bs), boundary,
+                            sqdist_cutoff, factor_solute, factor_solvent, kappa,
+                            dist_cutoff_inv, lu, n_blocks::Int32, n_per_warp::Int32)
+    li = @index(Local, Linear)
+    gi = @index(Group, Linear)
+    sh_x  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_y  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_z  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_q  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_B  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_fx = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_fy = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_fz = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_bf = @localmem eltype(fs_mat) (gb_tile_group_size,)
 
-    if idx <= n_atoms * n_chunks
-        i, chunk_i = gbsa_atom_chunk(idx, n_atoms)
-        born_force_i, f_i = gb_force_1_partial(coords, charges, Bs, sqdist_cutoff,
-                                factor_solute, factor_solvent, kappa, dist_cutoff_inv,
-                                boundary, lu, i, chunk_i:n_chunks:n_atoms)
-        Atomix.@atomic born_forces_mod[i] += convert(eltype(born_forces_mod), born_force_i)
-        for dim in 1:D
-            Atomix.@atomic fs_mat[dim, i] += convert(eltype(fs_mat), f_i[dim])
+    T = eltype(fs_mat)
+    lane, sbase, warp = gb_tile_lane(li, gi)
+    slot = sbase + lane + Int32(1)
+    n_atoms = Int32(length(coords))
+    bx, by = gb_tile_decode(warp * n_per_warp, n_blocks)
+
+    i = bx * Int32(gb_tile_size) + lane
+    i_valid = i < n_atoms
+    ii = ifelse(i_valid, i + Int32(1), Int32(1))
+    coord_i = ustrip.(lu, coords[ii])
+    qi, Bi = T(charges[ii]), ustrip(lu, Bs[ii])
+    f_i = zero(coord_i)
+    bf_i = zero(T)
+
+    for _ in Int32(1):n_per_warp
+        tile_valid = bx < n_blocks
+        j = by * Int32(gb_tile_size) + lane
+        j_valid = tile_valid & (j < n_atoms)
+        jl = ifelse(j_valid, j + Int32(1), Int32(1))
+        coord_j = ustrip.(lu, coords[jl])
+        sh_x[slot] = coord_j[1]
+        sh_y[slot] = coord_j[2]
+        sh_z[slot] = coord_j[3]
+        sh_q[slot] = T(charges[jl])
+        sh_B[slot] = ustrip(lu, Bs[jl])
+        sh_fx[slot] = zero(T)
+        sh_fy[slot] = zero(T)
+        sh_fz[slot] = zero(T)
+        sh_bf[slot] = zero(T)
+        diag = (bx == by)
+        j_base = by * Int32(gb_tile_size)
+        # The self term, once per atom from its diagonal tile
+        if diag & i_valid
+            _, dGpol_dalpha2_ii = gb_pair_gpol(zero(T), qi * qi, Bi, Bi, factor_solute,
+                                               factor_solvent, kappa, zero(dist_cutoff_inv))
+            bf_i += dGpol_dalpha2_ii * Bi
         end
+        for tj in Int32(0):Int32(gb_tile_size - 1)
+            @synchronize
+            jj = (lane + tj) & Int32(gb_tile_size - 1)
+            js = sbase + jj + Int32(1)
+            dr = vector(coord_i, SVector(sh_x[js], sh_y[js], sh_z[js]), boundary)
+            r2 = sum(abs2, dr)
+            in_range = i_valid & tile_valid & ((j_base + jj) < n_atoms) &
+                       (!diag | (jj != lane)) & (r2 <= sqdist_cutoff)
+            qj, Bj = sh_q[js], sh_B[js]
+            dGpol_dr, dGpol_dalpha2_ij = gb_pair_gpol(ifelse(in_range, r2, one(r2)), qi * qj,
+                                                      Bi, Bj, factor_solute, factor_solvent,
+                                                      kappa, dist_cutoff_inv)
+            dGpol_dr = ifelse(in_range, dGpol_dr, zero(dGpol_dr))
+            dGpol_dalpha2_ij = ifelse(in_range, dGpol_dalpha2_ij, zero(dGpol_dalpha2_ij))
+            bf_i += dGpol_dalpha2_ij * Bj
+            fdr = dr * dGpol_dr
+            f_i += fdr
+            if !diag
+                sh_bf[js] += dGpol_dalpha2_ij * Bi
+                sh_fx[js] -= fdr[1]
+                sh_fy[js] -= fdr[2]
+                sh_fz[js] -= fdr[3]
+            end
+        end
+        @synchronize
+        if j_valid & !diag
+            Atomix.@atomic fs_mat[1, j + 1] += sh_fx[slot]
+            Atomix.@atomic fs_mat[2, j + 1] += sh_fy[slot]
+            Atomix.@atomic fs_mat[3, j + 1] += sh_fz[slot]
+            Atomix.@atomic born_forces_mod[j + 1] += sh_bf[slot]
+        end
+        by += Int32(1)
+        if by == n_blocks
+            if i_valid
+                Atomix.@atomic fs_mat[1, i + 1] += f_i[1]
+                Atomix.@atomic fs_mat[2, i + 1] += f_i[2]
+                Atomix.@atomic fs_mat[3, i + 1] += f_i[3]
+                Atomix.@atomic born_forces_mod[i + 1] += bf_i
+            end
+            f_i = zero(coord_i)
+            bf_i = zero(T)
+            bx += Int32(1)
+            by = bx
+            i = bx * Int32(gb_tile_size) + lane
+            i_valid = i < n_atoms
+            ii = ifelse(i_valid, i + Int32(1), Int32(1))
+            coord_i = ustrip.(lu, coords[ii])
+            qi, Bi = T(charges[ii]), ustrip(lu, Bs[ii])
+        end
+    end
+    if i_valid
+        Atomix.@atomic fs_mat[1, i + 1] += f_i[1]
+        Atomix.@atomic fs_mat[2, i + 1] += f_i[2]
+        Atomix.@atomic fs_mat[3, i + 1] += f_i[3]
+        Atomix.@atomic born_forces_mod[i + 1] += bf_i
     end
 end
 
@@ -1807,19 +2009,114 @@ end
     end
 end
 
-@kernel inbounds=true function gbsa_force_2_kernel!(fs_mat, @Const(coords), @Const(or),
+# Forces from the change in the Born radii, the two directions of a pair share the
+#   distance and sum to a term that acts on both atoms
+@kernel inbounds=true function gbsa_force_2_tile_kernel!(fs_mat, @Const(coords), @Const(or),
                             @Const(sor), @Const(born_forces_scaled), neck, boundary,
-                            sqdist_cutoff, n_chunks, ::Val{D}) where D
-    idx = @index(Global, Linear)
-    n_atoms = length(coords)
+                            sqdist_cutoff, n_blocks::Int32, n_per_warp::Int32)
+    li = @index(Local, Linear)
+    gi = @index(Group, Linear)
+    sh_x   = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_y   = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_z   = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_or  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_sor = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_bfs = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_cls = @localmem Int32 (gb_tile_group_size,)
+    sh_fx  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_fy  = @localmem eltype(fs_mat) (gb_tile_group_size,)
+    sh_fz  = @localmem eltype(fs_mat) (gb_tile_group_size,)
 
-    if idx <= n_atoms * n_chunks
-        i, chunk_i = gbsa_atom_chunk(idx, n_atoms)
-        f_i = gb_force_2_partial(coords, or, sor, born_forces_scaled, neck, sqdist_cutoff,
-                                 boundary, i, chunk_i:n_chunks:n_atoms)
-        for dim in 1:D
-            Atomix.@atomic fs_mat[dim, i] += convert(eltype(fs_mat), f_i[dim])
+    T = eltype(fs_mat)
+    lu = unit(eltype(or))
+    lane, sbase, warp = gb_tile_lane(li, gi)
+    slot = sbase + lane + Int32(1)
+    n_atoms = Int32(length(coords))
+    bx, by = gb_tile_decode(warp * n_per_warp, n_blocks)
+
+    i = bx * Int32(gb_tile_size) + lane
+    i_valid = i < n_atoms
+    ii = ifelse(i_valid, i + Int32(1), Int32(1))
+    coord_i = ustrip.(lu, coords[ii])
+    ori, sori = ustrip(lu, or[ii]), ustrip(lu, sor[ii])
+    bfi = T(ustrip(born_forces_scaled[ii]))
+    ci = neck_class(neck, ii)
+    f_i = zero(coord_i)
+
+    for _ in Int32(1):n_per_warp
+        tile_valid = bx < n_blocks
+        j = by * Int32(gb_tile_size) + lane
+        j_valid = tile_valid & (j < n_atoms)
+        jl = ifelse(j_valid, j + Int32(1), Int32(1))
+        coord_j = ustrip.(lu, coords[jl])
+        sh_x[slot] = coord_j[1]
+        sh_y[slot] = coord_j[2]
+        sh_z[slot] = coord_j[3]
+        sh_or[slot] = ustrip(lu, or[jl])
+        sh_sor[slot] = ustrip(lu, sor[jl])
+        sh_bfs[slot] = T(ustrip(born_forces_scaled[jl]))
+        sh_cls[slot] = neck_class(neck, jl)
+        sh_fx[slot] = zero(T)
+        sh_fy[slot] = zero(T)
+        sh_fz[slot] = zero(T)
+        diag = (bx == by)
+        j_base = by * Int32(gb_tile_size)
+        for tj in Int32(0):Int32(gb_tile_size - 1)
+            @synchronize
+            jj = (lane + tj) & Int32(gb_tile_size - 1)
+            js = sbase + jj + Int32(1)
+            dr = vector(coord_i, SVector(sh_x[js], sh_y[js], sh_z[js]), boundary)
+            r2 = sum(abs2, dr)
+            in_range = i_valid & tile_valid & ((j_base + jj) < n_atoms) &
+                       (!diag | (jj != lane)) & !iszero(r2) & (r2 <= sqdist_cutoff)
+            r = sqrt(ifelse(in_range, r2, one(r2)))
+            rinv = gb_inv(r)
+            r2inv = rinv * rinv
+            orj, sorj, bfj, cj = sh_or[js], sh_sor[js], sh_bfs[js], sh_cls[js]
+            neck_grad_ij, neck_grad_ji = zero(r), zero(r)
+            if neck_active(neck, r, ori, orj)
+                neck_grad_ij = neck_integral_grad_unchecked(neck, ci, cj, r)
+                neck_grad_ji = neck_integral_grad_unchecked(neck, cj, ci, r)
+            end
+            de = gb_force_2_de(r, rinv, r2inv, ori, sorj, bfi, neck_grad_ij) +
+                 gb_force_2_de(r, rinv, r2inv, orj, sori, bfj, neck_grad_ji)
+            fdr = dr * ifelse(in_range, de, zero(de))
+            f_i -= fdr
+            if !diag
+                sh_fx[js] += fdr[1]
+                sh_fy[js] += fdr[2]
+                sh_fz[js] += fdr[3]
+            end
         end
+        @synchronize
+        if j_valid & !diag
+            Atomix.@atomic fs_mat[1, j + 1] += sh_fx[slot]
+            Atomix.@atomic fs_mat[2, j + 1] += sh_fy[slot]
+            Atomix.@atomic fs_mat[3, j + 1] += sh_fz[slot]
+        end
+        by += Int32(1)
+        if by == n_blocks
+            if i_valid
+                Atomix.@atomic fs_mat[1, i + 1] += f_i[1]
+                Atomix.@atomic fs_mat[2, i + 1] += f_i[2]
+                Atomix.@atomic fs_mat[3, i + 1] += f_i[3]
+            end
+            f_i = zero(coord_i)
+            bx += Int32(1)
+            by = bx
+            i = bx * Int32(gb_tile_size) + lane
+            i_valid = i < n_atoms
+            ii = ifelse(i_valid, i + Int32(1), Int32(1))
+            coord_i = ustrip.(lu, coords[ii])
+            ori, sori = ustrip(lu, or[ii]), ustrip(lu, sor[ii])
+            bfi = T(ustrip(born_forces_scaled[ii]))
+            ci = neck_class(neck, ii)
+        end
+    end
+    if i_valid
+        Atomix.@atomic fs_mat[1, i + 1] += f_i[1]
+        Atomix.@atomic fs_mat[2, i + 1] += f_i[2]
+        Atomix.@atomic fs_mat[3, i + 1] += f_i[3]
     end
 end
 
@@ -1836,37 +2133,115 @@ end
 function gbsa_energy(sys::System{<:Any, <:AbstractGPUArray}, inter, Bs, atom_charges,
                      n_threads::Integer)
     n_atoms = length(sys)
-    n_chunks = gbsa_n_chunks(n_atoms)
     backend = get_backend(sys.coords)
     lu = gb_length_unit(inter)
     dist_cutoff_inv = gb_dist_cutoff_inv(inter)
     # The energy accumulator is zeroed by gbsa_setup!
     pes = inter.buffer_pes
+    n_blocks, n_per_warp, n_items = gb_tile_launch(n_atoms)
 
-    kernel! = gbsa_energy_kernel!(backend, gpu_threads_gbsa())
-    kernel!(pes, sys.coords, atom_charges, Bs, inter.offset_radii, ustrip(lu, sys.boundary),
-            gb_sqdist_cutoff(inter), ustrip(inter.factor_solute), ustrip(inter.factor_solvent),
-            ustrip(inv(lu), inter.kappa), ustrip(lu, inter.offset),
-            ustrip(lu, inter.probe_radius), ustrip(inter.sa_factor), inter.use_ACE, lu,
-            dist_cutoff_inv, n_chunks; ndrange=(n_atoms * n_chunks))
+    kernel! = gbsa_energy_tile_kernel!(backend, gb_tile_group_size)
+    launch_kernel!(kernel!, pes, sys.coords, atom_charges, Bs, inter.offset_radii,
+                   ustrip(lu, sys.boundary), gb_sqdist_cutoff(inter),
+                   ustrip(inter.factor_solute), ustrip(inter.factor_solvent),
+                   ustrip(inv(lu), inter.kappa), ustrip(lu, inter.offset),
+                   ustrip(lu, inter.probe_radius), ustrip(inter.sa_factor), inter.use_ACE, lu,
+                   dist_cutoff_inv, n_blocks, n_per_warp; ndrange=n_items)
 
     return sum(pes) * gbsa_energy_unit(inter)
 end
 
-@kernel inbounds=true function gbsa_energy_kernel!(pes, @Const(coords), @Const(charges),
+# Each pair contributes once, the diagonal tiles only taking the pairs with j > i, and the
+#   self terms are added once per atom from its diagonal tile
+@kernel inbounds=true function gbsa_energy_tile_kernel!(pes, @Const(coords), @Const(charges),
                             @Const(Bs), @Const(or), boundary, sqdist_cutoff, factor_solute,
                             factor_solvent, kappa, offset, probe_radius, sa_factor,
-                            use_ACE, lu, dist_cutoff_inv, n_chunks)
-    idx = @index(Global, Linear)
-    n_atoms = length(coords)
+                            use_ACE, lu, dist_cutoff_inv, n_blocks::Int32, n_per_warp::Int32)
+    li = @index(Local, Linear)
+    gi = @index(Group, Linear)
+    sh_x = @localmem eltype(pes) (gb_tile_group_size,)
+    sh_y = @localmem eltype(pes) (gb_tile_group_size,)
+    sh_z = @localmem eltype(pes) (gb_tile_group_size,)
+    sh_q = @localmem eltype(pes) (gb_tile_group_size,)
+    sh_B = @localmem eltype(pes) (gb_tile_group_size,)
 
-    if idx <= n_atoms * n_chunks
-        i, chunk_i = gbsa_atom_chunk(idx, n_atoms)
-        E = gb_energy_partial(coords, charges, Bs, or, sqdist_cutoff, factor_solute,
-                              factor_solvent, kappa, offset, probe_radius, sa_factor,
-                              use_ACE, boundary, lu, dist_cutoff_inv, i,
-                              (i + chunk_i - 1):n_chunks:n_atoms)
-        Atomix.@atomic pes[i] += convert(eltype(pes), E)
+    T = eltype(pes)
+    lane, sbase, warp = gb_tile_lane(li, gi)
+    slot = sbase + lane + Int32(1)
+    n_atoms = Int32(length(coords))
+    bx, by = gb_tile_decode(warp * n_per_warp, n_blocks)
+
+    i = bx * Int32(gb_tile_size) + lane
+    i_valid = i < n_atoms
+    ii = ifelse(i_valid, i + Int32(1), Int32(1))
+    coord_i = ustrip.(lu, coords[ii])
+    qi, Bi = T(charges[ii]), ustrip(lu, Bs[ii])
+    E = zero(T)
+
+    for _ in Int32(1):n_per_warp
+        tile_valid = bx < n_blocks
+        j = by * Int32(gb_tile_size) + lane
+        j_valid = tile_valid & (j < n_atoms)
+        jl = ifelse(j_valid, j + Int32(1), Int32(1))
+        coord_j = ustrip.(lu, coords[jl])
+        sh_x[slot] = coord_j[1]
+        sh_y[slot] = coord_j[2]
+        sh_z[slot] = coord_j[3]
+        sh_q[slot] = T(charges[jl])
+        sh_B[slot] = ustrip(lu, Bs[jl])
+        diag = (bx == by)
+        j_base = by * Int32(gb_tile_size)
+        if diag & i_valid
+            if iszero(kappa)
+                pre_factor = factor_solute + factor_solvent
+            else
+                pre_factor = factor_solute + gb_exp(-kappa * Bi) * factor_solvent
+            end
+            E += pre_factor * (qi * qi) / (2 * Bi)
+            if use_ACE && (Bi > zero(Bi))
+                radius_i = ustrip(lu, or[ii]) + offset
+                E += sa_factor * (radius_i + probe_radius)^2 * (radius_i / Bi)^6
+            end
+        end
+        @synchronize
+        for tj in Int32(0):Int32(gb_tile_size - 1)
+            jj = (lane + tj) & Int32(gb_tile_size - 1)
+            js = sbase + jj + Int32(1)
+            dr = vector(coord_i, SVector(sh_x[js], sh_y[js], sh_z[js]), boundary)
+            r2 = sum(abs2, dr)
+            in_range = i_valid & tile_valid & ((j_base + jj) < n_atoms) &
+                       (!diag | (jj > lane)) & (r2 <= sqdist_cutoff)
+            qj, Bj = sh_q[js], sh_B[js]
+            alpha2_ij = Bi * Bj
+            r2_safe = ifelse(in_range, r2, one(r2))
+            f = sqrt(r2_safe + alpha2_ij * gb_exp(-gb_div(r2_safe, 4 * alpha2_ij)))
+            f_cutoff = gb_inv(f) - dist_cutoff_inv
+            if iszero(kappa)
+                pre_factor = factor_solute + factor_solvent
+            else
+                pre_factor = factor_solute + gb_exp(-kappa * f) * factor_solvent
+            end
+            E_pair = pre_factor * qi * qj * f_cutoff
+            E += ifelse(in_range, E_pair, zero(E_pair))
+        end
+        @synchronize
+        by += Int32(1)
+        if by == n_blocks
+            if i_valid
+                Atomix.@atomic pes[i + 1] += E
+            end
+            E = zero(T)
+            bx += Int32(1)
+            by = bx
+            i = bx * Int32(gb_tile_size) + lane
+            i_valid = i < n_atoms
+            ii = ifelse(i_valid, i + Int32(1), Int32(1))
+            coord_i = ustrip.(lu, coords[ii])
+            qi, Bi = T(charges[ii]), ustrip(lu, Bs[ii])
+        end
+    end
+    if i_valid
+        Atomix.@atomic pes[i + 1] += E
     end
 end
 
