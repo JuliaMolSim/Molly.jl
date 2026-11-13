@@ -14,6 +14,14 @@ lazy = true
     sha256 = "2a705a81b80fd95b5751d7c82ad0fcd0c6d24296f2663f126db2ed1715b9c53f"
     url = "https://github.com/ERovers/Molly.jl/releases/download/openfe-tyk2-data-v1/openfe_tyk2_data.tar.gz"
 
+[mup1_data]
+git-tree-sha1 = "bf3469795cbb72158251706037e8505a8f3fa83d"
+lazy = true
+
+    [[mup1_data.download]]
+    sha256 = "e94fdfb6a055ca185043f0a2dc2672da63db2b55755f855206128c69804dfb5f"
+    url = "https://github.com/ERovers/Molly.jl/releases/download/ladybugs-tutorial-data-v1/mup1_data.tar.gz"
+
 [tyk2_data]
 git-tree-sha1 = "0512ded255e1756a19ad6b07a06c36417aed7993"
 lazy = true
