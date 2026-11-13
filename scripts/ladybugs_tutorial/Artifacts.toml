@@ -1,0 +1,7 @@
+[mup1_data]
+git-tree-sha1 = "bf3469795cbb72158251706037e8505a8f3fa83d"
+lazy = true
+
+    [[mup1_data.download]]
+    sha256 = "e94fdfb6a055ca185043f0a2dc2672da63db2b55755f855206128c69804dfb5f"
+    url = "https://github.com/ERovers/Molly.jl/releases/download/ladybugs-tutorial-data-v1/mup1_data.tar.gz"
