@@ -814,6 +814,14 @@ struct MolecularTopology
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
+    # Cache of the data used to move molecules as units on the GPU, see
+    #   `molecule_unwrap_plan`, filled when first needed
+    unwrap_cache::Base.RefValue{Any}
+end
+
+function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms,
+                             Ref{Any}(nothing))
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
