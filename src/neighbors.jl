@@ -2483,7 +2483,9 @@ small systems.
 atoms, options are `:warn` to emit a warning, `:nowarn` to suppress it or `:error` to
 error.
 """
-struct DistanceNeighborFinder{B, D, S}
+mutable struct DistanceNeighborFinder{B, D, S}
+    # Mutable so that the system holds it by reference: copied inline in a differentiated
+    #   function, its Bool field and padding were a value Enzyme could not type
     eligible::B
     dist_cutoff::D
     special::S
@@ -2868,7 +2870,8 @@ The pairs are stored on the CPU.
 Cannot be used if one or more dimensions has infinite boundaries.
 Cannot be used with [`TriclinicBoundary`](@ref).
 """
-struct TreeNeighborFinder{D, B, S}
+mutable struct TreeNeighborFinder{D, B, S}
+    # Mutable for the reason given in `DistanceNeighborFinder`
     eligible::B
     dist_cutoff::D
     special::S

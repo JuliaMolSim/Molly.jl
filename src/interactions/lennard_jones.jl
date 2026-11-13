@@ -173,7 +173,9 @@ atoms directly has no effect; [`inject_gradients`](@ref) recomputes the correcti
 injected values, including its gradients.
 Only compatible with 3D systems.
 """
-struct LJDispersionCorrection{F6, F12, EC, C, S, E, P}
+mutable struct LJDispersionCorrection{F6, F12, EC, C, S, E, P}
+    # Mutable so that a tuple of general interactions holds it by reference: stored inline
+    #   after a PME, Enzyme lost the gradients of the factors injection recomputes
     factor_6::F6
     factor_12::F12
     energy_const::EC
@@ -480,7 +482,8 @@ The number of atoms is assumed not to change after setup, and [`inject_gradients
 recomputes the correction from injected σ and ϵ values, including its gradients.
 Only compatible with 3D systems.
 """
-struct LJDispersionCorrectionλ{F6, F12, EC, C, L, S, E, SCH, P}
+mutable struct LJDispersionCorrectionλ{F6, F12, EC, C, L, S, E, SCH, P}
+    # Mutable for the reason given in `LJDispersionCorrection`
     factor_6::F6
     factor_12::F12
     energy_const::EC
