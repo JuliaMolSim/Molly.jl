@@ -382,6 +382,29 @@ function accumulate_constraint_virial!(buffers, contribution, context)
     return accumulate_constraint_virial!(buffers, contribution .* context.virial_scale)
 end
 
+#=
+Each thread adds to one of `n_virial_slots` copies of the tensor, chosen from its index
+with `virial_slot`, and the copies are summed into the tensor with `fold_virial_slots!`
+before it is read. The number of slots is a power of two so that the slot is a mask of
+the index.
+=#
+const n_virial_slots = 512
+
+@inline virial_slot(i::Integer, n_slots::Integer) = ((i - 1) & (n_slots - 1)) + 1
+
+# The potential energy kernels add into one of `n_energy_slots` entries of the energy buffer
+#   in the same way, as every pair adding into a single entry serialises on that address;
+#   the entries are summed when the energy is read
+const n_energy_slots = 512
+@inline energy_slot(i::Integer, n_slots::Integer) = virial_slot(i, n_slots)
+
+# The slots of a D x D virial tensor without units, as an array of size (D, D, n_slots)
+function virial_slots_array(vir_nounits::AbstractArray{T, 2}) where T
+    slots = similar(vir_nounits, size(vir_nounits, 1), size(vir_nounits, 2), n_virial_slots)
+    fill!(slots, zero(T))
+    return slots
+end
+
 pre_coupling_ref() = Ref{Any}(nothing)
 constraint_scratch_ref() = Ref{Any}(nothing)
 
@@ -490,11 +513,14 @@ energy calculations.
 
 # Fields
 - `fs_mat`: Force matrix of size `(D, N)`.
-- `pe_vec_nounits`: Vector of size 1 for potential energy summation.
+- `pe_vec_nounits`: Vector of `n_energy_slots` entries that the potential energy kernels add
+  into, see `energy_slot`, summed when the energy is read.
 - `virial`: 3x3 virial tensor (with units).
 - `virial_nounits`: 3x3 virial tensor on GPU (without units).
 - `constraint_virial`: 3x3 constraint virial tensor (with units).
 - `constraint_virial_nounits`: 3x3 constraint virial tensor on GPU (without units).
+- `virial_slots`, `constraint_virial_slots`: the copies of the virial tensors that the
+  kernels add to, of size `(3, 3, n_virial_slots)`, see `virial_slot`.
 - `kin_tensor`: 3x3 kinetic energy tensor (with units).
 - `pres_tensor`: 3x3 pressure tensor (with units).
 - `pre_coupling_virial`, `pre_coupling_kin_tensor`, `pre_coupling_volume`:
@@ -548,14 +574,16 @@ The Morton order, block, tile, exception and reordered buffers are only used by 
 CUDA tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
 finders.
 =#
-mutable struct BuffersGPU{F, P, V, VN, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR, VR, AR,
-                          fs_re}
+mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR, VR,
+                          AR, fs_re}
     fs_mat::F
     pe_vec_nounits::P
     virial::V
     virial_nounits::VN
     constraint_virial::V
     constraint_virial_nounits::VN
+    virial_slots::VS
+    constraint_virial_slots::VS
     kin_tensor::KT
     pres_tensor::PT
     pre_coupling_virial::Base.RefValue{Any}
@@ -610,8 +638,11 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
     constraint_virial = zero(virial)
     constraint_virial_nounits = similar(virial_nounits)
     fill!(constraint_virial_nounits, zero(eltype(virial_nounits)))
+    virial_slots = virial_slots_array(virial_nounits)
+    constraint_virial_slots = virial_slots_array(virial_nounits)
     return BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits,
-                      constraint_virial, constraint_virial_nounits, kin_tensor, pres_tensor,
+                      constraint_virial, constraint_virial_nounits, virial_slots,
+                      constraint_virial_slots, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
@@ -648,6 +679,18 @@ function merge_constraint_virial!(buffers::BuffersCPU, sys, step_n::Integer)
     buffers.constraint_virial .= buffers.constraint_virial_nounits .* sys.energy_units
     buffers.virial .+= buffers.constraint_virial
     mark_total_virial!(buffers.validity, step_n)
+    invalidate_pressure!(buffers.validity)
+    return buffers
+end
+
+# The slots of the constraint virial are folded into the tensor as they are accumulated,
+#   but are cleared with it in case a fold did not happen
+function clear_constraint_virial!(buffers::BuffersGPU, step_n::Integer)
+    fill!(buffers.constraint_virial, zero(eltype(buffers.constraint_virial)))
+    fill!(buffers.constraint_virial_nounits, zero(eltype(buffers.constraint_virial_nounits)))
+    fill!(buffers.constraint_virial_slots, zero(eltype(buffers.constraint_virial_slots)))
+    mark_constraint_virial!(buffers.validity, step_n)
+    invalidate_total_virial!(buffers.validity)
     invalidate_pressure!(buffers.validity)
     return buffers
 end
@@ -705,11 +748,13 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N_tiled)
-    pe_vec_noun  = KernelAbstractions.zeros(backend, TH, 1)
+    pe_vec_noun  = KernelAbstractions.zeros(backend, TH, n_energy_slots)
     virial       = zeros(TH, D, D) .* sys.energy_units
     virial_nu    = KernelAbstractions.zeros(backend, TH, D, D)
     constr_vir   = zero(virial)
     constr_vir_nu = KernelAbstractions.zeros(backend, TH, D, D)
+    vir_slots    = virial_slots_array(virial_nu)
+    constr_vir_slots = virial_slots_array(virial_nu)
     kin          = zero(virial)
     pres         = ustrip_vec.(zero(virial)) * pressure_units(sys)
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
@@ -751,7 +796,8 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     end
 
     return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, constr_vir, constr_vir_nu,
-                      kin, pres, pre_coupling_ref(), pre_coupling_ref(),
+                      vir_slots, constr_vir_slots, kin, pres, pre_coupling_ref(),
+                      pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
@@ -1454,6 +1500,7 @@ function gpu_forces!(fs,
                      ::Val{accumulate}=Val(false)) where {D, T, TH, needs_vir, accumulate}
     if needs_vir
         fill!(buffers.virial_nounits, zero(TH))
+        fill!(buffers.virial_slots, zero(TH))
     else
         invalidate_interaction_virial!(buffers.validity)
         invalidate_total_virial!(buffers.validity)
@@ -1474,7 +1521,7 @@ function gpu_forces!(fs,
                                        step_n)
         end
 
-        specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+        specific_forces_gpu!(buffers.fs_mat, buffers.virial_slots,
                              values(specific_inter_lists), sys.coords, sys.velocities,
                              sys.atoms, sys.boundary, Val(needs_vir), step_n, sys.force_units,
                              Val(T))
@@ -1490,6 +1537,7 @@ function gpu_forces!(fs,
                            Val(accumulate))
 
     if needs_vir
+        fold_virial_slots!(buffers.virial_nounits, buffers.virial_slots)
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
 end
@@ -1534,6 +1582,7 @@ function gpu_forces_concurrent!(fs,
                                 zero_fs::Bool) where {D, T, TH, needs_vir, accumulate}
     if needs_vir
         fill!(buffers.virial_nounits, zero(TH))
+        fill!(buffers.virial_slots, zero(TH))
     else
         invalidate_interaction_virial!(buffers.validity)
         invalidate_total_virial!(buffers.validity)
@@ -1547,7 +1596,7 @@ function gpu_forces_concurrent!(fs,
     # Giving the specific and general interactions a queue each was slower, as the pairwise
     #   force kernel then shares the device with more work at once
     side = side_work_start(get_backend(sys.coords))
-    shared = (sys.coords, sys.velocities, sys.atoms, buffers.fs_mat, buffers.virial_nounits,
+    shared = (sys.coords, sys.velocities, sys.atoms, buffers.fs_mat, buffers.virial_slots,
               fs)
     with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
         # The kernels using the neighbor list are launched first as they take the longest
@@ -1559,7 +1608,7 @@ function gpu_forces_concurrent!(fs,
         #   ones as they are independent kernels that finish early
         run_side_work!(side, shared) do
             zero_fs && zero_forces_gpu!(fs)
-            specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
+            specific_forces_gpu!(buffers.fs_mat, buffers.virial_slots,
                                  values(specific_inter_lists), sys.coords, sys.velocities,
                                  sys.atoms, sys.boundary, Val(needs_vir), step_n,
                                  sys.force_units, Val(T))
@@ -1581,6 +1630,7 @@ function gpu_forces_concurrent!(fs,
                            Val(accumulate))
 
     if needs_vir
+        fold_virial_slots!(buffers.virial_nounits, buffers.virial_slots)
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
     return fs
