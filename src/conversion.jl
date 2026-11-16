@@ -115,6 +115,14 @@ function replace_fields(x::X, new_fields::NamedTuple) where X
     return X.name.wrapper((get(new_fields, f, getfield(x, f)) for f in fieldnames(X))...)
 end
 
+# Rebuild a struct whose last field is not converted, such as a particle count kept in Float64
+# whatever the float type of the system: the default constructor requires that field's own type
+function convert_struct_keep_last(c::SystemConversion, x::X) where X
+    n = fieldcount(X)
+    fields = ntuple(i -> convert_component(c, getfield(x, i)), Val(n - 1))
+    return X.name.wrapper(fields..., getfield(x, n))
+end
+
 function convert_component(c::SystemConversion, at::Atom)
     return Atom(at.index, at.atom_type, convert_component(c, at.mass),
                 convert_component(c, at.charge), convert_component(c, at.σ),
