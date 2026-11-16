@@ -1296,11 +1296,273 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
     return centers
 end
 
-function molecule_centers(coords::AbstractGPUArray,
-                          boundary::AbstractBoundary{<:Any, T},
-                          topology) where T
+#=
+Moving molecules as units on the GPU
+
+The center of a molecule is the center of geometry of the molecule made whole, which
+`molecule_centers` finds on the CPU by walking the bonds. On the GPU the bonds are walked
+in parallel. A spanning forest of the bond graph of each molecule is found once on the
+CPU and kept with the topology, as the parent of each atom and the depth of the deepest
+tree. Each atom then finds the whole number of box lengths between its wrapped fractional
+coordinates and those of its parent, and pointer jumping sums these along the path to the
+root of its tree in a number of rounds that grows with the logarithm of the depth, so a
+protein of a thousand bonded atoms in a chain takes ten rounds. The unwrapped fractional
+coordinates of an atom are then its wrapped coordinates less the sum, which gives the same
+centers as the walk on the CPU since the sum along a path does not depend on the path
+unless the molecule is bonded to its own image, where neither is meaningful.
+=#
+struct MoleculeUnwrapPlan{AI, AV, AS, AC}
+    parents::AI # Parent of each atom in the spanning forest, 0 for a root
+    atom_molecule_inds::AI
+    molecule_atom_counts::AI
+    n_jumps::Int # Rounds of pointer jumping that reach the root of every tree
+    frac::AV # Wrapped fractional coordinates of each atom
+    shifts_1::AS # Box lengths from each atom to its current ancestor, double buffered
+    shifts_2::AS
+    ancestors_1::AI
+    ancestors_2::AI
+    center_sums::AC # Sum of the unwrapped fractional coordinates of the atoms of a molecule
+end
+
+# The spanning forest of the bond graph within each molecule, as the parent of each atom
+#   with 0 for the roots, and the number of rounds of pointer jumping needed to reach them
+function molecule_spanning_forest(topology::MolecularTopology, n_atoms::Integer)
+    atom_mol = topology.atom_molecule_inds
+    bonds = topology.bonded_atoms
+    # Adjacency in compressed sparse row form
+    degree = zeros(Int32, n_atoms)
+    for (i, j) in bonds
+        degree[i] += one(Int32)
+        degree[j] += one(Int32)
+    end
+    starts = Vector{Int32}(undef, n_atoms + 1)
+    starts[1] = one(Int32)
+    for i in 1:n_atoms
+        starts[i + 1] = starts[i] + degree[i]
+    end
+    adjacent = Vector{Int32}(undef, starts[end] - 1)
+    fill!(degree, zero(Int32))
+    for (i, j) in bonds
+        adjacent[starts[i] + degree[i]] = j
+        degree[i] += one(Int32)
+        adjacent[starts[j] + degree[j]] = i
+        degree[j] += one(Int32)
+    end
+
+    # Breadth-first search from the lowest atom of each connected component, which gives
+    #   the shallowest trees
+    parents = zeros(Int32, n_atoms)
+    depths = zeros(Int32, n_atoms)
+    visited = falses(n_atoms)
+    queue = Vector{Int32}(undef, n_atoms)
+    max_depth = zero(Int32)
+    for seed in 1:n_atoms
+        visited[seed] && continue
+        visited[seed] = true
+        queue_head, queue_tail = 1, 1
+        queue[1] = seed
+        while queue_head <= queue_tail
+            i = queue[queue_head]
+            queue_head += 1
+            for k in starts[i]:(starts[i + 1] - 1)
+                j = adjacent[k]
+                (visited[j] || atom_mol[j] != atom_mol[i]) && continue
+                visited[j] = true
+                parents[j] = i
+                depths[j] = depths[i] + one(Int32)
+                max_depth = max(max_depth, depths[j])
+                queue_tail += 1
+                queue[queue_tail] = j
+            end
+        end
+    end
+    # After k rounds the shift of each atom covers 2^k bonds towards the root
+    n_jumps = (max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)))
+    return parents, n_jumps
+end
+
+#=
+The plan for unwrapping the molecules of `coords` on the device, see `MoleculeUnwrapPlan`,
+from the cache of `topology` or built and cached.
+=#
+function molecule_unwrap_plan(topology::MolecularTopology,
+                              coords::AbstractGPUArray{SVector{D, C}}) where {D, C}
+    T = typeof(ustrip(zero(C)))
+    N = length(coords)
+    cache = topology.unwrap_cache[]
+    if cache isa MoleculeUnwrapPlan && eltype(cache.frac) == SVector{D, T} &&
+            length(cache.frac) == N && array_type(cache.frac) == array_type(coords)
+        return cache
+    end
+    if length(topology.atom_molecule_inds) != N
+        throw(ArgumentError("the topology is for $(length(topology.atom_molecule_inds)) " *
+                            "atoms but there are $N coordinates"))
+    end
     AT = array_type(coords)
-    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
+    TH = default_float_type_high(AT, T)
+    backend = get_backend(coords)
+    parents, n_jumps = molecule_spanning_forest(topology, N)
+    n_mol = length(topology.molecule_atom_counts)
+    plan = MoleculeUnwrapPlan(
+        to_device(parents, AT),
+        to_device(topology.atom_molecule_inds, AT),
+        to_device(topology.molecule_atom_counts, AT),
+        n_jumps,
+        similar(coords, SVector{D, T}),
+        similar(coords, SVector{D, Int32}),
+        similar(coords, SVector{D, Int32}),
+        similar(coords, Int32),
+        similar(coords, Int32),
+        KernelAbstractions.zeros(backend, TH, D, n_mol),
+    )
+    topology.unwrap_cache[] = plan
+    return plan
+end
+
+@inline wrap_frac01(v) = v .- floor.(v)
+
+# The box matrix without units, in the length unit of the coordinates
+function box_matrix_nounits(boundary::Union{CubicBoundary, RectangularBoundary}, coord_unit,
+                            ::Type{T}) where T
+    sl = boundary.side_lengths
+    D = length(sl)
+    vals = ntuple(Val(D * D)) do k
+        row, col = (k - 1) % D + 1, (k - 1) ÷ D + 1
+        (row == col ? T(ustrip(coord_unit, sl[row])) : zero(T))
+    end
+    return SMatrix{D, D, T}(vals)
+end
+
+function box_matrix_nounits(boundary::TriclinicBoundary, coord_unit, ::Type{T}) where T
+    return SMatrix{3, 3, T}(ustrip.(coord_unit, box_matrix(boundary)))
+end
+
+#=
+Find the wrapped fractional coordinates, the shifts to the roots and the sums of the
+unwrapped fractional coordinates of each molecule in `plan`, returning the array holding
+the shifts.
+=#
+function unwrap_molecules_gpu!(plan::MoleculeUnwrapPlan, coords, inv_box)
+    backend = get_backend(coords)
+    N = length(coords)
+    launch_kernel!(unwrap_init_kernel!(backend, 256), plan.frac, plan.shifts_1,
+                   plan.ancestors_1, coords, plan.parents, inv_box; ndrange=N)
+    shifts_in, shifts_out = plan.shifts_1, plan.shifts_2
+    ancestors_in, ancestors_out = plan.ancestors_1, plan.ancestors_2
+    for _ in 1:plan.n_jumps
+        launch_kernel!(unwrap_jump_kernel!(backend, 256), shifts_out, ancestors_out,
+                       shifts_in, ancestors_in; ndrange=N)
+        shifts_in, shifts_out = shifts_out, shifts_in
+        ancestors_in, ancestors_out = ancestors_out, ancestors_in
+    end
+    fill!(plan.center_sums, zero(eltype(plan.center_sums)))
+    launch_kernel!(molecule_center_sum_kernel!(backend, 256), plan.center_sums, plan.frac,
+                   shifts_in, plan.atom_molecule_inds; ndrange=N)
+    return shifts_in
+end
+
+@kernel inbounds=true function unwrap_init_kernel!(frac, shifts, ancestors, @Const(coords),
+                                                   @Const(parents), inv_box)
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        f = wrap_frac01(inv_box * ustrip_vec(coords[i]))
+        frac[i] = f
+        p = parents[i]
+        if iszero(p)
+            shifts[i] = zero(eltype(shifts))
+            ancestors[i] = zero(eltype(ancestors))
+        else
+            f_parent = wrap_frac01(inv_box * ustrip_vec(coords[p]))
+            shifts[i] = round.(Int32, f - f_parent)
+            ancestors[i] = p
+        end
+    end
+end
+
+@kernel inbounds=true function unwrap_jump_kernel!(shifts_out, ancestors_out,
+                                                   @Const(shifts_in), @Const(ancestors_in))
+    i = @index(Global, Linear)
+    if i <= length(ancestors_in)
+        a = ancestors_in[i]
+        if iszero(a)
+            shifts_out[i] = shifts_in[i]
+            ancestors_out[i] = a
+        else
+            shifts_out[i] = shifts_in[i] + shifts_in[a]
+            ancestors_out[i] = ancestors_in[a]
+        end
+    end
+end
+
+@kernel inbounds=true function molecule_center_sum_kernel!(center_sums, @Const(frac),
+                                                @Const(shifts), @Const(atom_molecule_inds))
+    i = @index(Global, Linear)
+    if i <= length(frac)
+        u = frac[i] - shifts[i]
+        m = atom_molecule_inds[i]
+        for d in eachindex(u)
+            Atomix.@atomic center_sums[d, m] += eltype(center_sums)(u[d])
+        end
+    end
+end
+
+# The mean of the unwrapped fractional coordinates of the atoms of molecule `m`
+@inline function molecule_mean_frac(center_sums, counts, m, ::Val{D}, ::Val{T}) where {D, T}
+    n = counts[m]
+    return SVector{D, T}(ntuple(d -> T(center_sums[d, m] / n), Val(D)))
+end
+
+@kernel inbounds=true function molecule_centers_kernel!(centers, @Const(center_sums),
+                                        @Const(counts), box, coord_unit, ::Val{D},
+                                        ::Val{T}) where {D, T}
+    m = @index(Global, Linear)
+    if m <= length(counts)
+        f = wrap_frac01(molecule_mean_frac(center_sums, counts, m, Val(D), Val(T)))
+        centers[m] = (box * f) * coord_unit
+    end
+end
+
+function molecule_centers(coords::AbstractGPUArray{SVector{D, C}}, boundary,
+                          topology) where {D, C}
+    if isnothing(topology)
+        return coords
+    end
+    T = typeof(ustrip(zero(C)))
+    coord_unit = unit(C)
+    plan = molecule_unwrap_plan(topology, coords)
+    box = box_matrix_nounits(boundary, coord_unit, T)
+    unwrap_molecules_gpu!(plan, coords, inv(box))
+    n_mol = length(plan.molecule_atom_counts)
+    centers = similar(coords, n_mol)
+    launch_kernel!(molecule_centers_kernel!(get_backend(coords), 256), centers,
+                   plan.center_sums, plan.molecule_atom_counts, box, coord_unit, Val(D),
+                   Val(T); ndrange=n_mol)
+    return centers
+end
+
+#=
+Place the atoms of the scaled system. The displacement of an atom from the center of its
+molecule is found from the unwrapped fractional coordinates, so the molecule is kept whole,
+and is rotated by `R` before being added to the scaled center.
+=#
+@kernel inbounds=true function scale_place_kernel!(coords, velocities, @Const(frac),
+                                        @Const(shifts), @Const(center_sums), @Const(counts),
+                                        @Const(atom_molecule_inds), box_old, μ, R, μinv,
+                                        boundary_new, coord_unit, ::Val{D}, ::Val{T},
+                                        ::Val{scale_vel}) where {D, T, scale_vel}
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        m = atom_molecule_inds[i]
+        mean_frac = molecule_mean_frac(center_sums, counts, m, Val(D), Val(T))
+        center_old = box_old * wrap_frac01(mean_frac)
+        u = frac[i] - shifts[i]
+        δ = box_old * (u - mean_frac)
+        r_new = R * δ + μ * center_old
+        coords[i] = wrap_coords(r_new * coord_unit, boundary_new)
+        if scale_vel
+            velocities[i] = μinv * velocities[i]
+        end
+    end
 end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
@@ -1318,6 +1580,19 @@ function check_boundary_change(sys, strictness)
         check_cutoff_box_size(sqrt(max_sqdist), sys.boundary, strictness; maxlog=1)
     end
     return nothing
+end
+
+# The rotation of the right polar decomposition of `μ`, made right-handed
+function rotation_part(μ::SMatrix{D, D}) where D
+    sv = svd(Matrix(μ))
+    R = SMatrix{D, D}(sv.U * sv.Vt)
+    if det(R) < 0
+        idx = argmin(sv.S)
+        Ufix = Matrix(sv.U)
+        Ufix[:, idx] .*= -1
+        R = SMatrix{D, D}(Ufix * sv.Vt)
+    end
+    return R
 end
 
 @doc raw"""
@@ -1402,13 +1677,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
 
         # rotation from right polar decomposition
         if rotate
-            sv = svd(Matrix(μ))
-            R  = SMatrix{D,D}(sv.U * sv.Vt)
-            if det(R) < 0 # Ensure right-handed rotation
-                idx  = argmin(sv.S)
-                Ufix = Matrix(sv.U); Ufix[:,idx] .*= -1
-                R    = SMatrix{D,D}(Ufix * sv.Vt)
-            end
+            R = rotation_part(μ)
         else
             R = SMatrix{D,D}(I)
         end
@@ -1449,6 +1718,42 @@ function scale_coords!(sys::System{<:Any, AT, T},
         check_boundary_change(sys, strictness)
         return sys
     end
+end
+
+function scale_coords!(sys::System{<:Any, AT, T},
+                       μ_in::SMatrix{D, D};
+                       rotate::Bool=true,
+                       ignore_molecules::Bool=false,
+                       scale_velocities::Bool=false,
+                       strictness=default_strictness()) where {AT <: AbstractGPUArray, T, D}
+    if has_infinite_boundary(sys.boundary)
+        throw(ArgumentError("infinite boundary not supported for scale_coords!"))
+    end
+    μ = SMatrix{D, D, T}(μ_in)
+    μinv = inv(μ)
+    coord_unit = unit(eltype(eltype(sys.coords)))
+    B = box_matrix_nounits(sys.boundary, coord_unit, T)
+    B′ = μ * B
+    boundary_new = rebuild_boundary(sys.boundary, B′ .* coord_unit)
+
+    if ignore_molecules || isnothing(sys.topology)
+        sys.coords .= (μ,) .* sys.coords
+        if scale_velocities
+            sys.velocities .= (μinv,) .* sys.velocities
+        end
+    else
+        plan = molecule_unwrap_plan(sys.topology, sys.coords)
+        shifts = unwrap_molecules_gpu!(plan, sys.coords, inv(B))
+        R = (rotate ? SMatrix{D, D, T}(rotation_part(μ)) : SMatrix{D, D, T}(I))
+        launch_kernel!(scale_place_kernel!(get_backend(sys.coords), 256), sys.coords,
+                       sys.velocities, plan.frac, shifts, plan.center_sums,
+                       plan.molecule_atom_counts, plan.atom_molecule_inds, B, μ, R, μinv,
+                       boundary_new, coord_unit, Val(D), Val(T), Val(scale_velocities);
+                       ndrange=length(sys.coords))
+    end
+    sys.boundary = boundary_new
+    check_boundary_change(sys, strictness)
+    return sys
 end
 
 @doc raw"""

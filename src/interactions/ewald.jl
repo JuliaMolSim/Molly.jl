@@ -554,7 +554,9 @@ function PME(dist_cutoff, atoms, boundary; error_tol=default_ewald_error_tol, or
         # The charge is added to the real grid atomically, so no per-thread grid is needed
         charge_grid_buffer = nothing
         recip_conv_buffer  = to_device(zeros(TE, size(recip_grid)), AT)
-        virial_buffer      = to_device(zeros(T, 3, 3), AT)
+        # The kernel adds to a slot of the virial chosen from the grid point, see
+        #   `virial_slot`, and the slots are summed on the host
+        virial_buffer      = to_device(zeros(T, 3, 3, n_virial_slots), AT)
     elseif n_threads > 1
         charge_grid_buffer = [zeros(T, size(charge_grid)) for _ in 1:n_spread_threads(n_threads)]
         recip_conv_buffer = zeros(TE, n_threads)
@@ -1129,7 +1131,7 @@ end
 @inline function recip_conv_inner!(vir_nou, recip_grid::AbstractArray{Complex{T}, 3}, bsm_x,
                            bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
                            boxfactor, kx, ky, kz, ::Val{needs_vir},
-                           ::Val{atomic}) where {T, needs_vir, atomic}
+                           ::Val{atomic}, slot=1) where {T, needs_vir, atomic}
     if iszero(kx) && iszero(ky) && iszero(kz)
         return zero(T) * energy_units
     end
@@ -1159,7 +1161,7 @@ end
             if atomic
                 for d1 in 1:3
                     for d2 in 1:3
-                        Atomix.@atomic vir_nou[d1, d2] += Ek_nou * G[d1, d2]
+                        Atomix.@atomic vir_nou[d1, d2, slot] += Ek_nou * G[d1, d2]
                     end
                 end
             else
@@ -1226,7 +1228,8 @@ function recip_conv!(vir, buffer_virial, recip_grid::AbstractArray{Complex{T}, 3
                     Val(needs_pe))
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
-        vir .+= from_device(buffer_virial) .* energy_units / 2
+        vir_slots = from_device(buffer_virial)
+        vir .+= dropdims(sum(vir_slots; dims=3); dims=3) .* energy_units / 2
     end
     # The energy is discarded when only forces are wanted, in which case the reduction
     # over the whole mesh, and the device synchronisation it forces, can be skipped
@@ -1261,7 +1264,8 @@ end
         ky, kx = r % mesh_dims[2], r ÷ mesh_dims[2]
         esum = recip_conv_inner!(vir, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
                                  energy_units, f_div_ϵr, factor, boxfactor,
-                                 kx, ky, kz, Val(needs_vir), Val(true))
+                                 kx, ky, kz, Val(needs_vir), Val(true),
+                                 virial_slot(li, size(vir, 3)))
         if needs_pe
             @inbounds esum_arr[li] = ustrip(energy_units, esum)
         end
@@ -1436,8 +1440,9 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
                     inter.bsplines_moduli_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
                     energy_units, n_thr, Val(needs_vir), Val(needs_pe))
-    grad_safe_bfft!(inter.charge_grid, inter.recip_grid, inter.bfft_plan)
+    # The backward transform is only needed for the forces
     if calculate_forces
+        grad_safe_bfft!(inter.charge_grid, inter.recip_grid, inter.bfft_plan)
         interpolate_force!(Fs, inter.charge_grid, grid_indices, bsplines_θ,
                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                            inter.scheduler, n_thr)
@@ -1791,7 +1796,7 @@ function PME_λ(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     charge_grid_buffer    = nothing
     # The reciprocal space energy is summed in Float64 where the device supports it
     recip_conv_buffer     = to_device(zeros(default_float_type_high(AT, T), size(recip_grid)), AT)
-    virial_buffer         = to_device(zeros(T, 2, 3, 3), AT)
+    virial_buffer         = to_device(zeros(T, 2, 3, 3, n_virial_slots), AT)
     partial_charge_buffer = to_device(zeros(T, 2, n_atoms), AT)
 
     # The end state charges depend on the scheduler and on each atom's role, so they are
@@ -2150,7 +2155,7 @@ end
 @inline function recip_conv_inner_batch!(vir_nou, recip_grid::AbstractArray{Complex{T}, 4}, bsm_x,
                            bsm_y, bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor,
                            boxfactor, b, kx, ky, kz, ::Val{needs_vir},
-                           ::Val{atomic}) where {T, needs_vir, atomic}
+                           ::Val{atomic}, slot=1) where {T, needs_vir, atomic}
     if iszero(kx) && iszero(ky) && iszero(kz)
         return zero(T) * energy_units
     end
@@ -2197,7 +2202,7 @@ end
             if atomic
                 for d1 in 1:3
                     for d2 in 1:3
-                        Atomix.@atomic vir_nou[b, d1, d2] += Ek_nou * G[d1, d2]
+                        Atomix.@atomic vir_nou[b, d1, d2, slot] += Ek_nou * G[d1, d2]
                     end
                 end
             else
@@ -2231,7 +2236,8 @@ function recip_conv_batch!(vir, buffer_virial, recip_grid::AbstractArray{Complex
     KernelAbstractions.synchronize(backend)
     if needs_vir
         # The mesh sums both k and -k, so the virial needs the same 1/2 as the energy.
-        vir .+= dropdims(sum((from_device(buffer_virial) .* energy_units / 2) .* (1-λ,λ), dims=1), dims=1)
+        vir_slots = dropdims(sum(from_device(buffer_virial); dims=4); dims=4)
+        vir .+= dropdims(sum((vir_slots .* energy_units / 2) .* (1-λ,λ), dims=1), dims=1)
     end
     # The energy is discarded when only forces are wanted, in which case the reduction
     # over the whole mesh, and the device synchronisation it forces, can be skipped
@@ -2258,7 +2264,8 @@ end
         ky, kx = r % mesh_dims[2], r ÷ mesh_dims[2]
         esum = recip_conv_inner_batch!(vir, recip_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
                                  energy_units, f_div_ϵr, factor, boxfactor, b,
-                                 kx, ky, kz, Val(needs_vir), Val(true))
+                                 kx, ky, kz, Val(needs_vir), Val(true),
+                                 virial_slot(li, size(vir, 4)))
         if needs_pe
             @inbounds esum_arr[batch_linear_index(esum_arr, b, li)] = ustrip(energy_units, esum)
         end
@@ -2372,9 +2379,9 @@ function ewald_pe_forces!(Fs, vir, inter::PME_λ{T}, atoms, coords, boundary, fo
                     inter.bsplines_moduli_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
                     energy_units, n_thr, Val(needs_vir), Val(needs_pe), λ)
 
-    Molly.grad_safe_bfft!(charge_grid, recip_grid, inter.bfft_plan)
-
+    # The backward transform is only needed for the forces
     if calculate_forces
+        Molly.grad_safe_bfft!(charge_grid, recip_grid, inter.bfft_plan)
         Molly.interpolate_force_batch!(Fs, charge_grid, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                             inter.scheduler, n_thr, λ)

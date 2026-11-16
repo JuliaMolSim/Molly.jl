@@ -221,7 +221,7 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         vels = (any_uses_velocity(pairwise_inters) ? sys.velocities : nothing)
-        kernel!(buffers.fs_mat, buffers.virial_nounits, sys.coords, vels, sys.atoms,
+        kernel!(buffers.fs_mat, buffers.virial_slots, sys.coords, vels, sys.atoms,
                 sys.boundary, pairwise_inters, nbs, step_n, Val(needs_vir), Val(D),
                 Val(sys.force_units); ndrange=length(nbs))
     end
@@ -261,15 +261,40 @@ finish_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
         dr = vector(coord_i, coord_j, boundary)
         f = sum_pairwise_forces_gpu(inters, dr, atoms[i], atoms[j], Val(F), special,
                                     coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic fs_mat[dim, i] += -fval
             Atomix.@atomic fs_mat[dim, j] +=  fval
             if needs_vir
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += ustrip(dr[alpha]) * fval
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += ustrip(dr[alpha]) * fval
                 end
             end
+        end
+    end
+end
+
+# Add the virial slots into the tensor `vir`, see `virial_slot`, leaving the slots at zero
+function fold_virial_slots!(vir, slots)
+    backend = get_backend(vir)
+    kernel! = fold_virial_slots_kernel!(backend, 256)
+    launch_kernel!(kernel!, vir, slots; ndrange=length(slots))
+    return vir
+end
+
+@kernel inbounds=true function fold_virial_slots_kernel!(vir, slots)
+    i = @index(Global, Linear)
+    if i <= length(slots)
+        v = slots[i]
+        if !iszero(v)
+            n_rows = size(slots, 1)
+            n_cols = size(slots, 2)
+            i0 = i - 1
+            row = i0 % n_rows + 1
+            col = (i0 ÷ n_rows) % n_cols + 1
+            Atomix.@atomic vir[row, col] += v
+            slots[i] = zero(v)
         end
     end
 end
@@ -399,6 +424,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -408,7 +434,7 @@ end
                 r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += λ * ustrip(r_ji[alpha]) * f1val
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += λ * ustrip(r_ji[alpha]) * f1val
                 end
             end
         end
@@ -430,6 +456,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -442,7 +469,7 @@ end
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val)
                 end
             end
@@ -466,6 +493,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -481,7 +509,7 @@ end
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
                                                        λ * ustrip(r_jl[alpha]) * f4val)
                 end
@@ -507,6 +535,7 @@ end
                         unit(fs.f4[1]) != F || unit(fs.f5[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -525,7 +554,7 @@ end
                 r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l], atoms[m]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
                                                        λ * ustrip(r_jl[alpha]) * f4val +
                                                        λ * ustrip(r_jm[alpha]) * f5val)
@@ -583,7 +612,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -653,7 +682,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -669,7 +698,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -686,7 +715,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -704,7 +733,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -722,7 +751,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 

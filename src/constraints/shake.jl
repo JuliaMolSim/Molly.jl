@@ -323,10 +323,10 @@ function accumulate_rattle_velocity_virial!(coords, velocities_before, velocitie
 end
 
 @inline function accumulate_constraint_virial_atomic!(constraint_virial_nounits, coords,
-                                                      correction_impulse, virial_scale)
+                                                      correction_impulse, virial_scale, slot)
     for alpha in 1:3
         for beta in 1:3
-            Atomix.@atomic constraint_virial_nounits[alpha, beta] +=
+            Atomix.@atomic constraint_virial_nounits[alpha, beta, slot] +=
                 ustrip(virial_scale * coords[alpha] * correction_impulse[beta])
         end
     end
@@ -341,6 +341,7 @@ end
         boundary, virial_scale)
     idx = @index(Global, Linear)
     if idx <= length(k1s)
+        slot = virial_slot(idx, size(constraint_virial_nounits, 3))
         k1 = k1s[idx]
         k2 = k2s[idx]
         λ = constraint_virial_lambda(atoms, k1, k2)
@@ -352,6 +353,7 @@ end
             ustrip.(local_k2),
             impulse_k2,
             λ * virial_scale,
+            slot,
         )
     end
 end
@@ -364,6 +366,7 @@ end
         boundary, virial_scale)
     idx = @index(Global, Linear)
     if idx <= length(k1s)
+        slot = virial_slot(idx, size(constraint_virial_nounits, 3))
         k1 = k1s[idx]
         k2 = k2s[idx]
         k3 = k3s[idx]
@@ -377,6 +380,7 @@ end
             ustrip.(local_k2),
             impulse_k2,
             λ * virial_scale,
+            slot,
         )
 
         local_k3 = vector(ref_k1, coords_ref[k3], boundary)
@@ -386,6 +390,7 @@ end
             ustrip.(local_k3),
             impulse_k3,
             λ * virial_scale,
+            slot,
         )
     end
 end
@@ -398,6 +403,7 @@ end
         boundary, virial_scale)
     idx = @index(Global, Linear)
     if idx <= length(k1s)
+        slot = virial_slot(idx, size(constraint_virial_nounits, 3))
         k1 = k1s[idx]
         k2 = k2s[idx]
         k3 = k3s[idx]
@@ -412,6 +418,7 @@ end
             ustrip.(local_k2),
             impulse_k2,
             λ * virial_scale,
+            slot,
         )
 
         local_k3 = vector(ref_k1, coords_ref[k3], boundary)
@@ -421,6 +428,7 @@ end
             ustrip.(local_k3),
             impulse_k3,
             λ * virial_scale,
+            slot,
         )
 
         local_k4 = vector(ref_k1, coords_ref[k4], boundary)
@@ -430,6 +438,7 @@ end
             ustrip.(local_k4),
             impulse_k4,
             λ * virial_scale,
+            slot,
         )
     end
 end
@@ -442,9 +451,11 @@ function accumulate_shake_cluster12_virial_gpu!(coords_ref, values_before, value
     virial_kern! = shake_cluster12_virial_kernel!(backend, block_size)
     VT = eltype(context.buffers.constraint_virial_nounits)
     virial_scale = VT(ustrip(context.virial_scale))
-    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+    virial_kern!(context.buffers.constraint_virial_slots, clusters.k1, clusters.k2,
                  context.atoms, coords_ref, values_before, values_after, ms, boundary, virial_scale;
                  ndrange=length(clusters))
+    fold_virial_slots!(context.buffers.constraint_virial_nounits,
+                       context.buffers.constraint_virial_slots)
     return context
 end
 
@@ -456,9 +467,11 @@ function accumulate_shake_cluster23_virial_gpu!(coords_ref, values_before, value
     virial_kern! = shake_cluster23_virial_kernel!(backend, block_size)
     VT = eltype(context.buffers.constraint_virial_nounits)
     virial_scale = VT(ustrip(context.virial_scale))
-    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+    virial_kern!(context.buffers.constraint_virial_slots, clusters.k1, clusters.k2,
                  clusters.k3, context.atoms, coords_ref, values_before, values_after, ms, boundary,
                  virial_scale; ndrange=length(clusters))
+    fold_virial_slots!(context.buffers.constraint_virial_nounits,
+                       context.buffers.constraint_virial_slots)
     return context
 end
 
@@ -470,9 +483,11 @@ function accumulate_shake_cluster34_virial_gpu!(coords_ref, values_before, value
     virial_kern! = shake_cluster34_virial_kernel!(backend, block_size)
     VT = eltype(context.buffers.constraint_virial_nounits)
     virial_scale = VT(ustrip(context.virial_scale))
-    virial_kern!(context.buffers.constraint_virial_nounits, clusters.k1, clusters.k2,
+    virial_kern!(context.buffers.constraint_virial_slots, clusters.k1, clusters.k2,
                  clusters.k3, clusters.k4, context.atoms, coords_ref, values_before, values_after, ms,
                  boundary, virial_scale; ndrange=length(clusters))
+    fold_virial_slots!(context.buffers.constraint_virial_nounits,
+                       context.buffers.constraint_virial_slots)
     return context
 end
 

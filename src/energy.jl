@@ -722,7 +722,7 @@ function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
                          sys.boundary, step_n, sys.energy_units, Val(TH))
     end
 
-    return only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
+    return sum(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 end
 
 """
