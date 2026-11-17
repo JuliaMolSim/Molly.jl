@@ -1078,17 +1078,37 @@ function cuda_displacement_scratch(tracker, ::Type{T},
             length(scratch.block_maxs_1) >= n_blocks
         return scratch
     end
+    scratch = CUDADisplacementScratch{T}(n_blocks)
+    if !isnothing(tracker)
+        tracker.scratch = scratch
+    end
+    return scratch
+end
+
+function CUDADisplacementScratch{T}(n_blocks::Integer) where T
     result = CuArray{T, 1, CUDA_CORE.HostMemory}(undef, 6)
     result_host = unsafe_wrap(Array, result)
     counter = fill!(CuArray{Int32, 1, CUDA_CORE.DeviceMemory}(undef, 1), Int32(0))
     n_blocks_alloc = max(n_blocks, displacement_max_blocks)
     block_maxs = ntuple(_ -> CuArray{T, 1, CUDA_CORE.DeviceMemory}(undef, n_blocks_alloc), 4)
-    scratch = CUDADisplacementScratch{T}(result, result_host, block_maxs..., counter,
+    return CUDADisplacementScratch{T}(result, result_host, block_maxs..., counter,
                     CuEvent(CUDA_CORE.EVENT_DISABLE_TIMING), CUDA.context())
-    if !isnothing(tracker)
-        tracker.scratch = scratch
-    end
-    return scratch
+end
+
+#=
+A copy of the fields would have a host array that is a copy of the results rather than the
+pinned memory the device writes to, so every check with it would read the result of the
+last check before the copy, and it would share the event. A copy of a system that has made
+checks, which holds the scratch in the tracker of its neighbor finder, would then never
+rebuild its tile list, or rebuild it every time. The copy is a new scratch instead, with
+a result that says the atoms have moved in case a check was pending.
+=#
+function Base.deepcopy_internal(scratch::CUDADisplacementScratch{T}, dict::IdDict) where T
+    haskey(dict, scratch) && return dict[scratch]::CUDADisplacementScratch{T}
+    scratch_copy = CUDADisplacementScratch{T}(length(scratch.block_maxs_1))
+    scratch_copy.result_host .= (zero(T), zero(T), one(T), zero(T), zero(T), one(T))
+    dict[scratch] = scratch_copy
+    return scratch_copy
 end
 
 @inline function warp_reduce_top2(max_1, max_2)
