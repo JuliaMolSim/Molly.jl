@@ -3467,8 +3467,10 @@ end
     torp,
     atid,
     ::Val{smoothness_correction},
+    torsion_args,
 ) where {smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -3507,13 +3509,17 @@ end
                                             BO_kl = BO_kl_raw - valence_cutoff
 
                                             if BO_kl > zero(BO_kl) && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
-                                                valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
+                                                if isnothing(torsion_args)
+                                                    valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
 
-                                                if valid_torsion_idx <= size(valid_torsions, 2)
-                                                    valid_torsions[1, valid_torsion_idx] = j
-                                                    valid_torsions[2, valid_torsion_idx] = idx_k
-                                                    valid_torsions[3, valid_torsion_idx] = idx_i
-                                                    valid_torsions[4, valid_torsion_idx] = idx_l
+                                                    if valid_torsion_idx <= size(valid_torsions, 2)
+                                                        valid_torsions[1, valid_torsion_idx] = j
+                                                        valid_torsions[2, valid_torsion_idx] = idx_k
+                                                        valid_torsions[3, valid_torsion_idx] = idx_i
+                                                        valid_torsions[4, valid_torsion_idx] = idx_l
+                                                    end
+                                                else
+                                                    torsion!(j, idx_k, idx_i, idx_l, group, torsion_args...)
                                                 end
                                             end
                                         end
@@ -3560,6 +3566,42 @@ end
         idx_i = valid_torsions[3, ti]
         idx_l = valid_torsions[4, ti]
 
+        torsion!(
+            j, idx_k, idx_i, idx_l, group, nbrs, BO, valence_cutoff, reverse_nbrs,
+            Δ_angle, genp, conv_factor, coords, boundary, torp, atid, torsion_energies,
+            conj_energies, forces, S_dE_dΔ, S_dE_dBO, S_dE_dBOπ, BO_π,
+            Val(smoothness_correction),
+        )
+    end
+end
+
+@inline function torsion!(
+    j,
+    idx_k,
+    idx_i,
+    idx_l,
+    group,
+    nbrs,
+    BO,
+    valence_cutoff,
+    reverse_nbrs,
+    Δ_angle,
+    genp,
+    conv_factor::T,
+    coords,
+    boundary,
+    torp,
+    atid,
+    torsion_energies,
+    conj_energies,
+    forces,
+    S_dE_dΔ,
+    S_dE_dBO,
+    S_dE_dBOπ,
+    BO_π,
+    ::Val{smoothness_correction},
+) where {T, smoothness_correction}
+    @inbounds begin
         p_tor2 = genp.p_tor2
         p_tor3 = genp.p_tor3
         p_tor4 = genp.p_tor4
@@ -3812,6 +3854,7 @@ end
             end
         end
     end
+    return nothing
 end
 
 
@@ -3846,6 +3889,31 @@ function torsions!(
 
     conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
 
+    torsion_args = nothing
+    if backend isa KernelAbstractions.CPU
+        torsion_args = (
+            nbrs,
+            BO,
+            valence_cutoff,
+            reverse_nbrs,
+            Δ_angle,
+            genp,
+            conv_factor,
+            sys.coords,
+            sys.boundary,
+            torp,
+            atid,
+            torsion_energies,
+            conj_energies,
+            reaxff_kernel_forces(inter, backend),
+            S_dE_dΔ,
+            S_dE_dBO,
+            S_dE_dBOπ,
+            BO_π,
+            inter.smoothness_correction,
+        )
+    end
+
     fill!(inter.state.n_valid_torsions, 0)
 
     # this continues counting even when capacity of valid_torsions is reached => reports exact required size
@@ -3860,7 +3928,8 @@ function torsions!(
             valence_cutoff,
             torp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            torsion_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3886,7 +3955,8 @@ function torsions!(
             valence_cutoff,
             torp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            torsion_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
