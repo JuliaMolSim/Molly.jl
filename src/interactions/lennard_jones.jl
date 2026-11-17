@@ -574,9 +574,8 @@ function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; schedul
     return update_cached_parameters(dc, atoms_cpu)
 end
 
-# `n_eff` is kept in Float64, so the generic rebuild would downcast it and find no constructor
-convert_component(c::SystemConversion, dc::LJDispersionCorrectionλ) =
-    convert_struct_keep_last(c, dc)
+# `n_eff` is a particle count kept in Float64, so the generic rebuild must not downcast it
+unconverted_fields(::Type{<:LJDispersionCorrectionλ}) = (:n_eff,)
 
 function update_cached_parameters(dc::LJDispersionCorrectionλ, atoms)
     factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
