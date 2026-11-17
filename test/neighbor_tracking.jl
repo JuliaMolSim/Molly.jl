@@ -705,6 +705,22 @@ end
             Molly.forces!(fs, sys, nothing, 8, buffers, Val(false))
             @test Molly.neighbor_update_counts(nf).n_builds == n_builds_before + 1
             @test max_diff(fs, forces(sys_ref)) < 0.05u"kJ * mol^-1 * nm^-1"
+            # A copy of a system that has made checks reads the results of its own checks
+            Molly.forces!(fs, sys, nothing, 9, buffers, Val(false))
+            sys_copy = deepcopy(sys)
+            nf_copy = sys_copy.neighbor_finder
+            buffers_copy = Molly.init_buffers!(sys_copy, 1)
+            Molly.forces!(fs, sys_copy, nothing, 9, buffers_copy, Val(false))
+            n_builds_before = Molly.neighbor_update_counts(nf_copy).n_builds
+            for i in 9:10
+                coords_moved[i] = wrap_coords(
+                        coords_moved[i] + SVector(0.0f0, 0.06f0, 0.0f0)u"nm", boundary)
+            end
+            sys_copy.coords .= to_device(coords_moved, AT)
+            sys_ref.coords .= sys_copy.coords
+            Molly.forces!(fs, sys_copy, nothing, 10, buffers_copy, Val(false))
+            @test Molly.neighbor_update_counts(nf_copy).n_builds == n_builds_before + 1
+            @test max_diff(fs, forces(sys_ref)) < 0.05u"kJ * mol^-1 * nm^-1"
             # Without a buffer the tiles are refreshed every time without tracking
             nf_noskin = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=0.8f0u"nm",
                                           array_type=AT)
