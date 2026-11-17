@@ -1422,9 +1422,6 @@ function clear_reaxff_state!(
     fill!(inter.state.fill_pos, 0)
     fill!(inter.state.coordn, zero(T))
     fill!(inter.state.forces, zero(T))
-    fill!(inter.state.S_dE_dBO, zero(T))
-    fill!(inter.state.S_dE_dBOπ, zero(T))
-    fill!(inter.state.S_dE_dBOππ, zero(T))
     fill!(inter.state.S_dE_dΔ, zero(T))
     fill!(inter.state.energy_components, zero(T))
     
@@ -1679,6 +1676,9 @@ function resolve_forces!(
 end
 
 
+@inline positive_pow(x, y) = exp(y * log(x))
+
+
 @inline function smoothness_taper(x::T, x_min, x_max) where {T}
     if x <= x_min
         return zero(T), zero(T)
@@ -1726,7 +1726,7 @@ end
         p_bo2 = bndp_ij.p_bo2
         ro_σ_bond = odgp_ij.ro_sigma
 
-        BO′_σ_arg = p_bo1 * (dr / ro_σ_bond)^p_bo2
+        BO′_σ_arg = p_bo1 * positive_pow(dr / ro_σ_bond, p_bo2)
         BO′_σ_exp = exp(BO′_σ_arg)
         BO′_σ_shift = (one(T) + bo_cutoff) * BO′_σ_exp
         BO′_σ = BO′_σ_shift - bo_cutoff
@@ -1747,7 +1747,7 @@ end
         p_bo4 = bndp_ij.p_bo4
         ro_π_bond = odgp_ij.ro_pi
 
-        BO′_π_arg = p_bo3 * (dr / ro_π_bond)^p_bo4
+        BO′_π_arg = p_bo3 * positive_pow(dr / ro_π_bond, p_bo4)
         BO′_π = exp(BO′_π_arg)
         dBOπ′_dr = BO′_π * p_bo4 * BO′_π_arg / dr 
 
@@ -1766,7 +1766,7 @@ end
         p_bo6 = bndp_ij.p_bo6
         ro_ππ_bond = odgp_ij.ro_pipi
 
-        BO′_ππ_arg = p_bo5 * (dr / ro_ππ_bond)^p_bo6
+        BO′_ππ_arg = p_bo5 * positive_pow(dr / ro_ππ_bond, p_bo6)
         BO′_ππ = exp(BO′_ππ_arg)
         dBOππ′_dr = BO′_ππ * p_bo6 * BO′_ππ_arg / dr
 
@@ -2260,12 +2260,12 @@ end
             dEBond_dBOπ = -De_π - dEBond_dBOσ
             dEBond_dBOππ = -De_ππ - dEBond_dBOσ
 
-            S_dE_dBO[idx_j, i] += dEBond_dBO
-            S_dE_dBO[idx_i, j] += dEBond_dBO
-            S_dE_dBOπ[idx_j, i] += dEBond_dBOπ
-            S_dE_dBOπ[idx_i, j] += dEBond_dBOπ
-            S_dE_dBOππ[idx_j, i] += dEBond_dBOππ
-            S_dE_dBOππ[idx_i, j] += dEBond_dBOππ
+            S_dE_dBO[idx_j, i] = dEBond_dBO
+            S_dE_dBO[idx_i, j] = dEBond_dBO
+            S_dE_dBOπ[idx_j, i] = dEBond_dBOπ
+            S_dE_dBOπ[idx_i, j] = dEBond_dBOπ
+            S_dE_dBOππ[idx_j, i] = dEBond_dBOππ
+            S_dE_dBOππ[idx_i, j] = dEBond_dBOππ
 
             bnd_engy = dEbond_exp1 * bo_σ  - De_π * bo_π - De_ππ * bo_ππ
             
@@ -3022,11 +3022,11 @@ end
             SBO2 = zero(T)
             dSBO2 = zero(T)
         elseif SBO < 1.0
-            SBO2 = SBO^p_val9
-            dSBO2 = p_val9 * SBO^(p_val9 - one(T))
+            SBO2 = positive_pow(SBO, p_val9)
+            dSBO2 = p_val9 * positive_pow(SBO, p_val9 - one(T))
         elseif SBO < 2.0
-            SBO2 = T(2.0) - (T(2.0) - SBO)^p_val9
-            dSBO2 = p_val9 * (T(2.0) - SBO)^(p_val9 - one(T))
+            SBO2 = T(2.0) - positive_pow(T(2.0) - SBO, p_val9)
+            dSBO2 = p_val9 * positive_pow(T(2.0) - SBO, p_val9 - one(T))
         else
             SBO2 = T(2.0)
             dSBO2 = zero(T)
@@ -3095,8 +3095,8 @@ end
                         f8 = p_val5 - (val_sm1 * val_sm2 * val_inv1)
                         df8_dΔj = -(p_val5 - one(T)) * (val_exp1 * p_val6 * val_arg_3 - val_sm2 * (val_exp1 * p_val6 + val_exp3 * -p_val7)) * val_inv1 * val_inv1
 
-                        val_arg1 = p_val3 * (BO_ij)^(p_val4 - one(T))   
-                        val_arg2 = p_val3 * (BO_jk)^(p_val4 - one(T))
+                        val_arg1 = p_val3 * positive_pow(BO_ij, p_val4 - one(T))
+                        val_arg2 = p_val3 * positive_pow(BO_jk, p_val4 - one(T))
                         f7_exp1 = exp(-val_arg1 * BO_ij)
                         f7_exp2 = exp(-val_arg2 * BO_jk)
 
@@ -4580,9 +4580,9 @@ end
     
             gamma_w_inv_pow = odgp_ij.gamma_w_inv_pow
     
-            r_ij_pow = r_ij^p_vdW1
+            r_ij_pow = positive_pow(r_ij, p_vdW1)
             f13_sum1 = r_ij_pow + gamma_w_inv_pow
-            f13 = f13_sum1^p_vdW1_inv
+            f13 = positive_pow(f13_sum1, p_vdW1_inv)
     
             df13_drij = f13 * r_ij_pow * inv(f13_sum1 * r_ij)
     
