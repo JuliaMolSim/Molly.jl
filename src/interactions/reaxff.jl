@@ -313,7 +313,7 @@ struct DeviceParams{GP, AP, BP, OP, AE, AGP, TP, HP, GLP, TAP, HD, HA}
 end
 
 
-mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
+mutable struct ReaxFF2008State{T, VI, MI, MT, VT, AF}
     n_atoms::Int
     sys_atid::VI
     nbrs::MI
@@ -364,6 +364,7 @@ mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
     n_valid_hbonds::VI      # 1-element device vector
     bond_pair_indices::VI
     n_bond_pairs::VI
+    group_forces::AF
 end
 
 
@@ -427,7 +428,8 @@ function empty_state(
         MI(undef, 3, 0),
         VI(undef, 1),
         VI(undef, 0),
-        VI(undef, 1)
+        VI(undef, 1),
+        AT{T, 3}(undef, 3, 0, 0)
     )
 end
 
@@ -1360,6 +1362,7 @@ function init_reaxff_state!(
     n_valid_hbonds = zeros(Int, 1)
     bond_pair_indices = zeros(Int, 0)
     n_bond_pairs = zeros(Int, 1)
+    group_forces = zeros(T, 3, 0, 0)
 
     inter.state = ReaxFF2008State(
         n_atoms,
@@ -1411,7 +1414,8 @@ function init_reaxff_state!(
         to_device(valid_hbonds, AT),
         to_device(n_valid_hbonds, AT),
         to_device(bond_pair_indices, AT),
-        to_device(n_bond_pairs, AT)
+        to_device(n_bond_pairs, AT),
+        to_device(group_forces, AT)
     )
 end
 
@@ -1429,6 +1433,22 @@ function clear_reaxff_state!(
 end
 
 
+@inline function add_force!(forces::AbstractMatrix, force, i, group)
+    @inbounds for n in 1:3
+        Atomix.@atomic forces[n, i] += force[n]
+    end
+end
+
+@inline function add_force!(forces::AbstractArray{<:Any, 3}, force, i, group)
+    @inbounds for n in 1:3
+        forces[n, i, group] += force[n]
+    end
+end
+
+reaxff_kernel_forces(inter, backend) = inter.state.forces
+reaxff_kernel_forces(inter, ::KernelAbstractions.CPU) = inter.state.group_forces
+
+
 @inline function write_force_BO(
     coords,
     boundary,
@@ -1441,7 +1461,8 @@ end
     derivatives,
     forces,
     nbrs,
-    fill_pos
+    fill_pos,
+    group
 )
     dBO_dBO′ = derivatives.dBO_dBO′
     dBO_dΔi′ = derivatives.dBO_dΔi′
@@ -1471,10 +1492,8 @@ end
     dE_dBO_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
     force_tmp = dE_dBO_tot .* r_ij_norm
 
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_tmp[n]
-        Atomix.@atomic forces[n, j] -= force_tmp[n]
-    end
+    add_force!(forces, force_tmp, i, group)
+    add_force!(forces, -force_tmp, j, group)
 
     @inbounds for idx_k in 1:fill_pos[i]
         k = nbrs[idx_k, i]
@@ -1488,10 +1507,8 @@ end
         dE_dΔi_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
         force_tmp = dE_dΔi_tot .* r_ik_norm
 
-        for n in 1:3
-            Atomix.@atomic forces[n, i] += force_tmp[n]
-            Atomix.@atomic forces[n, k] -= force_tmp[n]
-        end
+        add_force!(forces, force_tmp, i, group)
+        add_force!(forces, -force_tmp, k, group)
     end
 
     @inbounds for idx_k in 1:fill_pos[j]
@@ -1506,10 +1523,8 @@ end
         dE_dΔj_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
         force_tmp = dE_dΔj_tot .* r_jk_norm
 
-        for n in 1:3
-            Atomix.@atomic forces[n, j] += force_tmp[n]
-            Atomix.@atomic forces[n, k] -= force_tmp[n]
-        end
+        add_force!(forces, force_tmp, j, group)
+        add_force!(forces, -force_tmp, k, group)
     end
 end
 
@@ -1522,17 +1537,12 @@ end
     dE_dΘ,
     dΘ_dri,
     dΘ_drj,
-    dΘ_drk
+    dΘ_drk,
+    group
 )
-    force_i = dE_dΘ .* dΘ_dri
-    force_j = dE_dΘ .* dΘ_drj
-    force_k = dE_dΘ .* dΘ_drk
-
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_i[n]
-        Atomix.@atomic forces[n, j] += force_j[n]
-        Atomix.@atomic forces[n, k] += force_k[n]
-    end
+    add_force!(forces, dE_dΘ .* dΘ_dri, i, group)
+    add_force!(forces, dE_dΘ .* dΘ_drj, j, group)
+    add_force!(forces, dE_dΘ .* dΘ_drk, k, group)
 end
 
 
@@ -1546,19 +1556,13 @@ end
     dω_dri,
     dω_drj,
     dw_drk,
-    dw_drl
+    dw_drl,
+    group
 )
-    force_i = dE_dω .* dω_dri
-    force_j = dE_dω .* dω_drj
-    force_k = dE_dω .* dw_drk
-    force_l = dE_dω .* dw_drl
-
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_i[n]
-        Atomix.@atomic forces[n, j] += force_j[n]
-        Atomix.@atomic forces[n, k] += force_k[n]
-        Atomix.@atomic forces[n, l] += force_l[n]
-    end
+    add_force!(forces, dE_dω .* dω_dri, i, group)
+    add_force!(forces, dE_dω .* dω_drj, j, group)
+    add_force!(forces, dE_dω .* dw_drk, k, group)
+    add_force!(forces, dE_dω .* dw_drl, l, group)
 end
 
 
@@ -1596,6 +1600,7 @@ end
     derivatives
 )
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -1620,7 +1625,8 @@ end
                     derivatives,
                     forces,
                     nbrs,
-                    fill_pos
+                    fill_pos,
+                    group
                 )
             end
         end
@@ -1668,7 +1674,7 @@ function resolve_forces!(
         S_dE_dBOπ,
         S_dE_dBOππ,
         S_dE_dΔ,
-        inter.state.forces,
+        reaxff_kernel_forces(inter, backend),
         derivatives,
         ndrange=length(nbrs),
         workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
@@ -2972,6 +2978,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_angles[1, ti]
@@ -3224,7 +3231,8 @@ end
                             dE_val_dTheta_ijk,
                             dtheta_dri,
                             dtheta_drj,
-                            dtheta_drk
+                            dtheta_drk,
+                            group
                         )
 
                         dE_val_prod2 = dE_val_prod * Theta_oo * val_exp2 * p_val10 * dSBO2 * deg_to_rad
@@ -3383,7 +3391,7 @@ function valence_angles!(
             S_dE_dBOπ,
             S_dE_dBOππ,
             S_dE_dΔ,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             inter.smoothness_correction,
             ndrange=n_valid_angles,
             workgroupsize=reaxff_workgroupsize(backend, n_valid_angles, n_threads)
@@ -3544,6 +3552,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_torsions[1, ti]
@@ -3758,7 +3767,8 @@ end
                                             dE_tors_dΘijk + dE_conj_dΘijk,
                                             dΘ_ijk_dri_buf,
                                             dΘ_ijk_drj_buf,
-                                            dΘ_ijk_drk_buf
+                                            dΘ_ijk_drk_buf,
+                                            group
                                         )
                                         write_force_Θ(
                                             forces,
@@ -3768,7 +3778,8 @@ end
                                             dE_tors_dΘjkl + dE_conj_dΘjkl,
                                             dΘ_jkl_drj_buf,
                                             dΘ_jkl_drk_buf,
-                                            dΘ_jkl_drl_buf
+                                            dΘ_jkl_drl_buf,
+                                            group
                                         )
 
                                         dE_tors_dω = f10 * sin_prod * T(0.5) * (
@@ -3789,7 +3800,8 @@ end
                                             dω_dri,
                                             dω_drj,
                                             dω_drk,
-                                            dω_drl
+                                            dω_drl,
+                                            group
                                         )
                                     end
                                 end
@@ -3903,7 +3915,7 @@ function torsions!(
             atid,
             torsion_energies,
             conj_energies,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             S_dE_dΔ,
             S_dE_dBO,
             S_dE_dBOπ,
@@ -4140,6 +4152,7 @@ end
     hbond_args,
 ) where T
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     cutoff_sq = hbond_dist_cutoff * hbond_dist_cutoff
 
@@ -4198,7 +4211,7 @@ end
                             j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
                             coords, boundary, hbdp, atid, S_dE_dBO, forces,
                             hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-                            smoothness,
+                            smoothness, group,
                         )
                     end
                 end
@@ -4227,6 +4240,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_hbonds[1, ti]
@@ -4237,7 +4251,7 @@ end
             j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
             coords, boundary, hbdp, atid, S_dE_dBO, forces,
             hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-            Val(smoothness_correction),
+            Val(smoothness_correction), group,
         )
     end
 end
@@ -4260,6 +4274,7 @@ end
     hbond_bo_cutoff,
     hbond_dist_cutoff,
     ::Val{smoothness_correction},
+    group,
 ) where {T, smoothness_correction}
     @inbounds begin
         i = nbrs[idx_i, j]
@@ -4280,9 +4295,6 @@ end
         r_vec_jk_unit = r_vec_jk / r_jk
 
         energy_pair = zero(T)
-        f_j_x = zero(T)
-        f_j_y = zero(T)
-        f_j_z = zero(T)
 
         idx_j = reverse_nbrs[idx_i, j]
 
@@ -4355,24 +4367,12 @@ end
 
         dE_hbond_drjk_vec = dE_hbond_drjk * r_vec_jk_unit
 
-        Atomix.@atomic forces[1, k] += dE_dΘ_k[1] - dE_hbond_drjk_vec[1]
-        Atomix.@atomic forces[2, k] += dE_dΘ_k[2] - dE_hbond_drjk_vec[2]
-        Atomix.@atomic forces[3, k] += dE_dΘ_k[3] - dE_hbond_drjk_vec[3]
-
-        Atomix.@atomic forces[1, i] += dE_dΘ_i[1]
-        Atomix.@atomic forces[2, i] += dE_dΘ_i[2]
-        Atomix.@atomic forces[3, i] += dE_dΘ_i[3]
-
-        f_j_x += dE_dΘ_j[1] + dE_hbond_drjk_vec[1]
-        f_j_y += dE_dΘ_j[2] + dE_hbond_drjk_vec[2]
-        f_j_z += dE_dΘ_j[3] + dE_hbond_drjk_vec[3]
+        add_force!(forces, dE_dΘ_k - dE_hbond_drjk_vec, k, group)
+        add_force!(forces, dE_dΘ_i, i, group)
+        add_force!(forces, dE_dΘ_j + dE_hbond_drjk_vec, j, group)
 
         Atomix.@atomic S_dE_dBO[idx_i, j] += dE_hbond_dBOij
         Atomix.@atomic S_dE_dBO[idx_j, i] += dE_hbond_dBOij
-
-        Atomix.@atomic forces[1, j] += f_j_x
-        Atomix.@atomic forces[2, j] += f_j_y
-        Atomix.@atomic forces[3, j] += f_j_z
 
         Atomix.@atomic hb_energies[j] += energy_pair
     end
@@ -4416,7 +4416,7 @@ function hydrogen_bonds!(
         hbond_args = (
             reverse_nbrs,
             inter.state.S_dE_dBO,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             hb_energies,
             inter.smoothness_correction,
         )
@@ -4503,7 +4503,7 @@ function hydrogen_bonds!(
             hbdp,
             atid,
             inter.state.S_dE_dBO,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             hb_energies,
             hbond_bo_cutoff,
             hbond_dist_cutoff,
@@ -4545,6 +4545,7 @@ end
     upper_taper_radius
 ) where T
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         ni = far_nbrs_list[ti]
@@ -4619,10 +4620,8 @@ end
             
             tot_dE_drij = (dE_vdW_drij + dE_coulomb_drij) * r_ij_unit
     
-            for n in 1:3
-                Atomix.@atomic forces[n, i] += tot_dE_drij[n]
-                Atomix.@atomic forces[n, j] -= tot_dE_drij[n]
-            end
+            add_force!(forces, tot_dE_drij, i, group)
+            add_force!(forces, -tot_dE_drij, j, group)
         end
     end
 end
@@ -4682,7 +4681,7 @@ function non_bonded!(
         p_vdW1_inv,
         q,
         C,
-        inter.state.forces,
+        reaxff_kernel_forces(inter, backend),
         vdW_energies,
         coulomb_energies,
         upper_taper_radius;
@@ -4918,6 +4917,25 @@ function accumulate_reaxff_energy!(inter, energies, slots, backend)
 end
 
 
+@kernel function reduce_group_forces_kernel(
+    forces,
+    group_forces
+)
+    i = @index(Global, Linear)
+
+    @inbounds for n in 1:3
+        force = zero(eltype(forces))
+
+        for group in axes(group_forces, 3)
+            force += group_forces[n, i, group]
+            group_forces[n, i, group] = zero(eltype(forces))
+        end
+
+        forces[n, i] += force
+    end
+end
+
+
 function compute_reaxff_energy_forces!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
@@ -4925,7 +4943,12 @@ function compute_reaxff_energy_forces!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where {T}
-    
+    n_atoms = inter.state.n_atoms
+
+    if backend isa KernelAbstractions.CPU && size(inter.state.group_forces, 3) < n_threads
+        inter.state.group_forces = zeros(T, 3, n_atoms, n_threads)
+    end
+
     clear_reaxff_state!(inter)
     bonds!(inter, sys, neighbors, backend; n_threads=n_threads)
     lone_pairs!(inter, backend; n_threads=n_threads)
@@ -4939,6 +4962,14 @@ function compute_reaxff_energy_forces!(
 
     if backend isa KernelAbstractions.GPU
         inter.state.energy = sum(inter.state.energy_components)
+    else
+        reduce_kernel = reduce_group_forces_kernel(backend)
+        reduce_kernel(
+            inter.state.forces,
+            inter.state.group_forces;
+            ndrange=n_atoms,
+            workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        )
     end
 
     return inter.state.energy
