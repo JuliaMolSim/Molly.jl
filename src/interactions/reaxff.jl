@@ -2886,8 +2886,10 @@ end
     angp,
     atid,
     ::Val{smoothness_correction},
+    angle_args,
 ) where {smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -2920,14 +2922,22 @@ end
                                 angp_ijk = angp[p_idx]
 
                                 if abs(angp_ijk.p_val1) > 0.001
-                                    valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
+                                    if isnothing(angle_args)
+                                        valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
 
-                                    # if overflow, continue counting so can resize later
-                                    if valid_angle_idx <= size(valid_angles, 2)
-                                        valid_angles[1, valid_angle_idx] = j
-                                        valid_angles[2, valid_angle_idx] = idx_i
-                                        valid_angles[3, valid_angle_idx] = idx_k
-                                        valid_angles[4, valid_angle_idx] = p_idx
+                                        # if overflow, continue counting so can resize later
+                                        if valid_angle_idx <= size(valid_angles, 2)
+                                            valid_angles[1, valid_angle_idx] = j
+                                            valid_angles[2, valid_angle_idx] = idx_i
+                                            valid_angles[3, valid_angle_idx] = idx_k
+                                            valid_angles[4, valid_angle_idx] = p_idx
+                                        end
+                                    else
+                                        valence_angle!(
+                                            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO,
+                                            valence_cutoff, valence_prod_cutoff, angle_entries,
+                                            angp, atid, Val(smoothness_correction), angle_args...,
+                                        )
                                     end
                                 end
                             end
@@ -2986,6 +2996,58 @@ end
         idx_k = valid_angles[3, ti]
         p_idx = valid_angles[4, ti]
 
+        valence_angle!(
+            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO, valence_cutoff,
+            valence_prod_cutoff, angle_entries, angp, atid, Val(smoothness_correction),
+            atmp, genp, Δ_e_mod2, n_lp, dn_lp_dΔi, Δ_angle, Δ, Δ_boc, coordn,
+            reverse_nbrs, BO_π, BO_ππ, coords, boundary, conv_factor, deg_to_rad,
+            val_energies, pen_energies, coa_energies, S_dE_dBO, S_dE_dBOπ, S_dE_dBOππ,
+            S_dE_dΔ, forces,
+        )
+    end
+end
+
+@inline function valence_angle!(
+    j,
+    idx_i,
+    idx_k,
+    p_idx,
+    group,
+    fill_pos,
+    nbrs,
+    BO,
+    valence_cutoff,
+    valence_prod_cutoff,
+    angle_entries,
+    angp,
+    atid,
+    ::Val{smoothness_correction},
+    atmp,
+    genp,
+    Δ_e_mod2,
+    n_lp,
+    dn_lp_dΔi,
+    Δ_angle,
+    Δ,
+    Δ_boc,
+    coordn,
+    reverse_nbrs,
+    BO_π,
+    BO_ππ,
+    coords,
+    boundary,
+    conv_factor::T,
+    deg_to_rad,
+    val_energies,
+    pen_energies,
+    coa_energies,
+    S_dE_dBO,
+    S_dE_dBOπ,
+    S_dE_dBOππ,
+    S_dE_dΔ,
+    forces,
+) where {T, smoothness_correction}
+    @inbounds begin
         p_val6 = genp.p_val6
         p_val8 = genp.p_val8
         p_val9 = genp.p_val9
@@ -3257,6 +3319,7 @@ end
             end
         end
     end
+    return nothing
 end
 
 
@@ -3303,6 +3366,37 @@ function valence_angles!(
 
     conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
 
+    angle_args = nothing
+    if backend isa KernelAbstractions.CPU
+        # must stay at 32 elements or fewer for the splat in construct_valid_angles! to be specialised
+        angle_args = (
+            atmp,
+            genp,
+            Δ_e_mod2,
+            n_lp,
+            dn_lp_dΔi,
+            Δ_angle,
+            Δ,
+            Δ_boc,
+            coordn,
+            reverse_nbrs,
+            BO_π,
+            BO_ππ,
+            sys.coords,
+            sys.boundary,
+            conv_factor,
+            deg_to_rad,
+            val_energies,
+            pen_energies,
+            coa_energies,
+            S_dE_dBO,
+            S_dE_dBOπ,
+            S_dE_dBOππ,
+            S_dE_dΔ,
+            reaxff_kernel_forces(inter, backend),
+        )
+    end
+
     fill!(inter.state.n_valid_angles, 0)
 
     valid_angles_kernel! = construct_valid_angles!(backend)
@@ -3318,7 +3412,8 @@ function valence_angles!(
             angle_entries,
             angp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            angle_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3345,7 +3440,8 @@ function valence_angles!(
             angle_entries,
             angp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            angle_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )

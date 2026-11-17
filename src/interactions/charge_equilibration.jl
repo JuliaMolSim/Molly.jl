@@ -830,7 +830,7 @@ end
 
 
 # predicts next time step's charges using Lagrange interpolation
-# uses quartic charge prediction when there is sufficient history
+# uses cubic prediction for tolerance >= 1e-7, otherwise quartic
 # when there is insufficient history, uses fewer history vectors to avoid oscillation in predicted charges
 # every coefficient set sums to one, preserving total charge
 # only modifies q
