@@ -1254,7 +1254,8 @@ function charge_equilibration!(
             eem.state.q_backup
         )
 
-        eem.state.history_count = min(eem.state.history_count + 1, 5)
+        max_history_count = eem.tolerance >= QT(1e-7) ? 4 : 5
+        eem.state.history_count = min(eem.state.history_count + 1, max_history_count)
         eem.state.last_history_step = step_n
     end
 
