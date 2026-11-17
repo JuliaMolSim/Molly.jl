@@ -4362,7 +4362,7 @@ end
         r_jk_sq = r_vec_jk[1]^2 + r_vec_jk[2]^2 + r_vec_jk[3]^2
         r_jk = sqrt(r_jk_sq)
         inv_r_jk = inv(r_jk)
-        r_vec_jk_unit = r_vec_jk / r_jk
+        r_vec_jk_unit = r_vec_jk * inv_r_jk
 
         energy_pair = zero(T)
 
@@ -4625,7 +4625,7 @@ end
         r_ij = norm(r_vec_ij)
 
         if r_ij <= upper_taper_radius
-            r_ij_unit = r_vec_ij / r_ij
+            r_ij_unit = r_vec_ij * inv(r_ij)
     
             Tap = muladd(tp.Tap_7, r_ij, tp.Tap_6)
             Tap = muladd(Tap, r_ij, tp.Tap_5)
@@ -5013,6 +5013,7 @@ function compute_reaxff_energy_forces!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where {T}
+    n_threads = max(n_threads, 1)
     n_atoms = inter.state.n_atoms
 
     if backend isa KernelAbstractions.CPU && size(inter.state.group_forces, 3) < n_threads
