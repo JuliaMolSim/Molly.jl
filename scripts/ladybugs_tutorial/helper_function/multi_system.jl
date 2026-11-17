@@ -8,9 +8,8 @@ using Molly: alchemical_settings, check_softcores, check_scheduler, softcore_dic
              MinimumMixing, λ_params_function, scale_sterics, volume, LJDispersionCorrectionλ,
              disp_corr_cutoff, disp_corr_factors, lj_disp_corr_types, disp_corr_pe,
              disp_corr_virial!
-
-const AbstractGPUArray = Molly.GPUArrays.AbstractGPUArray
-const AtomsCalculators = Molly.AtomsCalculators
+using AbstractGPUArray
+using AtomsCalculators
 
 include(joinpath(@__DIR__, "probability_shed.jl"))
 
