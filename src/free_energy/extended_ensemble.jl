@@ -106,42 +106,66 @@ function convert_state_inters(ref_sys, pairwise, specific, general, ::Type{AT}) 
     return (carrier.pairwise_inters, carrier.specific_inter_lists, carrier.general_inters)
 end
 
+# The exclusion masks in the form the neighbour finders of the target device store them, so that
+# every state shares one object instead of bit-packing its own: `to_bitmatrix` returns a `BitMatrix`
+# unchanged, but builds a new one from the dense `Matrix{Bool}` that a device array converts to
+function localize_mask(mask, ::Type{AT}) where AT
+    if AT <: AbstractGPUArray
+        # A device array can not be built from the `BitMatrix` that a host copy holds
+        return to_device(mask isa BitArray ? Array(mask) : mask, AT)
+    else
+        return cpu_neighbor_matrix(mask)
+    end
+end
+
 # An expanded ensemble holding only `states`, on the given array type. Per-state vectors keep their
 # global indices and hold `nothing` elsewhere, so indexing them needs no remapping. The exclusion
-# matrices are converted twice however many states are resident, and shared.
-function localize_state_space(space::ExtendedStateSpace, states, ::Type{AT}) where AT
+# matrices are converted twice however many states are resident, and shared, as are the interactions
+# of the states that share them. `build_λ_systems=false` gives a copy that can be shipped to a
+# worker, which rebuilds the λ systems itself, but that can not evaluate an energy here
+function localize_state_space(space::ExtendedStateSpace, states, ::Type{AT};
+                              build_λ_systems::Bool=true) where AT
     resident = sort!(unique!(Int.(collect(states))))
     ref_sys = space.systems[first(resident)]
     reference = System(ref_sys; array_type=AT, loggers=())
     master = System(space.partition.master_sys; array_type=AT, loggers=())
-    λ_eligible = to_device(space.partition.λ_eligible, AT)
-    special_mask = to_device(space.partition.special_mask, AT)
+    λ_eligible = localize_mask(space.partition.λ_eligible, AT)
+    special_mask = localize_mask(space.partition.special_mask, AT)
 
     K = n_states(space)
     λ_systems, λ_atoms, hamiltonians = (Vector{Any}(nothing, K) for _ in 1:3)
     systems, integrators = (Vector{Any}(nothing, K) for _ in 1:2)
     pairwise, specific, general = (Vector{Any}(nothing, K) for _ in 1:3)
+    # States built from one system hold the same interaction objects, and converting such a set once
+    # keeps them shared: the key is the identity of the source, so no state is given interactions it
+    # did not already share, and the mask that every conversion throws away is converted once too
+    converted = IdDict{Any, Any}()
+    convert_once(p, s, g) = get!(converted, (p, s, g)) do
+        convert_state_inters(ref_sys, p, s, g, AT)
+    end
 
     for k in resident
         source = space.partition.λ_hamiltonians[k]
-        hamiltonians[k] = LambdaHamiltonian(convert_state_inters(ref_sys, source.pairwise_inters,
-            source.specific_inter_lists, source.general_inters, AT)...)
+        hamiltonians[k] = LambdaHamiltonian(convert_once(source.pairwise_inters,
+            source.specific_inter_lists, source.general_inters)...)
         λ_atoms[k] = to_device(space.partition.λ_atoms[k], AT)
-        # Every part is already on the target array type, so this converts nothing and the masks
-        # are shared rather than copied per state
-        λ_systems[k] = System(master;
-            atoms                = λ_atoms[k],
-            pairwise_inters      = hamiltonians[k].pairwise_inters,
-            specific_inter_lists = hamiltonians[k].specific_inter_lists,
-            general_inters       = hamiltonians[k].general_inters,
-            neighbor_finder      = build_neighbor_finder(master.neighbor_finder, λ_eligible,
-                                        special_mask; reuse_neighbors=space.partition.reuse_neighbors,
-                                        boundary=master.boundary),
-            loggers              = (),
-        )
-        pairwise[k], specific[k], general[k] = convert_state_inters(ref_sys,
-            space.state_pairwise_inters[k], space.state_specific_inter_lists[k],
-            space.state_general_inters[k], AT)
+        if build_λ_systems
+            # Every part is already on the target array type, so this converts nothing and the
+            # masks are shared rather than copied per state
+            λ_systems[k] = System(master;
+                atoms                = λ_atoms[k],
+                pairwise_inters      = hamiltonians[k].pairwise_inters,
+                specific_inter_lists = hamiltonians[k].specific_inter_lists,
+                general_inters       = hamiltonians[k].general_inters,
+                neighbor_finder      = build_neighbor_finder(master.neighbor_finder, λ_eligible,
+                                            special_mask;
+                                            reuse_neighbors=space.partition.reuse_neighbors,
+                                            boundary=master.boundary),
+                loggers              = (),
+            )
+        end
+        pairwise[k], specific[k], general[k] = convert_once(space.state_pairwise_inters[k],
+            space.state_specific_inter_lists[k], space.state_general_inters[k])
         # One object at every resident index: `ActiveThermoState` deepcopies it, so nothing aliases
         systems[k] = reference
         integrators[k] = space.integrators[k]

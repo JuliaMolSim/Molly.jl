@@ -1063,7 +1063,7 @@ const tss_worker_block = Ref{Any}(nothing)
 function setup_tss_worker!(space, specs, gpu_id, ::Type{AT}) where AT
     # Host arrays are allowed, so that the worker path can be checked without a GPU
     set_gpu_device!(gpu_id, Val(AT <: AbstractGPUArray))
-    states = findall(!isnothing, space.partition.λ_systems)
+    states = findall(!isnothing, space.partition.λ_atoms)
     local_space = localize_state_space(space, states, AT)
     active_state = ActiveThermoState(local_space, first(states))
     estimators = Dict{Int, Any}(spec.window => make_tss_local_estimator(
@@ -1109,11 +1109,14 @@ function setup_tss_workers(gpu_devices, sim::TSSSimulation, ::Type{AT}) where AT
     end
 
     # Every worker holds every window, so any replica can run on any worker. Localized on the host
-    # first so that only the evaluation states cross the wire, and once because all workers get it
+    # first so that only the evaluation states cross the wire, and once because all workers get it.
+    # The λ systems are left out: the worker builds its own, and on the host they would hold a
+    # bit-packed copy of the masks and of the shared interactions for every state
     specs = [tss_estimator_spec(state, w) for w in eachindex(state.windows)]
     states = sort!(unique!(reduce(vcat,
                     [window.evaluation_state_indices for window in state.windows])))
-    host_space = localize_state_space(state.state_space, states, Array)
+    host_space = localize_state_space(state.state_space, states, Array;
+                                      build_λ_systems=false)
     @sync for (i, pid) in pairs(pids)
         @async begin
             remotecall_fetch(setup_tss_worker!, pid, host_space, specs, devices[i], AT)
