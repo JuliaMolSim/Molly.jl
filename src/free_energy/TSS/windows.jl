@@ -28,7 +28,7 @@ struct TSSWindow
             end
         end
 
-        evaluation_state_indices = sort!(unique(Int.(collect(vcat(state_indices, evaluation_state_indices)))))
+        evaluation_state_indices = unique(Int.(collect(vcat(state_indices, evaluation_state_indices))))
         if isempty(evaluation_state_indices)
             throw(ArgumentError("evaluation_state_indices must be non-empty"))
         end

@@ -984,7 +984,14 @@ function resolve_tss_replica_parallel(sim::TSSSimulation,
     if mode == :auto
         # GPU replicas go to the workers, one GPU included, as HREMD does; with no worker process
         # to send them to they stay here, where they share the one device as they always have
-        uses_gpu && return nprocs() > 1 ? :distributed : :serial
+        if uses_gpu
+            if !isnothing(sim.pmf) && nprocs() > 1
+                @warn "PMF deconvolution is not supported with replica_parallel=:distributed " *
+                      "yet, so the replicas run serially on one device although worker " *
+                      "processes are available"
+            end
+            return (nprocs() > 1 && isnothing(sim.pmf)) ? :distributed : :serial
+        end
         return (length(sim.replicas) > 1 && n_threads > 1 && Threads.nthreads() > 1) ?
                :threads : :serial
     end
