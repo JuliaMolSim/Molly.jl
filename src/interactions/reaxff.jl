@@ -313,7 +313,7 @@ struct DeviceParams{GP, AP, BP, OP, AE, AGP, TP, HP, GLP, TAP, HD, HA}
 end
 
 
-mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
+mutable struct ReaxFF2008State{T, VI, MI, MT, VT, AF}
     n_atoms::Int
     sys_atid::VI
     nbrs::MI
@@ -364,6 +364,7 @@ mutable struct ReaxFF2008State{T, VI, MI, MT, VT}
     n_valid_hbonds::VI      # 1-element device vector
     bond_pair_indices::VI
     n_bond_pairs::VI
+    group_forces::AF
 end
 
 
@@ -427,7 +428,8 @@ function empty_state(
         MI(undef, 3, 0),
         VI(undef, 1),
         VI(undef, 0),
-        VI(undef, 1)
+        VI(undef, 1),
+        AT{T, 3}(undef, 3, 0, 0)
     )
 end
 
@@ -1360,6 +1362,7 @@ function init_reaxff_state!(
     n_valid_hbonds = zeros(Int, 1)
     bond_pair_indices = zeros(Int, 0)
     n_bond_pairs = zeros(Int, 1)
+    group_forces = zeros(T, 3, 0, 0)
 
     inter.state = ReaxFF2008State(
         n_atoms,
@@ -1411,7 +1414,8 @@ function init_reaxff_state!(
         to_device(valid_hbonds, AT),
         to_device(n_valid_hbonds, AT),
         to_device(bond_pair_indices, AT),
-        to_device(n_bond_pairs, AT)
+        to_device(n_bond_pairs, AT),
+        to_device(group_forces, AT)
     )
 end
 
@@ -1422,14 +1426,27 @@ function clear_reaxff_state!(
     fill!(inter.state.fill_pos, 0)
     fill!(inter.state.coordn, zero(T))
     fill!(inter.state.forces, zero(T))
-    fill!(inter.state.S_dE_dBO, zero(T))
-    fill!(inter.state.S_dE_dBOπ, zero(T))
-    fill!(inter.state.S_dE_dBOππ, zero(T))
     fill!(inter.state.S_dE_dΔ, zero(T))
     fill!(inter.state.energy_components, zero(T))
     
     inter.state.energy = zero(T)
 end
+
+
+@inline function add_force!(forces::AbstractMatrix, force, i, group)
+    @inbounds for n in 1:3
+        Atomix.@atomic forces[n, i] += force[n]
+    end
+end
+
+@inline function add_force!(forces::AbstractArray{<:Any, 3}, force, i, group)
+    @inbounds for n in 1:3
+        forces[n, i, group] += force[n]
+    end
+end
+
+reaxff_kernel_forces(inter, backend) = inter.state.forces
+reaxff_kernel_forces(inter, ::KernelAbstractions.CPU) = inter.state.group_forces
 
 
 @inline function write_force_BO(
@@ -1444,7 +1461,8 @@ end
     derivatives,
     forces,
     nbrs,
-    fill_pos
+    fill_pos,
+    group
 )
     dBO_dBO′ = derivatives.dBO_dBO′
     dBO_dΔi′ = derivatives.dBO_dΔi′
@@ -1474,10 +1492,8 @@ end
     dE_dBO_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
     force_tmp = dE_dBO_tot .* r_ij_norm
 
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_tmp[n]
-        Atomix.@atomic forces[n, j] -= force_tmp[n]
-    end
+    add_force!(forces, force_tmp, i, group)
+    add_force!(forces, -force_tmp, j, group)
 
     @inbounds for idx_k in 1:fill_pos[i]
         k = nbrs[idx_k, i]
@@ -1491,10 +1507,8 @@ end
         dE_dΔi_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
         force_tmp = dE_dΔi_tot .* r_ik_norm
 
-        for n in 1:3
-            Atomix.@atomic forces[n, i] += force_tmp[n]
-            Atomix.@atomic forces[n, k] -= force_tmp[n]
-        end
+        add_force!(forces, force_tmp, i, group)
+        add_force!(forces, -force_tmp, k, group)
     end
 
     @inbounds for idx_k in 1:fill_pos[j]
@@ -1509,10 +1523,8 @@ end
         dE_dΔj_tot = dE_dBO * coef_BO + dE_dBOπ * coef_BOπ + dE_dBOππ * coef_BOππ
         force_tmp = dE_dΔj_tot .* r_jk_norm
 
-        for n in 1:3
-            Atomix.@atomic forces[n, j] += force_tmp[n]
-            Atomix.@atomic forces[n, k] -= force_tmp[n]
-        end
+        add_force!(forces, force_tmp, j, group)
+        add_force!(forces, -force_tmp, k, group)
     end
 end
 
@@ -1525,17 +1537,12 @@ end
     dE_dΘ,
     dΘ_dri,
     dΘ_drj,
-    dΘ_drk
+    dΘ_drk,
+    group
 )
-    force_i = dE_dΘ .* dΘ_dri
-    force_j = dE_dΘ .* dΘ_drj
-    force_k = dE_dΘ .* dΘ_drk
-
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_i[n]
-        Atomix.@atomic forces[n, j] += force_j[n]
-        Atomix.@atomic forces[n, k] += force_k[n]
-    end
+    add_force!(forces, dE_dΘ .* dΘ_dri, i, group)
+    add_force!(forces, dE_dΘ .* dΘ_drj, j, group)
+    add_force!(forces, dE_dΘ .* dΘ_drk, k, group)
 end
 
 
@@ -1549,19 +1556,13 @@ end
     dω_dri,
     dω_drj,
     dw_drk,
-    dw_drl
+    dw_drl,
+    group
 )
-    force_i = dE_dω .* dω_dri
-    force_j = dE_dω .* dω_drj
-    force_k = dE_dω .* dw_drk
-    force_l = dE_dω .* dw_drl
-
-    for n in 1:3
-        Atomix.@atomic forces[n, i] += force_i[n]
-        Atomix.@atomic forces[n, j] += force_j[n]
-        Atomix.@atomic forces[n, k] += force_k[n]
-        Atomix.@atomic forces[n, l] += force_l[n]
-    end
+    add_force!(forces, dE_dω .* dω_dri, i, group)
+    add_force!(forces, dE_dω .* dω_drj, j, group)
+    add_force!(forces, dE_dω .* dw_drk, k, group)
+    add_force!(forces, dE_dω .* dw_drl, l, group)
 end
 
 
@@ -1599,6 +1600,7 @@ end
     derivatives
 )
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -1623,7 +1625,8 @@ end
                     derivatives,
                     forces,
                     nbrs,
-                    fill_pos
+                    fill_pos,
+                    group
                 )
             end
         end
@@ -1671,12 +1674,15 @@ function resolve_forces!(
         S_dE_dBOπ,
         S_dE_dBOππ,
         S_dE_dΔ,
-        inter.state.forces,
+        reaxff_kernel_forces(inter, backend),
         derivatives,
         ndrange=length(nbrs),
         workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
     )
 end
+
+
+@inline positive_pow(x, y) = exp(y * log(x))
 
 
 @inline function smoothness_taper(x::T, x_min, x_max) where {T}
@@ -1726,7 +1732,7 @@ end
         p_bo2 = bndp_ij.p_bo2
         ro_σ_bond = odgp_ij.ro_sigma
 
-        BO′_σ_arg = p_bo1 * (dr / ro_σ_bond)^p_bo2
+        BO′_σ_arg = p_bo1 * positive_pow(dr / ro_σ_bond, p_bo2)
         BO′_σ_exp = exp(BO′_σ_arg)
         BO′_σ_shift = (one(T) + bo_cutoff) * BO′_σ_exp
         BO′_σ = BO′_σ_shift - bo_cutoff
@@ -1747,7 +1753,7 @@ end
         p_bo4 = bndp_ij.p_bo4
         ro_π_bond = odgp_ij.ro_pi
 
-        BO′_π_arg = p_bo3 * (dr / ro_π_bond)^p_bo4
+        BO′_π_arg = p_bo3 * positive_pow(dr / ro_π_bond, p_bo4)
         BO′_π = exp(BO′_π_arg)
         dBOπ′_dr = BO′_π * p_bo4 * BO′_π_arg / dr 
 
@@ -1766,7 +1772,7 @@ end
         p_bo6 = bndp_ij.p_bo6
         ro_ππ_bond = odgp_ij.ro_pipi
 
-        BO′_ππ_arg = p_bo5 * (dr / ro_ππ_bond)^p_bo6
+        BO′_ππ_arg = p_bo5 * positive_pow(dr / ro_ππ_bond, p_bo6)
         BO′_ππ = exp(BO′_ππ_arg)
         dBOππ′_dr = BO′_ππ * p_bo6 * BO′_ππ_arg / dr
 
@@ -2260,12 +2266,12 @@ end
             dEBond_dBOπ = -De_π - dEBond_dBOσ
             dEBond_dBOππ = -De_ππ - dEBond_dBOσ
 
-            S_dE_dBO[idx_j, i] += dEBond_dBO
-            S_dE_dBO[idx_i, j] += dEBond_dBO
-            S_dE_dBOπ[idx_j, i] += dEBond_dBOπ
-            S_dE_dBOπ[idx_i, j] += dEBond_dBOπ
-            S_dE_dBOππ[idx_j, i] += dEBond_dBOππ
-            S_dE_dBOππ[idx_i, j] += dEBond_dBOππ
+            S_dE_dBO[idx_j, i] = dEBond_dBO
+            S_dE_dBO[idx_i, j] = dEBond_dBO
+            S_dE_dBOπ[idx_j, i] = dEBond_dBOπ
+            S_dE_dBOπ[idx_i, j] = dEBond_dBOπ
+            S_dE_dBOππ[idx_j, i] = dEBond_dBOππ
+            S_dE_dBOππ[idx_i, j] = dEBond_dBOππ
 
             bnd_engy = dEbond_exp1 * bo_σ  - De_π * bo_π - De_ππ * bo_ππ
             
@@ -2880,8 +2886,10 @@ end
     angp,
     atid,
     ::Val{smoothness_correction},
+    angle_args,
 ) where {smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -2914,14 +2922,22 @@ end
                                 angp_ijk = angp[p_idx]
 
                                 if abs(angp_ijk.p_val1) > 0.001
-                                    valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
+                                    if isnothing(angle_args)
+                                        valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
 
-                                    # if overflow, continue counting so can resize later
-                                    if valid_angle_idx <= size(valid_angles, 2)
-                                        valid_angles[1, valid_angle_idx] = j
-                                        valid_angles[2, valid_angle_idx] = idx_i
-                                        valid_angles[3, valid_angle_idx] = idx_k
-                                        valid_angles[4, valid_angle_idx] = p_idx
+                                        # if overflow, continue counting so can resize later
+                                        if valid_angle_idx <= size(valid_angles, 2)
+                                            valid_angles[1, valid_angle_idx] = j
+                                            valid_angles[2, valid_angle_idx] = idx_i
+                                            valid_angles[3, valid_angle_idx] = idx_k
+                                            valid_angles[4, valid_angle_idx] = p_idx
+                                        end
+                                    else
+                                        valence_angle!(
+                                            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO,
+                                            valence_cutoff, valence_prod_cutoff, angle_entries,
+                                            angp, atid, Val(smoothness_correction), angle_args...,
+                                        )
                                     end
                                 end
                             end
@@ -2972,6 +2988,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_angles[1, ti]
@@ -2979,6 +2996,58 @@ end
         idx_k = valid_angles[3, ti]
         p_idx = valid_angles[4, ti]
 
+        valence_angle!(
+            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO, valence_cutoff,
+            valence_prod_cutoff, angle_entries, angp, atid, Val(smoothness_correction),
+            atmp, genp, Δ_e_mod2, n_lp, dn_lp_dΔi, Δ_angle, Δ, Δ_boc, coordn,
+            reverse_nbrs, BO_π, BO_ππ, coords, boundary, conv_factor, deg_to_rad,
+            val_energies, pen_energies, coa_energies, S_dE_dBO, S_dE_dBOπ, S_dE_dBOππ,
+            S_dE_dΔ, forces,
+        )
+    end
+end
+
+@inline function valence_angle!(
+    j,
+    idx_i,
+    idx_k,
+    p_idx,
+    group,
+    fill_pos,
+    nbrs,
+    BO,
+    valence_cutoff,
+    valence_prod_cutoff,
+    angle_entries,
+    angp,
+    atid,
+    ::Val{smoothness_correction},
+    atmp,
+    genp,
+    Δ_e_mod2,
+    n_lp,
+    dn_lp_dΔi,
+    Δ_angle,
+    Δ,
+    Δ_boc,
+    coordn,
+    reverse_nbrs,
+    BO_π,
+    BO_ππ,
+    coords,
+    boundary,
+    conv_factor::T,
+    deg_to_rad,
+    val_energies,
+    pen_energies,
+    coa_energies,
+    S_dE_dBO,
+    S_dE_dBOπ,
+    S_dE_dBOππ,
+    S_dE_dΔ,
+    forces,
+) where {T, smoothness_correction}
+    @inbounds begin
         p_val6 = genp.p_val6
         p_val8 = genp.p_val8
         p_val9 = genp.p_val9
@@ -3022,11 +3091,11 @@ end
             SBO2 = zero(T)
             dSBO2 = zero(T)
         elseif SBO < 1.0
-            SBO2 = SBO^p_val9
-            dSBO2 = p_val9 * SBO^(p_val9 - one(T))
+            SBO2 = positive_pow(SBO, p_val9)
+            dSBO2 = p_val9 * positive_pow(SBO, p_val9 - one(T))
         elseif SBO < 2.0
-            SBO2 = T(2.0) - (T(2.0) - SBO)^p_val9
-            dSBO2 = p_val9 * (T(2.0) - SBO)^(p_val9 - one(T))
+            SBO2 = T(2.0) - positive_pow(T(2.0) - SBO, p_val9)
+            dSBO2 = p_val9 * positive_pow(T(2.0) - SBO, p_val9 - one(T))
         else
             SBO2 = T(2.0)
             dSBO2 = zero(T)
@@ -3095,8 +3164,8 @@ end
                         f8 = p_val5 - (val_sm1 * val_sm2 * val_inv1)
                         df8_dΔj = -(p_val5 - one(T)) * (val_exp1 * p_val6 * val_arg_3 - val_sm2 * (val_exp1 * p_val6 + val_exp3 * -p_val7)) * val_inv1 * val_inv1
 
-                        val_arg1 = p_val3 * (BO_ij)^(p_val4 - one(T))   
-                        val_arg2 = p_val3 * (BO_jk)^(p_val4 - one(T))
+                        val_arg1 = p_val3 * positive_pow(BO_ij, p_val4 - one(T))
+                        val_arg2 = p_val3 * positive_pow(BO_jk, p_val4 - one(T))
                         f7_exp1 = exp(-val_arg1 * BO_ij)
                         f7_exp2 = exp(-val_arg2 * BO_jk)
 
@@ -3224,7 +3293,8 @@ end
                             dE_val_dTheta_ijk,
                             dtheta_dri,
                             dtheta_drj,
-                            dtheta_drk
+                            dtheta_drk,
+                            group
                         )
 
                         dE_val_prod2 = dE_val_prod * Theta_oo * val_exp2 * p_val10 * dSBO2 * deg_to_rad
@@ -3249,6 +3319,7 @@ end
             end
         end
     end
+    return nothing
 end
 
 
@@ -3295,6 +3366,37 @@ function valence_angles!(
 
     conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
 
+    angle_args = nothing
+    if backend isa KernelAbstractions.CPU
+        # must stay at 32 elements or fewer for the splat in construct_valid_angles! to be specialised
+        angle_args = (
+            atmp,
+            genp,
+            Δ_e_mod2,
+            n_lp,
+            dn_lp_dΔi,
+            Δ_angle,
+            Δ,
+            Δ_boc,
+            coordn,
+            reverse_nbrs,
+            BO_π,
+            BO_ππ,
+            sys.coords,
+            sys.boundary,
+            conv_factor,
+            deg_to_rad,
+            val_energies,
+            pen_energies,
+            coa_energies,
+            S_dE_dBO,
+            S_dE_dBOπ,
+            S_dE_dBOππ,
+            S_dE_dΔ,
+            reaxff_kernel_forces(inter, backend),
+        )
+    end
+
     fill!(inter.state.n_valid_angles, 0)
 
     valid_angles_kernel! = construct_valid_angles!(backend)
@@ -3310,7 +3412,8 @@ function valence_angles!(
             angle_entries,
             angp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            angle_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3337,7 +3440,8 @@ function valence_angles!(
             angle_entries,
             angp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            angle_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3383,7 +3487,7 @@ function valence_angles!(
             S_dE_dBOπ,
             S_dE_dBOππ,
             S_dE_dΔ,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             inter.smoothness_correction,
             ndrange=n_valid_angles,
             workgroupsize=reaxff_workgroupsize(backend, n_valid_angles, n_threads)
@@ -3459,8 +3563,10 @@ end
     torp,
     atid,
     ::Val{smoothness_correction},
+    torsion_args,
 ) where {smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         max_nbrs = size(nbrs, 1)
@@ -3499,13 +3605,17 @@ end
                                             BO_kl = BO_kl_raw - valence_cutoff
 
                                             if BO_kl > zero(BO_kl) && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
-                                                valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
+                                                if isnothing(torsion_args)
+                                                    valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
 
-                                                if valid_torsion_idx <= size(valid_torsions, 2)
-                                                    valid_torsions[1, valid_torsion_idx] = j
-                                                    valid_torsions[2, valid_torsion_idx] = idx_k
-                                                    valid_torsions[3, valid_torsion_idx] = idx_i
-                                                    valid_torsions[4, valid_torsion_idx] = idx_l
+                                                    if valid_torsion_idx <= size(valid_torsions, 2)
+                                                        valid_torsions[1, valid_torsion_idx] = j
+                                                        valid_torsions[2, valid_torsion_idx] = idx_k
+                                                        valid_torsions[3, valid_torsion_idx] = idx_i
+                                                        valid_torsions[4, valid_torsion_idx] = idx_l
+                                                    end
+                                                else
+                                                    torsion!(j, idx_k, idx_i, idx_l, group, torsion_args...)
                                                 end
                                             end
                                         end
@@ -3544,6 +3654,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_torsions[1, ti]
@@ -3551,6 +3662,42 @@ end
         idx_i = valid_torsions[3, ti]
         idx_l = valid_torsions[4, ti]
 
+        torsion!(
+            j, idx_k, idx_i, idx_l, group, nbrs, BO, valence_cutoff, reverse_nbrs,
+            Δ_angle, genp, conv_factor, coords, boundary, torp, atid, torsion_energies,
+            conj_energies, forces, S_dE_dΔ, S_dE_dBO, S_dE_dBOπ, BO_π,
+            Val(smoothness_correction),
+        )
+    end
+end
+
+@inline function torsion!(
+    j,
+    idx_k,
+    idx_i,
+    idx_l,
+    group,
+    nbrs,
+    BO,
+    valence_cutoff,
+    reverse_nbrs,
+    Δ_angle,
+    genp,
+    conv_factor::T,
+    coords,
+    boundary,
+    torp,
+    atid,
+    torsion_energies,
+    conj_energies,
+    forces,
+    S_dE_dΔ,
+    S_dE_dBO,
+    S_dE_dBOπ,
+    BO_π,
+    ::Val{smoothness_correction},
+) where {T, smoothness_correction}
+    @inbounds begin
         p_tor2 = genp.p_tor2
         p_tor3 = genp.p_tor3
         p_tor4 = genp.p_tor4
@@ -3758,7 +3905,8 @@ end
                                             dE_tors_dΘijk + dE_conj_dΘijk,
                                             dΘ_ijk_dri_buf,
                                             dΘ_ijk_drj_buf,
-                                            dΘ_ijk_drk_buf
+                                            dΘ_ijk_drk_buf,
+                                            group
                                         )
                                         write_force_Θ(
                                             forces,
@@ -3768,7 +3916,8 @@ end
                                             dE_tors_dΘjkl + dE_conj_dΘjkl,
                                             dΘ_jkl_drj_buf,
                                             dΘ_jkl_drk_buf,
-                                            dΘ_jkl_drl_buf
+                                            dΘ_jkl_drl_buf,
+                                            group
                                         )
 
                                         dE_tors_dω = f10 * sin_prod * T(0.5) * (
@@ -3789,7 +3938,8 @@ end
                                             dω_dri,
                                             dω_drj,
                                             dω_drk,
-                                            dω_drl
+                                            dω_drl,
+                                            group
                                         )
                                     end
                                 end
@@ -3800,6 +3950,7 @@ end
             end
         end
     end
+    return nothing
 end
 
 
@@ -3834,6 +3985,31 @@ function torsions!(
 
     conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
 
+    torsion_args = nothing
+    if backend isa KernelAbstractions.CPU
+        torsion_args = (
+            nbrs,
+            BO,
+            valence_cutoff,
+            reverse_nbrs,
+            Δ_angle,
+            genp,
+            conv_factor,
+            sys.coords,
+            sys.boundary,
+            torp,
+            atid,
+            torsion_energies,
+            conj_energies,
+            reaxff_kernel_forces(inter, backend),
+            S_dE_dΔ,
+            S_dE_dBO,
+            S_dE_dBOπ,
+            BO_π,
+            inter.smoothness_correction,
+        )
+    end
+
     fill!(inter.state.n_valid_torsions, 0)
 
     # this continues counting even when capacity of valid_torsions is reached => reports exact required size
@@ -3848,7 +4024,8 @@ function torsions!(
             valence_cutoff,
             torp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            torsion_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3874,7 +4051,8 @@ function torsions!(
             valence_cutoff,
             torp,
             atid,
-            inter.smoothness_correction;
+            inter.smoothness_correction,
+            torsion_args;
             ndrange=length(nbrs),
             workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
         )
@@ -3903,7 +4081,7 @@ function torsions!(
             atid,
             torsion_energies,
             conj_energies,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             S_dE_dΔ,
             S_dE_dBO,
             S_dE_dBOπ,
@@ -4140,6 +4318,7 @@ end
     hbond_args,
 ) where T
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     cutoff_sq = hbond_dist_cutoff * hbond_dist_cutoff
 
@@ -4198,7 +4377,7 @@ end
                             j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
                             coords, boundary, hbdp, atid, S_dE_dBO, forces,
                             hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-                            smoothness,
+                            smoothness, group,
                         )
                     end
                 end
@@ -4227,6 +4406,7 @@ end
     ::Val{smoothness_correction},
 ) where {T, smoothness_correction}
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         j     = valid_hbonds[1, ti]
@@ -4237,7 +4417,7 @@ end
             j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
             coords, boundary, hbdp, atid, S_dE_dBO, forces,
             hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-            Val(smoothness_correction),
+            Val(smoothness_correction), group,
         )
     end
 end
@@ -4260,6 +4440,7 @@ end
     hbond_bo_cutoff,
     hbond_dist_cutoff,
     ::Val{smoothness_correction},
+    group,
 ) where {T, smoothness_correction}
     @inbounds begin
         i = nbrs[idx_i, j]
@@ -4277,12 +4458,9 @@ end
         r_jk_sq = r_vec_jk[1]^2 + r_vec_jk[2]^2 + r_vec_jk[3]^2
         r_jk = sqrt(r_jk_sq)
         inv_r_jk = inv(r_jk)
-        r_vec_jk_unit = r_vec_jk / r_jk
+        r_vec_jk_unit = r_vec_jk * inv_r_jk
 
         energy_pair = zero(T)
-        f_j_x = zero(T)
-        f_j_y = zero(T)
-        f_j_z = zero(T)
 
         idx_j = reverse_nbrs[idx_i, j]
 
@@ -4355,24 +4533,12 @@ end
 
         dE_hbond_drjk_vec = dE_hbond_drjk * r_vec_jk_unit
 
-        Atomix.@atomic forces[1, k] += dE_dΘ_k[1] - dE_hbond_drjk_vec[1]
-        Atomix.@atomic forces[2, k] += dE_dΘ_k[2] - dE_hbond_drjk_vec[2]
-        Atomix.@atomic forces[3, k] += dE_dΘ_k[3] - dE_hbond_drjk_vec[3]
-
-        Atomix.@atomic forces[1, i] += dE_dΘ_i[1]
-        Atomix.@atomic forces[2, i] += dE_dΘ_i[2]
-        Atomix.@atomic forces[3, i] += dE_dΘ_i[3]
-
-        f_j_x += dE_dΘ_j[1] + dE_hbond_drjk_vec[1]
-        f_j_y += dE_dΘ_j[2] + dE_hbond_drjk_vec[2]
-        f_j_z += dE_dΘ_j[3] + dE_hbond_drjk_vec[3]
+        add_force!(forces, dE_dΘ_k - dE_hbond_drjk_vec, k, group)
+        add_force!(forces, dE_dΘ_i, i, group)
+        add_force!(forces, dE_dΘ_j + dE_hbond_drjk_vec, j, group)
 
         Atomix.@atomic S_dE_dBO[idx_i, j] += dE_hbond_dBOij
         Atomix.@atomic S_dE_dBO[idx_j, i] += dE_hbond_dBOij
-
-        Atomix.@atomic forces[1, j] += f_j_x
-        Atomix.@atomic forces[2, j] += f_j_y
-        Atomix.@atomic forces[3, j] += f_j_z
 
         Atomix.@atomic hb_energies[j] += energy_pair
     end
@@ -4416,7 +4582,7 @@ function hydrogen_bonds!(
         hbond_args = (
             reverse_nbrs,
             inter.state.S_dE_dBO,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             hb_energies,
             inter.smoothness_correction,
         )
@@ -4503,7 +4669,7 @@ function hydrogen_bonds!(
             hbdp,
             atid,
             inter.state.S_dE_dBO,
-            inter.state.forces,
+            reaxff_kernel_forces(inter, backend),
             hb_energies,
             hbond_bo_cutoff,
             hbond_dist_cutoff,
@@ -4545,6 +4711,7 @@ end
     upper_taper_radius
 ) where T
     ti = @index(Global, Linear)
+    group = @index(Group, Linear)
 
     @inbounds begin
         ni = far_nbrs_list[ti]
@@ -4554,7 +4721,7 @@ end
         r_ij = norm(r_vec_ij)
 
         if r_ij <= upper_taper_radius
-            r_ij_unit = r_vec_ij / r_ij
+            r_ij_unit = r_vec_ij * inv(r_ij)
     
             Tap = muladd(tp.Tap_7, r_ij, tp.Tap_6)
             Tap = muladd(Tap, r_ij, tp.Tap_5)
@@ -4580,9 +4747,9 @@ end
     
             gamma_w_inv_pow = odgp_ij.gamma_w_inv_pow
     
-            r_ij_pow = r_ij^p_vdW1
+            r_ij_pow = positive_pow(r_ij, p_vdW1)
             f13_sum1 = r_ij_pow + gamma_w_inv_pow
-            f13 = f13_sum1^p_vdW1_inv
+            f13 = positive_pow(f13_sum1, p_vdW1_inv)
     
             df13_drij = f13 * r_ij_pow * inv(f13_sum1 * r_ij)
     
@@ -4619,10 +4786,8 @@ end
             
             tot_dE_drij = (dE_vdW_drij + dE_coulomb_drij) * r_ij_unit
     
-            for n in 1:3
-                Atomix.@atomic forces[n, i] += tot_dE_drij[n]
-                Atomix.@atomic forces[n, j] -= tot_dE_drij[n]
-            end
+            add_force!(forces, tot_dE_drij, i, group)
+            add_force!(forces, -tot_dE_drij, j, group)
         end
     end
 end
@@ -4682,7 +4847,7 @@ function non_bonded!(
         p_vdW1_inv,
         q,
         C,
-        inter.state.forces,
+        reaxff_kernel_forces(inter, backend),
         vdW_energies,
         coulomb_energies,
         upper_taper_radius;
@@ -4918,6 +5083,25 @@ function accumulate_reaxff_energy!(inter, energies, slots, backend)
 end
 
 
+@kernel function reduce_group_forces_kernel(
+    forces,
+    group_forces
+)
+    i = @index(Global, Linear)
+
+    @inbounds for n in 1:3
+        force = zero(eltype(forces))
+
+        for group in axes(group_forces, 3)
+            force += group_forces[n, i, group]
+            group_forces[n, i, group] = zero(eltype(forces))
+        end
+
+        forces[n, i] += force
+    end
+end
+
+
 function compute_reaxff_energy_forces!(
     inter::ReaxFF{ReaxFF2008, T},
     sys::System,
@@ -4925,7 +5109,13 @@ function compute_reaxff_energy_forces!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where {T}
-    
+    n_threads = max(n_threads, 1)
+    n_atoms = inter.state.n_atoms
+
+    if backend isa KernelAbstractions.CPU && size(inter.state.group_forces, 3) < n_threads
+        inter.state.group_forces = zeros(T, 3, n_atoms, n_threads)
+    end
+
     clear_reaxff_state!(inter)
     bonds!(inter, sys, neighbors, backend; n_threads=n_threads)
     lone_pairs!(inter, backend; n_threads=n_threads)
@@ -4939,6 +5129,14 @@ function compute_reaxff_energy_forces!(
 
     if backend isa KernelAbstractions.GPU
         inter.state.energy = sum(inter.state.energy_components)
+    else
+        reduce_kernel = reduce_group_forces_kernel(backend)
+        reduce_kernel(
+            inter.state.forces,
+            inter.state.group_forces;
+            ndrange=n_atoms,
+            workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        )
     end
 
     return inter.state.energy

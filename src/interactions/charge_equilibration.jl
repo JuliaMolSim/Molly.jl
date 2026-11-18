@@ -25,7 +25,7 @@ end
 eem_coupling_cutoff(coupling) = nothing
 
 # Mutable since H_nonzero size can change
-@kwdef mutable struct EEMState{VQ, VI}
+@kwdef mutable struct EEMState{VQ, VI, VC}
     q::VQ
     q_prev_1::VQ
     q_prev_2::VQ
@@ -38,7 +38,7 @@ eem_coupling_cutoff(coupling) = nothing
     # for off-diagonal part of H, represent using CSR
     H_nonzero::VQ
     rowptr::VI          # rowptr[i] is where row i begins in colidx
-    colidx::VI          # column indices of non zero entries in CSR matrix
+    colidx::VC          # column indices of non zero entries in CSR matrix
     row_counts::VI      # number of entries in each row in CSR matrix
     write_ptr::VI       # mutable cursor when modifying CSR arrays
 
@@ -83,7 +83,7 @@ write the converged charges from the solve into `sys.atoms`. EEM tallies the cha
 the global energy, but the corresponding electrostatic pair energy and forces are supplied by another
 interaction. For [`ReaxFF`](@ref), use `ElectronegativityEqualizationMethod(reaxff, atoms_data; ...)`.
 """
-@kwdef struct ElectronegativityEqualizationMethod{C, VI, VQ, QT}
+@kwdef struct ElectronegativityEqualizationMethod{C, VI, VQ, QT, VC}
     coupling::C
     n_atoms::Int
     type_ids::VI    # Vector of Ints, shape=(n_atoms,) 
@@ -92,7 +92,7 @@ interaction. For [`ReaxFF`](@ref), use `ElectronegativityEqualizationMethod(reax
     tolerance::QT
     squared_tolerance::QT   # χ_norm = norm(eem.state.mχ); squared_tolerance = (eem.tolerance * χ_norm)^2
     max_iterations::Int
-    state::EEMState{VQ, VI}
+    state::EEMState{VQ, VI, VC}
 end
 
 evaluate_before_pairwise(::ElectronegativityEqualizationMethod) = true
@@ -152,7 +152,7 @@ function ElectronegativityEqualizationMethod(
     fill!(H_nonzero, zero(QT))
 
     rowptr = similar(type_ids, n_atoms + 1)
-    colidx = similar(type_ids, 0)           # resized later according to number of CSR entries (2*n_pairs)
+    colidx = similar(type_ids, Int32, 0)    # resized later according to number of CSR entries (2*n_pairs)
     row_counts = similar(type_ids, n_atoms)
     write_ptr = similar(type_ids, n_atoms)
 
@@ -830,7 +830,7 @@ end
 
 
 # predicts next time step's charges using Lagrange interpolation
-# uses quartic charge prediction when there is sufficient history
+# uses cubic prediction for tolerance >= 1e-7, otherwise quartic
 # when there is insufficient history, uses fewer history vectors to avoid oscillation in predicted charges
 # every coefficient set sums to one, preserving total charge
 # only modifies q
@@ -1254,7 +1254,8 @@ function charge_equilibration!(
             eem.state.q_backup
         )
 
-        eem.state.history_count = min(eem.state.history_count + 1, 5)
+        max_history_count = eem.tolerance >= QT(1e-7) ? 4 : 5
+        eem.state.history_count = min(eem.state.history_count + 1, max_history_count)
         eem.state.last_history_step = step_n
     end
 
