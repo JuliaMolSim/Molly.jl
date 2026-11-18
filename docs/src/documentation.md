@@ -735,6 +735,7 @@ Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`ReplicaExc
 On CPU these are run in parallel by dividing up the number of available threads.
 On GPU each device is driven by its own worker process from Distributed.jl, so add one worker per GPU with `addprocs` and load Molly and the GPU package on the workers with `@everywhere` before calling [`simulate!`](@ref).
 All visible devices are used by default, and the `gpu_devices` keyword argument selects others, e.g. `gpu_devices=collect(CUDA.devices())[1:1]` with one worker.
+Windowed TSS ([`TSSState`](@ref) and [`TSSSimulation`](@ref)) uses the same arrangement, dealing the replicas of a cycle out between the workers; see the [Free energy calculation](@ref) section.
 For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 2.5 ps:
 ```julia
 using Molly

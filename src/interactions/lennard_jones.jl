@@ -574,6 +574,9 @@ function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; schedul
     return update_cached_parameters(dc, atoms_cpu)
 end
 
+# `n_eff` is a particle count kept in Float64, so the generic rebuild must not downcast it
+unconverted_fields(::Type{<:LJDispersionCorrectionλ}) = (:n_eff,)
+
 function update_cached_parameters(dc::LJDispersionCorrectionλ, atoms)
     factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
             from_device(dc.class_pairs), atoms, dc.n_eff, lj_lambda_pair_params(dc),

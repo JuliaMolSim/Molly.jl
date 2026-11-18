@@ -246,6 +246,21 @@ are called by the task that runs that replica, in sample order, so with
 Without sample loggers, no sample is constructed.
 Pass `replica_rngs` to [`simulate!`](@ref) to supply one RNG stream per replica;
 otherwise, each replica RNG is reseeded from the top-level `rng`.
+
+`replica_parallel` selects how [`simulate!`](@ref) runs the replicas of a cycle: `:serial` one
+after another, `:threads` on separate threads for CPU replicas, or `:distributed` on
+Distributed.jl worker processes, one per device. The default `:auto` picks `:distributed` for
+GPU-backed replicas when worker processes are available, `:threads` for multiple CPU replicas
+and `:serial` otherwise; `:distributed` can also be asked for explicitly with CPU replicas,
+where each worker is simply another process. With `:distributed` every worker holds every
+window and the replicas are dealt out between the workers, so the devices run replicas
+concurrently and the host keeps the estimators; the number of replicas each worker ran per
+cycle is recorded in `state.stats.worker_occupancy`. Add the workers with `addprocs` and load
+Molly, and the GPU package for GPU replicas, on them with `@everywhere` beforehand. Pass
+`gpu_devices` to [`simulate!`](@ref) to select the devices, one per worker, all visible GPUs
+being used by default; with CPU replicas the ids are ignored and the default is one worker per
+process. PMF deconvolution is not supported with `:distributed`, and `:auto` will not pick it
+when a PMF is given.
 """
 mutable struct TSSSimulation{S, R, W, P}
     state::S
@@ -342,16 +357,20 @@ function TSSSimulation(state::TSSState;
 end
 
 function WindowedTSSReplicaWorkspace(state::TSSState; partition = nothing)
-    max_eval_states = maximum(length(estimator.evaluation_state_indices) for estimator in state.estimators)
-    reference_estimator = first(state.estimators)
-    FT = eltype(reference_estimator.f)
-    ST = eltype(reference_estimator.energies)
     workspace_partition = isnothing(partition) ?
                           deepcopy(state.state_space.partition) :
                           partition
+    return WindowedTSSReplicaWorkspace(state.estimators, workspace_partition)
+end
+
+function WindowedTSSReplicaWorkspace(estimators, partition)
+    max_eval_states = maximum(length(estimator.evaluation_state_indices) for estimator in estimators)
+    reference_estimator = first(estimators)
+    FT = eltype(reference_estimator.f)
+    ST = eltype(reference_estimator.energies)
 
     return WindowedTSSReplicaWorkspace(
-        workspace_partition,
+        partition,
         Vector{ST}(undef, max_eval_states),
         zeros(FT, max_eval_states),
         zeros(FT, max_eval_states),
@@ -577,16 +596,6 @@ function validate_windowed_tss_replica_history_support(state::TSSState,
     return nothing
 end
 
-function windowed_tss_cycle_error(state::TSSState,
-                                   message::AbstractString,
-                                   cycle_window::Int,
-                                   substep::Int)
-    return ArgumentError(
-        "TSS windowed cycle invariant failed at iteration $(state.iteration), " *
-        "substep $(substep), fixed cycle window $(cycle_window): $(message)"
-    )
-end
-
 function drop_old_windowed_tss_histories!(state::TSSState, history_time::Int)
     for estimator in state.estimators
         isnothing(estimator.history) && continue
@@ -612,26 +621,26 @@ function check_windowed_tss_replica_invariant(state::TSSState,
     return replica
 end
 
-function check_windowed_tss_replica_cycle_state!(state::TSSState,
-                                                  replica::WindowedTSSReplica,
-                                                  cycle_window::Int,
-                                                  state_idx::Int,
-                                                  substep::Int,
-                                                  label::AbstractString)
-    if !window_contains_state(state.windows[cycle_window], state_idx)
-        throw(windowed_tss_cycle_error(
-            state,
-            "$(label) state $(state_idx) is not contained in fixed cycle window $(cycle_window)",
-            cycle_window,
-            substep,
+# The cycle body runs on a worker process in the multi-GPU path and so cannot see the TSSState:
+# the window's own state list carries everything the check needs
+function check_tss_cycle_state!(estimator::TSSLocalEstimator,
+                                 replica::WindowedTSSReplica,
+                                 cycle_window::Int,
+                                 state_idx::Int,
+                                 substep::Int,
+                                 label::AbstractString)
+    if iszero(estimator.local_index_by_state[state_idx])
+        throw(ArgumentError(
+            "TSS windowed cycle invariant failed at iteration $(estimator.iteration), " *
+            "substep $(substep), fixed cycle window $(cycle_window): $(label) state " *
+            "$(state_idx) is not contained in window states $(estimator.state_indices)"
         ))
     end
     if replica.active_window != cycle_window
-        throw(windowed_tss_cycle_error(
-            state,
-            "replica active window $(replica.active_window) changed during the cycle",
-            cycle_window,
-            substep,
+        throw(ArgumentError(
+            "TSS windowed cycle invariant failed at iteration $(estimator.iteration), " *
+            "substep $(substep), fixed cycle window $(cycle_window): replica active window " *
+            "$(replica.active_window) changed during the cycle"
         ))
     end
     return replica
@@ -707,6 +716,9 @@ function tss_sample_global_state(rng::AbstractRNG,
     return tss_global_index(estimator, idx)
 end
 
+windowed_tss_window_offset(state::TSSState{FT}, window::Int) where {FT} =
+    isnothing(state.coupling) ? zero(FT) : FT(state.coupling.window_offsets[window])
+
 function collect_windowed_tss_observation!(state::TSSState{FT},
                                             replica::WindowedTSSReplica,
                                             workspace::WindowedTSSReplicaWorkspace,
@@ -719,19 +731,42 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
                                             log_initial_state::Bool) where {FT}
     check_windowed_tss_invariant(state)
     check_windowed_tss_replica_invariant(state, replica)
-
-    entry_state = replica.active_state.active_idx
-    replica.active_window = other_window_for_state(state, replica.active_window, entry_state)
     cycle_window = replica.active_window
-    estimator = state.estimators[cycle_window]
-    check_windowed_tss_replica_cycle_state!(
-        state,
+    observation = run_tss_cycle!(
         replica,
-        cycle_window,
-        entry_state,
-        0,
-        "entry",
+        workspace,
+        state.estimators[cycle_window],
+        state.state_space,
+        pmf_deconvolution,
+        replica_index,
+        n_md_steps,
+        self_adjustment_steps,
+        n_threads,
+        initial_step,
+        log_initial_state,
+        windowed_tss_window_offset(state, cycle_window),
     )
+    check_windowed_tss_replica_invariant(state, replica)
+    return observation
+end
+
+# One TSS cycle for one replica, fixed to the window of `estimator`. Sees no TSSState, so it runs
+# unchanged on a worker process holding only that window's states
+function run_tss_cycle!(replica::WindowedTSSReplica,
+                        workspace::WindowedTSSReplicaWorkspace,
+                        estimator::TSSLocalEstimator{FT},
+                        space::ExtendedStateSpace,
+                        pmf_deconvolution,
+                        replica_index::Int,
+                        n_md_steps::Int,
+                        self_adjustment_steps::Int,
+                        n_threads::Int,
+                        initial_step::Int,
+                        log_initial_state::Bool,
+                        window_offset::FT) where {FT}
+    cycle_window = replica.active_window
+    entry_state = replica.active_state.active_idx
+    check_tss_cycle_state!(estimator, replica, cycle_window, entry_state, 0, "entry")
 
     final_visited_state = entry_state
     final_next_state = entry_state
@@ -740,14 +775,7 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
 
     for substep in 1:self_adjustment_steps
         visited_state = replica.active_state.active_idx
-        check_windowed_tss_replica_cycle_state!(
-            state,
-            replica,
-            cycle_window,
-            visited_state,
-            substep,
-            "visited",
-        )
+        check_tss_cycle_state!(estimator, replica, cycle_window, visited_state, substep, "visited")
 
         if log_initial_state && substep == 1 && !isempty(replica.sample_loggers)
             prepare_tss_initial_sample!(replica.active_state.active_sys, n_threads)
@@ -773,12 +801,9 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
                                     replica_index, cycle_window)
         end
         final_log_den = sample.log_den
-        window_offset = isnothing(state.coupling) ? zero(FT) :
-                        state.coupling.window_offsets[cycle_window]
         if substep == self_adjustment_steps
             pmf_deconvolution_sample = collect_tss_pmf_deconvolution_sample(
                 pmf_deconvolution,
-                state,
                 estimator,
                 replica.active_state;
                 window_offset = window_offset,
@@ -788,21 +813,14 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
             end
         end
         next_state = tss_sample_global_state(workspace.rng, estimator, sample.weights)
-        check_windowed_tss_replica_cycle_state!(
-            state,
-            replica,
-            cycle_window,
-            next_state,
-            substep,
-            "sampled next",
-        )
+        check_tss_cycle_state!(estimator, replica, cycle_window, next_state, substep,
+                               "sampled next")
 
         final_visited_state = visited_state
         final_next_state = next_state
 
         if substep < self_adjustment_steps
-            set_active_state!(replica.active_state, state.state_space, next_state)
-            check_windowed_tss_replica_invariant(state, replica)
+            set_active_state!(replica.active_state, space, next_state)
         end
     end
 
@@ -820,8 +838,7 @@ function collect_windowed_tss_observation!(state::TSSState{FT},
         ),
         pmf_deconvolution_samples,
     )
-    set_active_state!(replica.active_state, state.state_space, final_next_state)
-    check_windowed_tss_replica_invariant(state, replica)
+    set_active_state!(replica.active_state, space, final_next_state)
     return observation
 end
 
@@ -941,8 +958,8 @@ end
 
 function validate_tss_replica_parallel(replica_parallel)
     mode = replica_parallel isa Symbol ? replica_parallel : Symbol(replica_parallel)
-    if !(mode in (:auto, :serial, :threads))
-        throw(ArgumentError("replica_parallel must be one of :auto, :serial, or :threads."))
+    if !(mode in (:auto, :serial, :threads, :distributed))
+        throw(ArgumentError("replica_parallel must be one of :auto, :serial, :threads, or :distributed."))
     end
     return mode
 end
@@ -957,18 +974,34 @@ function resolve_tss_replica_parallel(sim::TSSSimulation,
     mode = validate_tss_replica_parallel(replica_parallel)
     uses_gpu = windowed_tss_uses_gpu_replicas(sim)
 
+    if mode == :distributed && !isnothing(sim.pmf)
+        throw(ArgumentError("PMF deconvolution is not supported with " *
+                "replica_parallel=:distributed yet; run it with :serial or drop the pmf argument"))
+    end
+
     if mode == :threads && uses_gpu
         throw(ArgumentError("replica_parallel=:threads is not supported for GPU-backed " *
                             "TSSSimulation replicas; use :serial or :auto."))
     end
 
     if mode == :auto
-        return (!uses_gpu && length(sim.replicas) > 1 && n_threads > 1 &&
-                Threads.nthreads() > 1) ? :threads : :serial
+        # GPU replicas go to the workers, one GPU included, as HREMD does; with no worker process
+        # to send them to they stay here, where they share the one device as they always have
+        if uses_gpu
+            if !isnothing(sim.pmf) && nprocs() > 1
+                @warn "PMF deconvolution is not supported with replica_parallel=:distributed " *
+                      "yet, so the replicas run serially on one device although worker " *
+                      "processes are available"
+            end
+            return (nprocs() > 1 && isnothing(sim.pmf)) ? :distributed : :serial
+        end
+        return (length(sim.replicas) > 1 && n_threads > 1 && Threads.nthreads() > 1) ?
+               :threads : :serial
     end
     return mode
 end
 
+## Serial
 function collect_windowed_tss_observations_serial!(sim::TSSSimulation,
                                                     thread_div,
                                                     initial_step::Int,
@@ -992,6 +1025,7 @@ function collect_windowed_tss_observations_serial!(sim::TSSSimulation,
     return observations
 end
 
+## Threaded
 function collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
                                                       thread_div,
                                                       initial_step::Int,
@@ -1017,6 +1051,201 @@ function collect_windowed_tss_observations_threaded!(sim::TSSSimulation,
     return observations
 end
 
+## Distributed
+tss_estimator_spec(state::TSSState, window::Integer) =
+    (; window = Int(window),
+       state_indices = copy(state.estimators[window].state_indices),
+       evaluation_state_indices = copy(state.estimators[window].evaluation_state_indices),
+       gamma = copy(state.estimators[window].gamma),
+       ETA = state.estimators[window].ETA,
+       dens_reg = state.estimators[window].dens_reg,
+       adaptive_gamma = state.estimators[window].adaptive_gamma)
+
+struct TSSWorkerBlock{SP, AS, W}
+    space::SP
+    active_state::AS
+    workspace::W
+    estimators::Dict{Int, Any}
+end
+
+const tss_worker_block = Ref{Any}(nothing)
+
+function setup_tss_worker!(space, specs, gpu_id, ::Type{AT}) where AT
+    # Host arrays are allowed, so that the worker path can be checked without a GPU
+    set_gpu_device!(gpu_id, Val(AT <: AbstractGPUArray))
+    states = findall(!isnothing, space.partition.λ_atoms)
+    local_space = localize_state_space(space, states, AT)
+    active_state = ActiveThermoState(local_space, first(states))
+    estimators = Dict{Int, Any}(spec.window => make_tss_local_estimator(
+            local_space,
+            active_state;
+            state_indices = spec.state_indices,
+            evaluation_state_indices = spec.evaluation_state_indices,
+            gamma = spec.gamma,
+            ETA = spec.ETA,
+            dens_reg = spec.dens_reg,
+            history_forgetting = nothing,
+            adaptive_gamma = spec.adaptive_gamma,
+            require_active_state = false,
+        ) for spec in specs)
+    workspace = WindowedTSSReplicaWorkspace(collect(values(estimators)), local_space.partition)
+    tss_worker_block[] = TSSWorkerBlock(local_space, active_state, workspace, estimators)
+    return nothing
+end
+
+const tss_workers_key = Ref{Any}(nothing)
+
+function setup_tss_workers(gpu_devices, sim::TSSSimulation, ::Type{AT}) where AT
+    state = sim.state
+    devices = collect(gpu_devices)
+    if isempty(devices)
+        throw(ArgumentError("a distributed TSSSimulation needs at least one device to run on, " *
+                "but gpu_devices is empty and no GPU was found; pass the devices with the " *
+                "gpu_devices keyword argument, which names one per worker and is ignored for " *
+                "CPU replicas"))
+    end
+    if nworkers() < length(devices)
+        throw(ArgumentError("a distributed TSSSimulation uses one Distributed.jl worker " *
+                "process per device, but there are $(nworkers()) workers and " *
+                "$(length(devices)) devices in gpu_devices; add workers with addprocs and load " *
+                "Molly, and the GPU package for GPU replicas, on them with @everywhere, or name " *
+                "fewer devices with the gpu_devices keyword argument"))
+    end
+    if length(devices) > length(sim.replicas)
+        @warn "there are more devices ($(length(devices))) than replicas " *
+              "($(length(sim.replicas))), so some workers will be idle"
+        devices = devices[1:length(sim.replicas)]
+    end
+    # The first worker per device, so a session with spare workers can still be used
+    pids = workers()[1:length(devices)]
+
+    key = (WeakRef(state), devices, pids, AT)
+    cached = tss_workers_key[]
+    if !isnothing(cached) && cached[1].value === state && cached[2:4] == key[2:4]
+        return pids
+    end
+
+    # Every worker holds every window, so any replica can run on any worker. Localized on the host
+    # first so that only the evaluation states cross the wire, and once because all workers get it.
+    # The λ systems are left out: the worker builds its own, and on the host they would hold a
+    # bit-packed copy of the masks and of the shared interactions for every state
+    specs = [tss_estimator_spec(state, w) for w in eachindex(state.windows)]
+    states = sort!(unique!(reduce(vcat,
+                    [window.evaluation_state_indices for window in state.windows])))
+    host_space = localize_state_space(state.state_space, states, Array;
+                                      build_λ_systems=false)
+    @sync for (i, pid) in pairs(pids)
+        @async begin
+            remotecall_fetch(setup_tss_worker!, pid, host_space, specs, devices[i], AT)
+            @info "Worker $(pid) on device $(devices[i]): $(length(state.windows)) windows, " *
+                  "$(length(states)) of $(n_states(state.state_space)) states"
+            flush(stdout)
+        end
+    end
+    tss_workers_key[] = key
+    return pids
+end
+
+function run_tss_worker_cycles(requests)
+    block = tss_worker_block[]
+    isnothing(block) && error("the TSS worker block is not set up on worker $(myid())")
+    space = block.space
+    AT = array_type(block.active_state.active_sys)
+    results = Dict{Int, Any}()
+
+    for request in requests
+        estimator = block.estimators[request.window]
+        estimator.f .= request.f
+        estimator.log_dens .= request.log_dens
+        estimator.iteration = request.iteration
+
+        set_active_state!(block.active_state, space, request.state_idx)
+        # A new wrapper rather than an assignment, since the loggers are part of the system's type
+        active_sys = System(block.active_state.active_sys;
+            coords     = to_device(request.coords, AT),
+            velocities = to_device(request.velocities, AT),
+            boundary   = request.boundary,
+            loggers    = map(worker_logger, request.loggers),
+        )
+        active_state = ActiveThermoState(request.state_idx, active_sys,
+                                         block.active_state.active_integrator)
+        replica = WindowedTSSReplica(active_state, request.window, request.sample_loggers)
+        block.workspace.rng = request.rng
+
+        observation = run_tss_cycle!(replica, block.workspace, estimator, space, nothing,
+                                     request.replica_index, request.n_md_steps,
+                                     request.self_adjustment_steps, 1, request.initial_step,
+                                     request.log_initial_state, request.window_offset)
+
+        results[request.replica_index] = (
+            next_state     = active_state.active_idx,
+            coords         = from_device(active_sys.coords),
+            velocities     = from_device(active_sys.velocities),
+            boundary       = active_sys.boundary,
+            rng            = block.workspace.rng,
+            loggers        = active_sys.loggers,
+            sample_loggers = replica.sample_loggers,
+            observation    = observation,
+        )
+    end
+    return results
+end
+
+
+function collect_windowed_tss_observations_distributed!(sim::TSSSimulation,
+                                                        pids,
+                                                        initial_step::Int,
+                                                        log_initial_state::Bool)
+    state = sim.state
+    requests = [Any[] for _ in eachindex(pids)]
+    for (replica_i, replica) in pairs(sim.replicas)
+        estimator = state.estimators[replica.active_window]
+        active_sys = replica.active_state.active_sys
+        # Replicas are dealt out round robin, which is an even split however they move
+        push!(requests[mod1(replica_i, length(pids))], (
+            replica_index         = replica_i,
+            window                = replica.active_window,
+            state_idx             = replica.active_state.active_idx,
+            coords                = from_device(active_sys.coords),
+            velocities            = from_device(active_sys.velocities),
+            boundary              = active_sys.boundary,
+            f                     = copy(estimator.f),
+            log_dens              = copy(estimator.log_dens),
+            iteration             = estimator.iteration,
+            window_offset         = windowed_tss_window_offset(state, replica.active_window),
+            rng                   = sim.replica_workspaces[replica_i].rng,
+            loggers               = active_sys.loggers,
+            sample_loggers        = replica.sample_loggers,
+            n_md_steps            = sim.n_md_steps,
+            self_adjustment_steps = sim.self_adjustment_steps,
+            initial_step          = initial_step,
+            log_initial_state     = log_initial_state,
+        ))
+    end
+
+    futures = [remotecall(run_tss_worker_cycles, pids[i], requests[i]) for i in eachindex(pids)]
+    results = Base.merge(map(fetch, futures)...)
+
+    observations = Vector{WindowedTSSObservation}(undef, length(sim.replicas))
+    for replica_i in eachindex(sim.replicas)
+        result = results[replica_i]
+        replica = sim.replicas[replica_i]
+        active_sys = replica.active_state.active_sys
+        # The results come back on host arrays whatever the state is on, and a broadcast of a host
+        # vector into a device array is not a valid kernel
+        copyto!(active_sys.coords, result.coords)
+        copyto!(active_sys.velocities, result.velocities)
+        active_sys.boundary = result.boundary
+        active_sys.loggers = result.loggers
+        set_active_state!(replica.active_state, state.state_space, result.next_state)
+        replica.sample_loggers = result.sample_loggers
+        sim.replica_workspaces[replica_i].rng = result.rng
+        observations[replica_i] = result.observation
+    end
+    push!(state.stats.worker_occupancy, map(length, requests))
+    return observations
+end
+
 function sync_windowed_tss_state_to_replica!(state::TSSState,
                                               replica::WindowedTSSReplica)
     state.active_window = replica.active_window
@@ -1033,12 +1262,29 @@ function sync_windowed_tss_state_to_replica!(state::TSSState,
     return state
 end
 
+# The window each replica runs the coming cycle in. Drawn on the host, from the replica's own RNG
+# and in replica order, so that the multi-GPU path knows where to send each replica before the
+# cycle starts and the RNG streams stay the same as in a serial run
+function choose_windowed_tss_cycle_windows!(sim::TSSSimulation)
+    state = sim.state
+    for (replica_i, replica) in pairs(sim.replicas)
+        check_windowed_tss_replica_invariant(state, replica)
+        replica.active_window = other_window_for_state(
+            state,
+            replica.active_window,
+            replica.active_state.active_idx,
+        )
+    end
+    return sim
+end
+
 function simulate!(sim::TSSSimulation;
                    rng = Random.default_rng(),
                    n_threads::Integer = Threads.nthreads(),
                    replica_rngs = nothing,
                    replica_parallel = :auto,
-                   show_progress = default_show_progress())
+                   show_progress = default_show_progress(),
+                   gpu_devices = nothing)
     state::TSSState = sim.state
     n_threads > 0 || throw(ArgumentError("n_threads must be positive."))
     if length(sim.replica_workspaces) != length(sim.replicas)
@@ -1047,6 +1293,25 @@ function simulate!(sim::TSSSimulation;
 
     parallel_mode = resolve_tss_replica_parallel(sim, replica_parallel, Int(n_threads))
     thread_div = equal_parts(Int(n_threads), length(sim.replicas))
+    worker_pids = nothing
+    if parallel_mode == :distributed
+        # Every GPU by default, but no more of them than there are workers to drive them. CPU
+        # replicas have no device to pin, so a worker per process and the ids are labels only
+        devices = if !isnothing(gpu_devices)
+            gpu_devices
+        elseif windowed_tss_uses_gpu_replicas(sim)
+            get_gpu_devices(Val(true))[1:min(end, nworkers())]
+        elseif nprocs() > 1
+            1:nworkers()
+        else
+            throw(ArgumentError("replica_parallel=:distributed needs worker processes to run " *
+                    "the replicas on, but this is the only process; add them with addprocs and " *
+                    "load Molly on them with @everywhere, or use :serial"))
+        end
+        worker_pids = setup_tss_workers(devices, sim,
+                            array_type(sim.replicas[1].active_state.active_sys))
+    end
+
     if isnothing(replica_rngs)
         seed_windowed_tss_replica_rngs!(sim, rng)
     else
@@ -1057,7 +1322,15 @@ function simulate!(sim::TSSSimulation;
     for cycle in 1:sim.n_cycles
         cycle_start_step = sim.current_step
         log_initial_state = sim.initial_log_pending
-        observations = if parallel_mode == :threads
+        choose_windowed_tss_cycle_windows!(sim)
+        observations = if parallel_mode == :distributed
+            collect_windowed_tss_observations_distributed!(
+                sim,
+                worker_pids,
+                cycle_start_step,
+                log_initial_state,
+            )
+        elseif parallel_mode == :threads
             collect_windowed_tss_observations_threaded!(
                 sim,
                 thread_div,

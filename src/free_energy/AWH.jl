@@ -43,7 +43,9 @@ accumulated statistical weights, free energy estimates, and target distribution 
 - `ρ::Union{Nothing, AbstractArray{T}}=nothing`: Target distribution array along λ. If `nothing`,
     a uniform distribution is used.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
-    energies for adjacent λ windows. Generally improves performance.
+    energies for adjacent λ windows. Generally improves performance. It applies to the λ systems,
+    which share one eligible matrix; the master system has a nearly dense eligible matrix and
+    nothing to share, so it always keeps the neighbor finder of its device.
 
 Loggers are attached by [`AWHSimulation`](@ref), not by `AWHState`.
 History-dependent general interactions such as [`Metadynamics`](@ref) are not supported.

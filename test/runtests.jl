@@ -75,6 +75,7 @@ const init_code_block = quote
     @suppress_err using oneAPI
 
     using DelimitedFiles
+    using Distributed
     using LinearAlgebra
     using Random
     using Statistics

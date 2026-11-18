@@ -411,6 +411,72 @@ end
         )
     end
 
+    @testset "distributed replicas" begin
+        # The worker path takes host arrays, so it can be checked without a GPU: the replicas
+        #   run on worker processes and must reproduce the serial run exactly, however the
+        #   round robin happens to deal them out
+        dist_states = make_tss_thermo_states(n_states=4)
+        dist_graph = Molly.tss_grid_graph((4,); window_size=(2,), periodic=false)
+        function distributed_test_sim(; build_λ_systems=false)
+            state = Molly.TSSState(dist_states; graph=dist_graph, first_state=1,
+                                   first_window=1, ETA=1.0, dens_reg=1e-4,
+                                   history_forgetting=Molly.TSSHistoryForgetting(alpha=0.0,
+                                                                                 phi=1.2),
+                                   build_λ_systems=build_λ_systems)
+            return Molly.TSSSimulation(state; n_md_steps=1, n_cycles=4,
+                                       self_adjustment_steps=2, log_freq=1, n_replicas=2,
+                                       first_states=[1, 3],
+                                       replica_loggers=[(temperature=TemperatureLogger(1),),
+                                                        (temperature=TemperatureLogger(1),)])
+        end
+
+        # The host of a distributed run builds no λ systems and so can evaluate no energy
+        host_sim = distributed_test_sim()
+        @test all(isnothing, host_sim.state.state_space.partition.λ_systems)
+        @test_throws ArgumentError Molly.simulate!(host_sim; n_threads=1,
+                                                   replica_parallel=:serial)
+
+        serial_sim = distributed_test_sim(build_λ_systems=true)
+        Molly.simulate!(serial_sim; rng=MersenneTwister(14), n_threads=1,
+                        replica_parallel=:serial)
+        serial_f = [copy(est.f) for est in serial_sim.state.estimators]
+        serial_states = [replica.active_state.active_idx for replica in serial_sim.replicas]
+        serial_coords = [copy(replica.active_state.active_sys.coords)
+                         for replica in serial_sim.replicas]
+        serial_temps = [copy(values(replica.active_state.active_sys.loggers.temperature))
+                        for replica in serial_sim.replicas]
+
+        worker_pids = addprocs(2; exeflags="--project=$(Base.active_project())")
+        try
+            @everywhere worker_pids using Molly
+            # Both replicas on one worker, then one each, which routes them differently
+            for (devices, occupancy) in (([0], [2]), ([0, 1], [1, 1]))
+                sim = distributed_test_sim()
+                Molly.simulate!(sim; rng=MersenneTwister(14), n_threads=1,
+                                replica_parallel=:distributed, gpu_devices=devices)
+                @test sim.state.stats.worker_occupancy == fill(occupancy, 4)
+                @test [copy(est.f) for est in sim.state.estimators] == serial_f
+                @test [replica.active_state.active_idx for replica in sim.replicas] ==
+                      serial_states
+                @test [copy(replica.active_state.active_sys.coords)
+                       for replica in sim.replicas] == serial_coords
+                # The loggers make the round trip to the worker and back, so they keep
+                #   recording into the collection the host holds
+                @test [copy(values(replica.active_state.active_sys.loggers.temperature))
+                       for replica in sim.replicas] == serial_temps
+                @test all(replica -> length(values(
+                            replica.active_state.active_sys.loggers.temperature)) == 9,
+                          sim.replicas)
+            end
+
+            # One worker process drives one GPU, so the devices cannot outnumber the workers
+            @test_throws ArgumentError Molly.simulate!(distributed_test_sim();
+                        n_threads=1, replica_parallel=:distributed, gpu_devices=[0, 1, 2])
+        finally
+            rmprocs(worker_pids)
+        end
+    end
+
     @testset "sample loggers" begin
         n_md_steps, n_cycles, self_adjustment_steps = 2, 3, 2
         n_samples = n_cycles * self_adjustment_steps

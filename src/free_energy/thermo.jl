@@ -21,12 +21,46 @@ mutable struct AlchemicalPartition{S, L, LS, A, H, T}
     λ_atoms::A
     λ_hamiltonians::H
 
+    # The neighbor masks every λ system shares, kept so that a λ system can be rebuilt on
+    # another device without a second copy of them; `master_sys.neighbor_finder` is the template
+    λ_eligible::Any
+    special_mask::Any
+    reuse_neighbors::Bool
+
     # State cache for master energy to prevent redundant calculations
     # across multiple single-state queries
     cached_coords::Any
     cached_boundary::Any
     cached_master_pe::T
 end
+
+function AlchemicalPartition(partition::AlchemicalPartition;
+                             master_sys=partition.master_sys,
+                             λ_systems=partition.λ_systems,
+                             λ_atoms=partition.λ_atoms,
+                             λ_hamiltonians=partition.λ_hamiltonians,
+                             λ_eligible=partition.λ_eligible,
+                             special_mask=partition.special_mask,
+                             reuse_neighbors=partition.reuse_neighbors,
+                             cached_master_pe=partition.cached_master_pe)
+    return AlchemicalPartition(
+        master_sys,
+        first_λ_system(λ_systems),
+        λ_systems,
+        λ_atoms,
+        λ_hamiltonians,
+        λ_eligible,
+        special_mask,
+        reuse_neighbors,
+        nothing,
+        nothing,
+        cached_master_pe,
+    )
+end
+
+# `nothing` marks a state whose λ system is not resident here, so a partition can hold a subset
+first_λ_system(λ_systems) = isnothing(findfirst(!isnothing, λ_systems)) ? nothing :
+                            λ_systems[findfirst(!isnothing, λ_systems)]
 
 function alchemical_atom_changed(atom, ref_atom)
     return atom.λ < 1.0 ||
@@ -72,7 +106,8 @@ keep_master_specific_inter(inter_list::InteractionList2Atoms, λ_atoms) =
     !exclusion_charges_vary(inter_list, λ_atoms)
 
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
-                             reuse_neighbors::Bool=true)
+                             reuse_neighbors::Bool=true,
+                             build_λ_systems::Bool=true)
     n_λ = length(thermo_states)
     ref_sys = thermo_states[1].system
     TH = float_type_high(ref_sys)
@@ -184,8 +219,10 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
     end
 
     # 4. Construct Partitioned Systems
+    # `reuse_neighbors` buys a shared pair list for the λ systems, which share one sparse eligible
+    # mask; the master has a nearly dense mask and nothing to share, so it keeps the device finder
     master_nf = build_neighbor_finder(ref_nfinder, master_eligible, special_mask;
-                                      reuse_neighbors=reuse_neighbors, boundary=ref_sys.boundary)
+                                      reuse_neighbors=false, boundary=ref_sys.boundary)
 
     # Deep-copy interactions: the partition systems must own isolated copies of any
     # mutable per-evaluation state (e.g. PME grids/plans, ML/GBSA buffers). Types with
@@ -201,24 +238,25 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
         loggers              = (),
     )
 
-    hamiltonians = LambdaHamiltonian[]
-    λ_systems = Any[]
-    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)
-        ham = LambdaHamiltonian(λ_p, λ_s, λ_g)
-        push!(hamiltonians, ham)
+    hamiltonians = [LambdaHamiltonian(λ_p, λ_s, λ_g)
+                    for (λ_p, λ_s, λ_g) in zip(λ_pairwise, λ_specific, λ_general)]
 
+    # The interaction split above always covers every state; materialising the systems is what
+    # costs the device memory, so a host that evaluates no energy (the distributed path) skips it
+    λ_systems = Vector{Any}(nothing, n_λ)
+    for i in (build_λ_systems ? (1:n_λ) : ())
+        ham = hamiltonians[i]
         λ_nf = build_neighbor_finder(ref_nfinder, λ_eligible, special_mask;
                                      reuse_neighbors=reuse_neighbors,
                                      boundary=ref_sys.boundary)
-        λ_sys = System(deepcopy(ref_sys);
-            atoms                = λ_atoms[length(λ_systems) + 1],
-            pairwise_inters      = deepcopy(λ_p),
-            general_inters       = deepcopy(λ_g),
-            specific_inter_lists = deepcopy(λ_s),
+        λ_systems[i] = System(deepcopy(ref_sys);
+            atoms                = λ_atoms[i],
+            pairwise_inters      = deepcopy(ham.pairwise_inters),
+            general_inters       = deepcopy(ham.general_inters),
+            specific_inter_lists = deepcopy(ham.specific_inter_lists),
             neighbor_finder      = λ_nf,
             loggers              = (),
         )
-        push!(λ_systems, λ_sys)
     end
 
     # Initialize cache values with safe defaults
@@ -226,10 +264,13 @@ function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
 
     return AlchemicalPartition(
         master_sys,
-        first(λ_systems),
+        first_λ_system(λ_systems),
         λ_systems,
         λ_atoms,
         hamiltonians,
+        λ_eligible,
+        special_mask,
+        reuse_neighbors,
         nothing,
         nothing,
         initial_pe
@@ -326,6 +367,14 @@ function update_master_energy!(partition::AlchemicalPartition, coords, boundary;
     end
     return partition.cached_master_pe
 end
+
+# A missing λ system means this process does not hold that state, which is the normal case on the
+# host of a distributed run: a method rather than a branch, so the resident path pays nothing
+evaluate_λ_energy!(::Nothing, coords, boundary; n_threads::Integer=Threads.nthreads()) =
+    throw(ArgumentError("the λ system for this state is not built in this process, so its " *
+            "energy cannot be evaluated here; a distributed TSS run evaluates λ energies on its " *
+            "workers, so pass replica_parallel=:distributed (:auto only picks it for GPU-backed " *
+            "replicas), or build the λ systems here with build_λ_systems=true"))
 
 function evaluate_λ_energy!(λ_sys, coords, boundary;
                             n_threads::Integer=Threads.nthreads())

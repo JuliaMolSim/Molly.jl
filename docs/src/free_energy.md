@@ -1593,6 +1593,27 @@ The reference distribution over rungs is called $\gamma$. It sets the asymptotic
 
 TSS can also forget early history. With [`Molly.TSSHistoryForgetting`](@ref) and its `alpha` and `n_epochs` keyword arguments, estimator history before approximately $\alpha \cdot t$ is dropped at TSS iteration $t$. Retained history is grouped into logarithmically spaced epochs. Those epochs are used both to remove old data and to compute jackknife uncertainty estimates without storing every individual sample.
 
+### Running the replicas
+
+A [`TSSSimulation`](@ref) can run several physical replicas, which share the window estimators and are advanced one cycle at a time. The `replica_parallel` keyword argument of [`simulate!`](@ref) chooses how a cycle is run: `:serial` runs the replicas one after another, `:threads` gives each CPU replica its own thread, and `:distributed` runs them on worker processes from Distributed.jl, one per GPU. The default `:auto` picks `:distributed` for GPU-backed replicas when worker processes are available, `:threads` for several CPU replicas, and `:serial` otherwise.
+
+With `:distributed` every worker holds a copy of every window, and the replicas of a cycle are dealt out between the workers, so the GPUs advance replicas concurrently. The host process keeps the estimators and applies the collected observations in replica order, which makes the result independent of how the replicas were dealt out. The first [`simulate!`](@ref) call sends each worker the thermodynamic states that the windows evaluate, and later calls on the same [`TSSState`](@ref) reuse them, so only coordinates, velocities and a few kilobytes of estimator state cross the wire per cycle. Add one worker per GPU with `addprocs` and load Molly and the GPU package on them with `@everywhere` before calling [`simulate!`](@ref), as for REMD. All visible devices are used by default, limited to one per worker, and the `gpu_devices` keyword argument selects others:
+
+```julia
+using Distributed
+
+N_GPUS = 2
+addprocs(N_GPUS; exeflags = "--project=$(Base.active_project())")
+@everywhere using Molly, CUDA
+
+tss_state = TSSState(thermo_states; graph = tss_graph, build_λ_systems = false)
+tss_sim = TSSSimulation(tss_state; n_md_steps = 500, n_cycles = 1000, n_replicas = 4)
+
+simulate!(tss_sim; gpu_devices = collect(CUDA.devices())[1:N_GPUS])
+```
+
+The λ systems of the partition, one per thermodynamic state, hold most of the memory of a TSS run. The host process of a distributed run evaluates no energies itself, so `build_λ_systems = false` leaves them to the workers and keeps a second full set off the device the states were built on. A state built that way can evaluate no energy in this process, so the keyword is only for distributed runs. The number of replicas each worker ran is recorded per cycle in `tss_state.stats.worker_occupancy`, and PMF deconvolution is not supported with `:distributed`.
+
 ### Alanine dipeptide PMF
 
 The full script is `scripts/tss_dipeptide.jl`:
