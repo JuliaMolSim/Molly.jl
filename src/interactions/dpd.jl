@@ -1,7 +1,8 @@
 export DPDInteraction
 
 @doc raw"""
-    DPDInteraction(; a, γ, σ, r_c, dt, use_neighbors, key)
+    DPDInteraction(; a=25.0, γ=4.5, σ=3.0, r_c=1.0, dt=0.01, use_neighbors=true,
+                   key=rand(UInt64))
 
 The dissipative particle dynamics (DPD) interaction between two particles.
 
@@ -42,7 +43,9 @@ V(r_{ij}) = \frac{a}{2} r_c \left(1 - \frac{r_{ij}}{r_c}\right)^2
 Pairwise random numbers are generated from a hash of the `key`,
 the particle indices, and the step number, ensuring momentum conservation.
 
-When using a neighbor list, set `dist_cutoff` to at least `1.5 * r_c` to provide a
+Should be used with a simulator like [`DPDVelocityVerlet`](@ref).
+When using a neighbor list, set the `dist_cutoff` of the neighbor finder to at least
+`1.5 * r_c` to provide a
 skin distance that accounts for particle movement between neighbor list rebuilds.
 
 # Arguments
@@ -60,7 +63,7 @@ skin distance that accounts for particle movement between neighbor list rebuilds
     σ::S = 3.0
     r_c::R = 1.0
     dt::D = 0.01
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     key::UInt64 = rand(UInt64)
 end
 

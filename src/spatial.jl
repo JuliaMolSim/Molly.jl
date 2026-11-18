@@ -6,12 +6,9 @@ export
     TriclinicBoundary,
     volume,
     density,
-    box_center,
     scale_boundary,
     random_coord,
-    vector_1D,
     vector,
-    wrap_coord_1D,
     wrap_coords,
     random_velocity,
     maxwell_boltzmann,
@@ -26,7 +23,22 @@ export
     scale_coords!,
     dipole_moment
 
-# Parameters are dimension, float type and coordinate type
+@public AbstractBoundary,
+    length_type,
+    has_infinite_boundary,
+    box_sides,
+    box_center,
+    vector_1D,
+    wrap_coord_1D,
+    unwrap_molecules
+
+"""
+Base type for boundary types.
+
+Parameters are dimension, float type and coordinate type.
+The built-in boundary types are [`CubicBoundary`](@ref), [`TriclinicBoundary`](@ref)
+and [`RectangularBoundary`](@ref).
+"""
 abstract type AbstractBoundary{D, T, C} end
 
 """
@@ -55,7 +67,7 @@ CubicBoundary(x::Number; kwargs...) = CubicBoundary(SVector{3}(x, x, x); kwargs.
 CubicBoundary(m::SMatrix{3,3}; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
 CubicBoundary(m::Matrix; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
 
-function boxmatrix(b::CubicBoundary)
+function box_matrix(b::CubicBoundary)
     return SMatrix{3, 3}(
         ustrip(b.side_lengths[1]), 0, 0,
         0, ustrip(b.side_lengths[2]), 0,
@@ -109,7 +121,7 @@ RectangularBoundary(x, y; kwargs...) = RectangularBoundary(SVector{2}(x, y); kwa
 RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x); kwargs...)
 RectangularBoundary(m::SMatrix{3,3}; kwargs...) = RectangularBoundary(SVector{2}(m[1,1], m[2,2]); kwargs...)
 
-function boxmatrix(b::RectangularBoundary)
+function box_matrix(b::RectangularBoundary)
     return SMatrix{3,3}(
         b.side_lengths[1], 0, 0,
         0, b.side_lengths[2], 0,
@@ -193,11 +205,13 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     γ = NT(ustrip(bond_angle(bv[1], bv[2])))
 
     # Cotangent of the angle between b_yz and c_yz.
+    # This is negative when c has a negative y component, and the sign is needed to wrap
+    #   coordinates in that case. cross_yz is positive due to the checks above.
     by, bz = bv[2][2], bv[2][3]
     cy, cz = bv[3][2], bv[3][3]
     cross_yz = ustrip(by * cz - bz * cy)
     dot_yz = ustrip(by * cy + bz * cz)
-    cot_bprojyz_cprojyz = NT(abs(dot_yz / cross_yz))
+    cot_bprojyz_cprojyz = NT(dot_yz / cross_yz)
 
     # Direct ratios used to project along c into the xy plane.
     cx, cy2, cz2 = bv[3][1], bv[3][2], bv[3][3]
@@ -252,17 +266,20 @@ end
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
 TriclinicBoundary(arr; kwargs...)        = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
-boxmatrix(b::TriclinicBoundary) = SMatrix{3, 3}(hcat(b.basis_vectors...))
+box_matrix(b::TriclinicBoundary) = SMatrix{3, 3}(hcat(b.basis_vectors...))
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
 
+# Chemfiles.jl passes the matrix memory to the row-major C library, which takes the
+#   columns there as the basis vectors, so the basis vectors are the rows here
 function Chemfiles.UnitCell(b::TriclinicBoundary)
+    bv_rows = permutedims(hcat(b.basis_vectors...))
     if unit(eltype(eltype(b.basis_vectors))) == NoUnits
-        Chemfiles.UnitCell(Float64.(Array(hcat(b.basis_vectors...))) .* 10) # Assume nm
+        Chemfiles.UnitCell(Float64.(Array(bv_rows)) .* 10) # Assume nm
     else
-        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", hcat(b.basis_vectors...)))))
+        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", bv_rows))))
     end
 end
 
@@ -296,15 +313,29 @@ AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
 AtomsBase.n_dimensions(::Union{System{D}, ReplicaSystem{D}}) where {D} = D
 
 float_type(::AbstractBoundary{<:Any, T}) where {T} = T
-length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
+
+"""
+    length_type(sys)
+    length_type(boundary)
+
+The length type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses,
+such as `typeof(1.0f0u"nm")`.
+"""
+length_type(::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
+length_type(sys::Union{System, ReplicaSystem}) = length_type(sys.boundary)
 
 Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
-Unitful.ustrip(b::TriclinicBoundary) = TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors))
-Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary) = TriclinicBoundary(
-                                            map(bv -> ustrip.(u, bv), b.basis_vectors))
+
+function Unitful.ustrip(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(bv), b.basis_vectors); approx_images=A)
+end
+
+function Unitful.ustrip(u::Unitful.Units, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(map(bv -> ustrip.(u, bv), b.basis_vectors); approx_images=A)
+end
 
 function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
     z = zero(C)
@@ -352,14 +383,24 @@ function invert_box_vectors(boundary::TriclinicBoundary)
     return recip_box ./ volume(boundary)
 end
 
+"""
+    has_infinite_boundary(sys)
+    has_infinite_boundary(boundary)
+
+Whether a boundary has one or more infinite (non-periodic) dimensions.
+"""
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false # Not currently supported
 has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
 
-n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
-n_infinite_dims(b::TriclinicBoundary) = 0
-n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
+"""
+    box_sides(boundary)
+    box_sides(boundary, i)
 
+The side lengths of a bounding box, or the side length in dimension `i`.
+
+For a [`TriclinicBoundary`](@ref) the diagonal components of the basis vectors are returned.
+"""
 @inline box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 @inline box_sides(b::Union{CubicBoundary, RectangularBoundary}, i) = b.side_lengths[i]
 @inline box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
@@ -423,13 +464,24 @@ For a 3D bounding box the volume scales as the cube of the scaling factor.
 scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
 scale_boundary(b::RectangularBoundary, scale) = RectangularBoundary(b.side_lengths .* scale)
 
-function scale_boundary(b::TriclinicBoundary, scale)
-    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale)
+function scale_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, scale) where A
+    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale; approx_images=A)
 end
 
-# The minimum cubic box surrounding the bounding box, used for visualization
+# The upper and lower corners of the minimum cubic box surrounding the bounding box, used
+#   for visualization
+# The lower corner is below the origin for a triclinic box with negative off-diagonal
+#   components, which has coordinates below zero
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-cubic_bounding_box(b::TriclinicBoundary) = sum(b.basis_vectors)
+cubic_bounding_box(b::TriclinicBoundary) = max.(triclinic_box_corners(b)...)
+
+cubic_bounding_box_min(b::Union{CubicBoundary, RectangularBoundary}) = zero(b.side_lengths)
+cubic_bounding_box_min(b::TriclinicBoundary) = min.(triclinic_box_corners(b)...)
+
+function triclinic_box_corners(b::TriclinicBoundary)
+    v1, v2, v3 = b.basis_vectors
+    return (zero(v1), v1, v2, v3, v1 + v2, v1 + v3, v2 + v3, v1 + v2 + v3)
+end
 
 # Coordinates for visualizing bounding box
 function bounding_box_lines(boundary::CubicBoundary, dist_unit)
@@ -529,12 +581,18 @@ function vector(c1, c2, boundary::RectangularBoundary)
     )
 end
 
+# The components of the basis vectors that are always zero are skipped
 function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, true}) where T
-    dr = c2 - c1
-    dr -= boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
-    dr -= boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
-    dr -= boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
-    return dr
+    a, b, c = boundary.basis_vectors
+    rs = boundary.reciprocal_size
+    dx, dy, dz = c2 - c1
+    n3 = floor(dz * rs[3] + T(0.5))
+    dx, dy, dz = dx - c[1] * n3, dy - c[2] * n3, dz - c[3] * n3
+    n2 = floor(dy * rs[2] + T(0.5))
+    dx, dy = dx - b[1] * n2, dy - b[2] * n2
+    n1 = floor(dx * rs[1] + T(0.5))
+    dx -= a[1] * n1
+    return SVector(dx, dy, dz)
 end
 
 function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, false}) where T
@@ -605,10 +663,16 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-# Unwrap coordinates so that molecules are not split over the boundary
-# Ensures that the center of geometry of bonded clusters of atoms
-# (we assume those are molecules!) falls always inside the simulation box.
-# Returns coordinates on CPU
+"""
+    unwrap_molecules(sys)
+    unwrap_molecules(coords, boundary, topology)
+
+Unwrap coordinates so that molecules are not split over the boundary.
+
+Returns coordinates on CPU.
+Ensures that the center of geometry of bonded clusters of atoms is
+always inside the simulation box.
+"""
 unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
 
 function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
@@ -718,7 +782,8 @@ end
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
                     dims=3, rng=Random.default_rng())
-    random_velocity(atom_mass::Real, temp::Real, k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
+    random_velocity(atom_mass::Real, temp::Real,
+                    k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
                     dims=3, rng=Random.default_rng())
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
@@ -979,17 +1044,36 @@ Calculate the pressure tensor of the system.
 
 The pressure is defined as
 ```math
-\bf{P} = \frac{ 2 \cdot \bf{K} + \bf{W} }{V}
+\bf{P} = \frac{ 2 \cdot \bf{K} + \bf{W} }{V} \quad\textrm{i.e.}\quad
+P_{\alpha\beta} = \frac{1}{V} \left( \sum_i m_i v_{i,\alpha} v_{i,\beta}
++ \sum_i r_{i,\alpha} f_{i,\beta} \right)
 ```
-where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
-and ``\bf{W}`` is the virial tensor.
+where ``V`` is the system volume (area in 2D), ``\bf{K}`` is the kinetic energy tensor
+(see [`kinetic_energy`](@ref)) and ``\bf{W}`` is the [`virial`](@ref) tensor.
+``\bf{K}`` is calculated from the velocities stored in the system, including any center
+of mass motion, and does not depend on the number of degrees of freedom used by
+[`temperature`](@ref).
+For the leapfrog-like integrator these velocities are half a time step
+behind the coordinates.
+For systems with units the default pressure is in bar in 3D and in bar nm in 2D.
 
-To calculate the scalar pressure, see [`scalar_pressure`](@ref).
+This is the [pressure tensor of LAMMPS](https://docs.lammps.org/compute_pressure.html),
+and is the negative of the sum of the
+[per-atom stress of LAMMPS](https://docs.lammps.org/compute_stress_atom.html) divided by
+the volume, apart from tail corrections.
+LAMMPS can subtract a velocity bias in the kinetic term via the temperature compute,
+which Molly does not do.
+It is also the pressure tensor of GROMACS,
+``\bf{P} = \frac{2}{V} (\bf{E}_\textrm{kin} - \bf{\Xi})`` with
+``\bf{\Xi} = -\bf{W} / 2``, though for the leapfrog integrator GROMACS uses the average
+of the kinetic energy tensors from the two half steps around the coordinates.
 
 For constrained systems, direct recomputation approximates constraint
 contributions using a deterministic small-step constraint preview. To reuse a
 total virial from a simulation step, pass valid simulator buffers with
 `recompute=false`.
+
+To calculate the scalar pressure, see [`scalar_pressure`](@ref).
 
 Not compatible with infinite boundaries.
 """
@@ -998,8 +1082,13 @@ function pressure(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
                     n_threads=n_threads, kwargs...)
 end
 
+# The pressure units of a system with units, bar in 3 dimensions and bar * nm, which has
+#   dimensions of force per length, in 2 dimensions
+pressure_units(sys::System{D}) where {D} = (sys.energy_units == NoUnits ? NoUnits :
+                                            (D == 2 ? u"bar * nm" : u"bar"))
+
 function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial, vol) where D
-    if sys.energy_units == NoUnits || D != 3
+    if sys.energy_units == NoUnits
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
@@ -1011,12 +1100,12 @@ function pressure_from_tensors!(pres_tensor, sys::System{D}, kin_tensor, virial,
             end
         end
     else
-        # Sensible unit to return by default for 3 dimensions
+        P_units = pressure_units(sys)
         @inbounds for col in 1:D
             for row in 1:D
                 K = energy_remove_mol(kin_tensor[row, col])
                 W = energy_remove_mol(virial[row, col])
-                pres_tensor[row, col] = uconvert(u"bar", (2 * K + W) / vol) # Σ r⊗f
+                pres_tensor[row, col] = uconvert(P_units, (2 * K + W) / vol) # Σ r⊗f
             end
         end
     end
@@ -1059,7 +1148,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     return buffers.pres_tensor
 end
 
-"""
+@doc raw"""
     scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                     recompute=true, n_threads=Threads.nthreads(),
                     pairwise_inters=system.pairwise_inters,
@@ -1068,7 +1157,16 @@ end
 
 Calculate the pressure of the system as a scalar.
 
-This is the trace of the [`pressure`](@ref) tensor.
+This is the trace of the [`pressure`](@ref) tensor divided by the number of dimensions
+``d``:
+```math
+P = \frac{\rm{Tr}\left[ \bf{P} \right]}{d}
+  = \frac{1}{d V} \left( 2 K + \sum_i \bf{r_i} \cdot \bf{f_i} \right)
+```
+where ``K`` is the kinetic energy.
+This matches the scalar pressure of GROMACS.
+The scalar pressure of LAMMPS uses ``N_\textrm{df} k_B T / d`` for the kinetic term, which
+is the same as ``2 K / d`` when the temperature includes all velocities.
 For constrained systems, the same deterministic preview convention as
 [`pressure`](@ref) applies.
 """
@@ -1100,7 +1198,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     # Build frac<->cart transforms
     if is_triclinic
-        B = boxmatrix(boundary)
+        B = box_matrix(boundary)
         to_frac = (r::SVector{3}) -> B \ r
         to_cart = (f::SVector{3}) -> B * f
     else
@@ -1198,16 +1296,281 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
     return centers
 end
 
-function molecule_centers(coords::AbstractGPUArray,
-                          boundary::AbstractBoundary{<:Any, T},
-                          topology) where T
+#=
+Moving molecules as units on the GPU
+
+The center of a molecule is the center of geometry of the molecule made whole, which
+`molecule_centers` finds on the CPU by walking the bonds. On the GPU the bonds are walked
+in parallel. A spanning forest of the bond graph of each molecule is found once on the
+CPU and kept with the topology, as the parent of each atom and the depth of the deepest
+tree. Each atom then finds the whole number of box lengths between its wrapped fractional
+coordinates and those of its parent, and pointer jumping sums these along the path to the
+root of its tree in a number of rounds that grows with the logarithm of the depth, so a
+protein of a thousand bonded atoms in a chain takes ten rounds. The unwrapped fractional
+coordinates of an atom are then its wrapped coordinates less the sum, which gives the same
+centers as the walk on the CPU since the sum along a path does not depend on the path
+unless the molecule is bonded to its own image, where neither is meaningful.
+=#
+struct MoleculeUnwrapPlan{AI, AV, AS, AC}
+    parents::AI # Parent of each atom in the spanning forest, 0 for a root
+    atom_molecule_inds::AI
+    molecule_atom_counts::AI
+    n_jumps::Int # Rounds of pointer jumping that reach the root of every tree
+    frac::AV # Wrapped fractional coordinates of each atom
+    shifts_1::AS # Box lengths from each atom to its current ancestor, double buffered
+    shifts_2::AS
+    ancestors_1::AI
+    ancestors_2::AI
+    center_sums::AC # Sum of the unwrapped fractional coordinates of the atoms of a molecule
+end
+
+# The spanning forest of the bond graph within each molecule, as the parent of each atom
+#   with 0 for the roots, and the number of rounds of pointer jumping needed to reach them
+function molecule_spanning_forest(topology::MolecularTopology, n_atoms::Integer)
+    atom_mol = topology.atom_molecule_inds
+    bonds = topology.bonded_atoms
+    # Adjacency in compressed sparse row form
+    degree = zeros(Int32, n_atoms)
+    for (i, j) in bonds
+        degree[i] += one(Int32)
+        degree[j] += one(Int32)
+    end
+    starts = Vector{Int32}(undef, n_atoms + 1)
+    starts[1] = one(Int32)
+    for i in 1:n_atoms
+        starts[i + 1] = starts[i] + degree[i]
+    end
+    adjacent = Vector{Int32}(undef, starts[end] - 1)
+    fill!(degree, zero(Int32))
+    for (i, j) in bonds
+        adjacent[starts[i] + degree[i]] = j
+        degree[i] += one(Int32)
+        adjacent[starts[j] + degree[j]] = i
+        degree[j] += one(Int32)
+    end
+
+    # Breadth-first search from the lowest atom of each connected component, which gives
+    #   the shallowest trees
+    parents = zeros(Int32, n_atoms)
+    depths = zeros(Int32, n_atoms)
+    visited = falses(n_atoms)
+    queue = Vector{Int32}(undef, n_atoms)
+    max_depth = zero(Int32)
+    for seed in 1:n_atoms
+        visited[seed] && continue
+        visited[seed] = true
+        queue_head, queue_tail = 1, 1
+        queue[1] = seed
+        while queue_head <= queue_tail
+            i = queue[queue_head]
+            queue_head += 1
+            for k in starts[i]:(starts[i + 1] - 1)
+                j = adjacent[k]
+                (visited[j] || atom_mol[j] != atom_mol[i]) && continue
+                visited[j] = true
+                parents[j] = i
+                depths[j] = depths[i] + one(Int32)
+                max_depth = max(max_depth, depths[j])
+                queue_tail += 1
+                queue[queue_tail] = j
+            end
+        end
+    end
+    # After k rounds the shift of each atom covers 2^k bonds towards the root
+    n_jumps = (max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)))
+    return parents, n_jumps
+end
+
+#=
+The plan for unwrapping the molecules of `coords` on the device, see `MoleculeUnwrapPlan`,
+from the cache of `topology` or built and cached.
+=#
+function molecule_unwrap_plan(topology::MolecularTopology,
+                              coords::AbstractGPUArray{SVector{D, C}}) where {D, C}
+    T = typeof(ustrip(zero(C)))
+    N = length(coords)
+    cache = topology.unwrap_cache[]
+    if cache isa MoleculeUnwrapPlan && eltype(cache.frac) == SVector{D, T} &&
+            length(cache.frac) == N && array_type(cache.frac) == array_type(coords)
+        return cache
+    end
+    if length(topology.atom_molecule_inds) != N
+        throw(ArgumentError("the topology is for $(length(topology.atom_molecule_inds)) " *
+                            "atoms but there are $N coordinates"))
+    end
     AT = array_type(coords)
-    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
+    TH = default_float_type_high(AT, T)
+    backend = get_backend(coords)
+    parents, n_jumps = molecule_spanning_forest(topology, N)
+    n_mol = length(topology.molecule_atom_counts)
+    plan = MoleculeUnwrapPlan(
+        to_device(parents, AT),
+        to_device(topology.atom_molecule_inds, AT),
+        to_device(topology.molecule_atom_counts, AT),
+        n_jumps,
+        similar(coords, SVector{D, T}),
+        similar(coords, SVector{D, Int32}),
+        similar(coords, SVector{D, Int32}),
+        similar(coords, Int32),
+        similar(coords, Int32),
+        KernelAbstractions.zeros(backend, TH, D, n_mol),
+    )
+    topology.unwrap_cache[] = plan
+    return plan
+end
+
+@inline wrap_frac01(v) = v .- floor.(v)
+
+# The box matrix without units, in the length unit of the coordinates
+function box_matrix_nounits(boundary::Union{CubicBoundary, RectangularBoundary}, coord_unit,
+                            ::Type{T}) where T
+    sl = boundary.side_lengths
+    D = length(sl)
+    vals = ntuple(Val(D * D)) do k
+        row, col = (k - 1) % D + 1, (k - 1) ÷ D + 1
+        (row == col ? T(ustrip(coord_unit, sl[row])) : zero(T))
+    end
+    return SMatrix{D, D, T}(vals)
+end
+
+function box_matrix_nounits(boundary::TriclinicBoundary, coord_unit, ::Type{T}) where T
+    return SMatrix{3, 3, T}(ustrip.(coord_unit, box_matrix(boundary)))
+end
+
+#=
+Find the wrapped fractional coordinates, the shifts to the roots and the sums of the
+unwrapped fractional coordinates of each molecule in `plan`, returning the array holding
+the shifts.
+=#
+function unwrap_molecules_gpu!(plan::MoleculeUnwrapPlan, coords, inv_box)
+    backend = get_backend(coords)
+    N = length(coords)
+    launch_kernel!(unwrap_init_kernel!(backend, 256), plan.frac, plan.shifts_1,
+                   plan.ancestors_1, coords, plan.parents, inv_box; ndrange=N)
+    shifts_in, shifts_out = plan.shifts_1, plan.shifts_2
+    ancestors_in, ancestors_out = plan.ancestors_1, plan.ancestors_2
+    for _ in 1:plan.n_jumps
+        launch_kernel!(unwrap_jump_kernel!(backend, 256), shifts_out, ancestors_out,
+                       shifts_in, ancestors_in; ndrange=N)
+        shifts_in, shifts_out = shifts_out, shifts_in
+        ancestors_in, ancestors_out = ancestors_out, ancestors_in
+    end
+    fill!(plan.center_sums, zero(eltype(plan.center_sums)))
+    launch_kernel!(molecule_center_sum_kernel!(backend, 256), plan.center_sums, plan.frac,
+                   shifts_in, plan.atom_molecule_inds; ndrange=N)
+    return shifts_in
+end
+
+@kernel inbounds=true function unwrap_init_kernel!(frac, shifts, ancestors, @Const(coords),
+                                                   @Const(parents), inv_box)
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        f = wrap_frac01(inv_box * ustrip_vec(coords[i]))
+        frac[i] = f
+        p = parents[i]
+        if iszero(p)
+            shifts[i] = zero(eltype(shifts))
+            ancestors[i] = zero(eltype(ancestors))
+        else
+            f_parent = wrap_frac01(inv_box * ustrip_vec(coords[p]))
+            shifts[i] = round.(Int32, f - f_parent)
+            ancestors[i] = p
+        end
+    end
+end
+
+@kernel inbounds=true function unwrap_jump_kernel!(shifts_out, ancestors_out,
+                                                   @Const(shifts_in), @Const(ancestors_in))
+    i = @index(Global, Linear)
+    if i <= length(ancestors_in)
+        a = ancestors_in[i]
+        if iszero(a)
+            shifts_out[i] = shifts_in[i]
+            ancestors_out[i] = a
+        else
+            shifts_out[i] = shifts_in[i] + shifts_in[a]
+            ancestors_out[i] = ancestors_in[a]
+        end
+    end
+end
+
+@kernel inbounds=true function molecule_center_sum_kernel!(center_sums, @Const(frac),
+                                                @Const(shifts), @Const(atom_molecule_inds))
+    i = @index(Global, Linear)
+    if i <= length(frac)
+        u = frac[i] - shifts[i]
+        m = atom_molecule_inds[i]
+        for d in eachindex(u)
+            Atomix.@atomic center_sums[d, m] += eltype(center_sums)(u[d])
+        end
+    end
+end
+
+# The mean of the unwrapped fractional coordinates of the atoms of molecule `m`
+@inline function molecule_mean_frac(center_sums, counts, m, ::Val{D}, ::Val{T}) where {D, T}
+    n = counts[m]
+    return SVector{D, T}(ntuple(d -> T(center_sums[d, m] / n), Val(D)))
+end
+
+@kernel inbounds=true function molecule_centers_kernel!(centers, @Const(center_sums),
+                                        @Const(counts), box, coord_unit, ::Val{D},
+                                        ::Val{T}) where {D, T}
+    m = @index(Global, Linear)
+    if m <= length(counts)
+        f = wrap_frac01(molecule_mean_frac(center_sums, counts, m, Val(D), Val(T)))
+        centers[m] = (box * f) * coord_unit
+    end
+end
+
+function molecule_centers(coords::AbstractGPUArray{SVector{D, C}}, boundary,
+                          topology) where {D, C}
+    if isnothing(topology)
+        return coords
+    end
+    T = typeof(ustrip(zero(C)))
+    coord_unit = unit(C)
+    plan = molecule_unwrap_plan(topology, coords)
+    box = box_matrix_nounits(boundary, coord_unit, T)
+    unwrap_molecules_gpu!(plan, coords, inv(box))
+    n_mol = length(plan.molecule_atom_counts)
+    centers = similar(coords, n_mol)
+    launch_kernel!(molecule_centers_kernel!(get_backend(coords), 256), centers,
+                   plan.center_sums, plan.molecule_atom_counts, box, coord_unit, Val(D),
+                   Val(T); ndrange=n_mol)
+    return centers
+end
+
+#=
+Place the atoms of the scaled system. The displacement of an atom from the center of its
+molecule is found from the unwrapped fractional coordinates, so the molecule is kept whole,
+and is rotated by `R` before being added to the scaled center.
+=#
+@kernel inbounds=true function scale_place_kernel!(coords, velocities, @Const(frac),
+                                        @Const(shifts), @Const(center_sums), @Const(counts),
+                                        @Const(atom_molecule_inds), box_old, μ, R, μinv,
+                                        boundary_new, coord_unit, ::Val{D}, ::Val{T},
+                                        ::Val{scale_vel}) where {D, T, scale_vel}
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        m = atom_molecule_inds[i]
+        mean_frac = molecule_mean_frac(center_sums, counts, m, Val(D), Val(T))
+        center_old = box_old * wrap_frac01(mean_frac)
+        u = frac[i] - shifts[i]
+        δ = box_old * (u - mean_frac)
+        r_new = R * δ + μ * center_old
+        coords[i] = wrap_coords(r_new * coord_unit, boundary_new)
+        if scale_vel
+            velocities[i] = μinv * velocities[i]
+        end
+    end
 end
 
 rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
 rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
-rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
+
+function rebuild_boundary(b::TriclinicBoundary{<:Any, <:Any, <:Any, A}, box) where A
+    return TriclinicBoundary(box; approx_images=A)
+end
 
 # Check that the interaction cutoff still fits in the box after the boundary is changed,
 #   for example by a barostat
@@ -1219,18 +1582,37 @@ function check_boundary_change(sys, strictness)
     return nothing
 end
 
-"""
+# The rotation of the right polar decomposition of `μ`, made right-handed
+function rotation_part(μ::SMatrix{D, D}) where D
+    sv = svd(Matrix(μ))
+    R = SMatrix{D, D}(sv.U * sv.Vt)
+    if det(R) < 0
+        idx = argmin(sv.S)
+        Ufix = Matrix(sv.U)
+        Ufix[:, idx] .*= -1
+        R = SMatrix{D, D}(Ufix * sv.Vt)
+    end
+    return R
+end
+
+@doc raw"""
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
                   rotate::Bool=true,
                   ignore_molecules::Bool=false,
                   scale_velocities::Bool=false,
                   strictness=:warn)
 
-Rigid-molecular barostat update with optional rotation.
+Scale the bounding box and coordinates of a system by the matrix ``\mu``, as done by
+barostats such as [`CRescaleBarostat`](@ref).
 
-- Box:        B′ = μ * B
-- Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
-- Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
+```math
+B' = \mu B, \quad \mathbf{r}' = \mu \mathbf{r}, \quad \mathbf{v}' = \mu^{-1} \mathbf{v}
+```
+where ``B`` is the box matrix and the velocities are only scaled when
+`scale_velocities=true`.
+If the system has a topology the molecules are moved as rigid units: the center of each
+molecule is scaled, and with `rotate=true` the molecule is rotated by the rotational part
+of ``\mu``. Setting `ignore_molecules=true` scales every atom instead.
 
 A warning is given at most once if the new box is too small for the interaction
 cutoff distance.
@@ -1252,7 +1634,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
 
     if ignore_molecules || isnothing(sys.topology)
         # box
-        B  = SMatrix{D,D}(ustrip.(boxmatrix(sys.boundary)))
+        B  = SMatrix{D,D}(ustrip.(box_matrix(sys.boundary)))
         Bu = unit(eltype(eltype(sys.coords)))
         B′ = μ * B
         sys.boundary = rebuild_boundary(sys.boundary, B′ .* Bu)
@@ -1272,7 +1654,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
         b_old   = ustrip(coord_u, b_old_u)
 
         # cell matrices
-        B  = SMatrix{D,D}(ustrip.(boxmatrix(b_old_u)))
+        B  = SMatrix{D,D}(ustrip.(box_matrix(b_old_u)))
         B′ = μ * B
 
         # topology
@@ -1295,13 +1677,7 @@ function scale_coords!(sys::System{<:Any, AT, T},
 
         # rotation from right polar decomposition
         if rotate
-            sv = svd(Matrix(μ))
-            R  = SMatrix{D,D}(sv.U * sv.Vt)
-            if det(R) < 0 # Ensure right-handed rotation
-                idx  = argmin(sv.S)
-                Ufix = Matrix(sv.U); Ufix[:,idx] .*= -1
-                R    = SMatrix{D,D}(Ufix * sv.Vt)
-            end
+            R = rotation_part(μ)
         else
             R = SMatrix{D,D}(I)
         end
@@ -1344,12 +1720,54 @@ function scale_coords!(sys::System{<:Any, AT, T},
     end
 end
 
-"""
+function scale_coords!(sys::System{<:Any, AT, T},
+                       μ_in::SMatrix{D, D};
+                       rotate::Bool=true,
+                       ignore_molecules::Bool=false,
+                       scale_velocities::Bool=false,
+                       strictness=default_strictness()) where {AT <: AbstractGPUArray, T, D}
+    if has_infinite_boundary(sys.boundary)
+        throw(ArgumentError("infinite boundary not supported for scale_coords!"))
+    end
+    μ = SMatrix{D, D, T}(μ_in)
+    μinv = inv(μ)
+    coord_unit = unit(eltype(eltype(sys.coords)))
+    B = box_matrix_nounits(sys.boundary, coord_unit, T)
+    B′ = μ * B
+    boundary_new = rebuild_boundary(sys.boundary, B′ .* coord_unit)
+
+    if ignore_molecules || isnothing(sys.topology)
+        sys.coords .= (μ,) .* sys.coords
+        if scale_velocities
+            sys.velocities .= (μinv,) .* sys.velocities
+        end
+    else
+        plan = molecule_unwrap_plan(sys.topology, sys.coords)
+        shifts = unwrap_molecules_gpu!(plan, sys.coords, inv(B))
+        R = (rotate ? SMatrix{D, D, T}(rotation_part(μ)) : SMatrix{D, D, T}(I))
+        launch_kernel!(scale_place_kernel!(get_backend(sys.coords), 256), sys.coords,
+                       sys.velocities, plan.frac, shifts, plan.center_sums,
+                       plan.molecule_atom_counts, plan.atom_molecule_inds, B, μ, R, μinv,
+                       boundary_new, coord_unit, Val(D), Val(T), Val(scale_velocities);
+                       ndrange=length(sys.coords))
+    end
+    sys.boundary = boundary_new
+    check_boundary_change(sys, strictness)
+    return sys
+end
+
+@doc raw"""
     dipole_moment(sys)
 
-The dipole moment μ of a system.
+The dipole moment of a system.
 
-Calculated as the sum of the coordinates multiplied by the partial charges.
+Calculated as the sum of the coordinates multiplied by the partial charges,
+``\boldsymbol{\mu} = \sum_i q_i \mathbf{r}_i``.
 Requires the charges on the atoms to be set.
 """
 dipole_moment(sys) = sum(sys.coords .* charges(sys))
+
+# Conversion to another float type, units or device, see `System(sys; ...)`
+function convert_component(c::SystemConversion, b::TriclinicBoundary{<:Any, <:Any, <:Any, A}) where A
+    return TriclinicBoundary(convert_component(c, b.basis_vectors); approx_images=A)
+end

@@ -14,7 +14,7 @@
         sys_out = System(
             sys;
             coords=[F * coord for coord in sys.coords],
-            boundary=TriclinicBoundary(F * Molly.boxmatrix(sys.boundary)),
+            boundary=TriclinicBoundary(F * Molly.box_matrix(sys.boundary)),
         )
         return potential_energy(sys_out, neighbors; n_threads=1)
     end
@@ -51,7 +51,7 @@
             z         o + q[2]   q[6];
             z         z          o + q[3]
         ]
-        boundary_new = TriclinicBoundary(F * Molly.boxmatrix(boundary))
+        boundary_new = TriclinicBoundary(F * Molly.box_matrix(boundary))
         return Molly.ewald_pe_forces!(
             nothing,
             nothing,
@@ -141,7 +141,7 @@
         nonbonded_method=SetupCoulombReactionField(),
     )
 
-    sys_trc = System(sys; boundary=TriclinicBoundary(Molly.boxmatrix(sys.boundary)))
+    sys_trc = System(sys; boundary=TriclinicBoundary(Molly.box_matrix(sys.boundary)))
     neighbors_virial = Molly.find_neighbors(sys_trc; n_threads=1)
 
     W_enzyme, _, _ = virial_enzyme(sys_trc, neighbors_virial)
@@ -229,10 +229,9 @@ end
     neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=1,
                                              dist_cutoff=T(1.5))
     pairwise_inters = (
-        LennardJones(cutoff=DistanceCutoff(T(1.2)), use_neighbors=true),
+        LennardJones(cutoff=DistanceCutoff(T(1.2))),
         CoulombReactionField(dist_cutoff=T(1.2),
                              solvent_dielectric=T(Molly.crf_solvent_dielectric),
-                             use_neighbors=true,
                              coulomb_const=T(ustrip(Molly.coulomb_const))),
     )
     bonds = InteractionList2Atoms(Int32.(collect(1:4)), Int32.(collect(5:8)),
@@ -292,30 +291,7 @@ end
 end
 
 @testset "CV gradients" begin
-    function cv_gradient_enz(cv_type, coords, atoms=nothing, boundary=nothing, velocities=nothing)
-        d_coords = zero(coords)
-        unit_arr = Any[u"nm"]
-
-        _, cv_val_ustrip = autodiff(
-            set_runtime_activity(ReverseWithPrimal), # set_runtime_activity necessary for units
-            Molly.calculate_cv_ustrip!,
-            Active,
-            Const(unit_arr),
-            Const(cv_type),
-            Duplicated(coords, d_coords),
-            Const(atoms),
-            Const(boundary),
-            Const(velocities),
-        )
-
-        # Correct the units after the ustrip
-        u = only(unit_arr)
-        d_coords = d_coords .* u ./ unit(d_coords[1][1])^2
-
-        return d_coords, cv_val_ustrip * u
-    end
-
-    function forces_test!(fs, sys, bias::BiasPotential; grad_cv=cv_gradient_enz, kwargs...)
+    function forces_test!(fs, sys, bias; grad_cv=Molly.cv_gradient_enzyme, kwargs...)
         if bias.cv_type.correction == :pbc
             coords = Molly.unwrap_molecules(sys)
         else
@@ -332,7 +308,7 @@ end
         )
 
         # Gradient of bias function with respect to CV
-        d_bias = bias_gradient(bias.bias_type, cv_sim)
+        d_bias = Molly.bias_gradient(bias.bias_type, cv_sim)
 
         fs_svec = d_bias .* d_coords
 
@@ -382,8 +358,8 @@ end
         fs_zero_enz = zero(fs)
         fs_zero_anl = zero(fs)
 
-        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=cv_gradient_enz)
-        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=cv_gradient)
+        forces_test!(fs_zero_enz, sys, bias_pot; grad_cv=Molly.cv_gradient_enzyme)
+        forces_test!(fs_zero_anl, sys, bias_pot; grad_cv=Molly.cv_gradient)
         @test isapprox(ustrip_vec.(fs_zero_anl), ustrip_vec.(fs_zero_enz); atol=1e-6)
     end
 end
@@ -484,16 +460,16 @@ end
     #   range where each interaction actually varies
     inters = [
         ("LennardJonesSCBeutler", LennardJonesSoftCoreBeutler(α=T(0.5),
-                                        cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true),
+                                        cutoff=DistanceCutoff(nb_cutoff)),
                                   T(0.4)),
         ("LennardJonesSCGapsys" , LennardJonesSoftCoreGapsys(α=T(0.85),
-                                        cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true),
+                                        cutoff=DistanceCutoff(nb_cutoff)),
                                   T(0.4)),
         ("CoulombSCBeutler"     , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                        use_neighbors=true, coulomb_const=cc),
+                                        coulomb_const=cc),
                                   T(0.7)),
         ("CoulombSCGapsys"      , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                        σQ=T(1.0), use_neighbors=true, coulomb_const=cc),
+                                        σQ=T(1.0), coulomb_const=cc),
                                   T(0.7)),
     ]
     for (name, inter, λ_start) in inters
@@ -609,11 +585,10 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng_setup)
     velocities = [random_velocity(atom_mass, temp; rng=rng_setup) for i in 1:n_atoms]
     nb_cutoff = T(1.2)
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
     crf = CoulombReactionField(
         dist_cutoff=nb_cutoff,
         solvent_dielectric=T(Molly.crf_solvent_dielectric),
-        use_neighbors=true,
         coulomb_const=cc,
     )
     neighbor_finder = DistanceNeighborFinder(
@@ -837,7 +812,7 @@ end
     @test frac_diff < 1e-5
 
     boundary_units = CubicBoundary(3.0u"nm")
-    lj_units = LennardJones(cutoff=DistanceCutoff(1.2u"nm"), use_neighbors=true)
+    lj_units = LennardJones(cutoff=DistanceCutoff(1.2u"nm"))
     neighbor_finder_units = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         n_steps=10,
@@ -1083,60 +1058,70 @@ end
     lost_wc = ("weight_14", "coulomb_const")
     pairwise_inters = [
         ("LennardJones"     , LennardJones(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("Mie"              , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("AshbaughHatch"    , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w), lost_w),
+                                    weight_special=w), lost_w),
         ("DoubleExponential", DoubleExponential(α=T(16.766), β=T(4.427), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
         ("DoubleExponentialSC", DoubleExponentialSoftCore(α=T(16.766), β=T(4.427),
-                                    weight_special=w, cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true), lost_w),
-        ("Gravity"          , Gravity(G=T(1.0), use_neighbors=true), ()),
+                                    weight_special=w, cutoff=DistanceCutoff(nb_cutoff)), ()),
+        ("Gravity"          , Gravity(G=T(1.0)), ()),
         ("LJSCBeutler"      , LennardJonesSoftCoreBeutler(α=T(0.5), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
         ("LJSCGapsys"       , LennardJonesSoftCoreGapsys(α=T(0.85), weight_special=w,
-                                    cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true), ()),
-        ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
+                                    cutoff=DistanceCutoff(nb_cutoff)), ()),
+        ("Coulomb"          , Coulomb(cutoff=DistanceCutoff(nb_cutoff),
                                     weight_special=w, coulomb_const=cc), ()),
-        ("CoulombScaled"    , CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+        ("CoulombScaled"    , Molly.CoulombScaled(cutoff=DistanceCutoff(nb_cutoff),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCBeutler" , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CoulombSCGapsys"  , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                    σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), ()),
+                                    σQ=T(1.0), weight_special=w, coulomb_const=cc), ()),
         ("CoulombRF"        , CoulombReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
-        ("CRFScaled"        , CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
+        ("CRFScaled"        , Molly.CoulombReactionFieldScaled(dist_cutoff=nb_cutoff,
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CRFSCBeutler"     , CoulombSoftCoreBeutlerReactionField(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc), ()),
+                                    weight_special=w, coulomb_const=cc), ()),
         ("CRFSCGapsys"      , CoulombSoftCoreGapsysReactionField(dist_cutoff=nb_cutoff,
-                                    σQ=T(1.0), use_neighbors=true, weight_special=w,
-                                    coulomb_const=cc), ()),
-        ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff, use_neighbors=true,
+                                    σQ=T(1.0), weight_special=w, coulomb_const=cc), ()),
+        ("CoulombEwald"     , CoulombEwald(dist_cutoff=nb_cutoff,
                                     weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
-        ("CoulombEwaldScaled", CoulombEwaldScaled(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+        ("CoulombEwaldScaled", Molly.CoulombEwaldScaled(dist_cutoff=nb_cutoff,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCBeutler"  , CoulombSoftCoreBeutlerEwald(dist_cutoff=nb_cutoff,
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
         ("CEwaldSCGapsys"   , CoulombSoftCoreGapsysEwald(dist_cutoff=nb_cutoff, σQ=T(1.0),
-                                    use_neighbors=true, weight_special=w, coulomb_const=cc,
+                                    weight_special=w, coulomb_const=cc,
                                     approximate_erfc=false), ()),
-        ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true,
+        ("Yukawa"           , Yukawa(cutoff=DistanceCutoff(nb_cutoff),
                                     weight_special=w, coulomb_const=cc, kappa=T(1.0)), ()),
     ]
     for (name, inter, broken) in pairwise_inters
         sys_ref = pairwise_sys(inter)
         params_dic = Dict{String, Float64}()
-        Molly.extract_block!(params_dic, parameter_prefix(inter), Molly.parameter_keys(inter),
-                             Molly.parameter_values(inter))
+        Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                             Molly.parameter_keys(inter), Molly.parameter_values(inter))
         test_params(name, sys_ref, params_dic, broken)
+    end
+
+    # A λ interaction followed by another one, as an alchemical system has them; the layout
+    #   of the first must not drop the gradients of the second
+    let inters = Dict(name => inter for (name, inter, _) in pairwise_inters),
+            sys_ref = System(pairwise_sys(inters["DoubleExponentialSC"]);
+                             pairwise_inters=(inters["DoubleExponentialSC"], inters["CoulombScaled"]))
+        params_dic = Dict{String, Float64}()
+        for inter in sys_ref.pairwise_inters
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter),
+                                 Molly.parameter_keys(inter), Molly.parameter_values(inter))
+        end
+        test_params("DoubleExponentialSC + CoulombScaled", sys_ref, params_dic)
     end
 
     specific_inters = [
@@ -1172,9 +1157,618 @@ end
         sys_ref = specific_sys(inter_list)
         params_dic = Dict{String, Float64}()
         for (inter, inter_type) in zip(inter_list.inters, inter_list.types)
-            Molly.extract_block!(params_dic, parameter_prefix(inter, inter_type),
+            Molly.extract_block!(params_dic, Molly.parameter_prefix(inter, inter_type),
                                  Molly.parameter_keys(inter), Molly.parameter_values(inter))
         end
         test_params(name, sys_ref, params_dic)
     end
+
+    # The λ versions that alchemical systems use have the keys of the interactions they
+    #   replace. Dual topology keeps the bonded terms of deleted atoms at full strength, so
+    #   the A copies of core atoms are used, whose bonded terms are scaled by 1 - λ
+    atoms_λ = [Atom(index=i, mass=T(10.0), charge=T(0.1), σ=T(0.3), ϵ=T(0.4), λ=T(0.6),
+                    alch_role=(i <= 2 ? Molly.CoreDRole : Molly.EnvRole))
+               for i in eachindex(coords_spec)]
+    scheduler = Molly.DefaultLambdaScheduler(dual=true)
+    to_λ(inter) = Molly.to_lambda_function(inter; scheduler=scheduler)
+    to_λ(inter::Molly.LennardJones14) = Molly.to_lambda_function(inter, Molly.GapsysSoftCore();
+                                                                 scheduler=scheduler, float_type=T)
+    to_λ(inter::Molly.LennardJones14, softcore) =
+        Molly.to_lambda_function(inter, softcore; scheduler=scheduler, float_type=T)
+    λ_inters = Any[(name, il, to_λ) for (name, il) in specific_inters if name != "FENEBond" &&
+                                                     name != "HarmonicPositionRestraint"]
+    for softcore in (Molly.BeutlerSoftCore(), Molly.ScaledSoftCore())
+        lj14 = specific_inters[findfirst(x -> first(x) == "LennardJones14", specific_inters)][2]
+        push!(λ_inters, ("LennardJones14 $(nameof(typeof(softcore)))", lj14,
+                         inter -> to_λ(inter, softcore)))
+    end
+    for (name, inter_list, convert) in λ_inters
+        il_λ = typeof(inter_list).name.wrapper(
+            (getfield(inter_list, f) for f in fieldnames(typeof(inter_list))[1:(end - 3)])...,
+            convert.(inter_list.inters), ["t"], inter_list.data)
+        sys_ref = System(specific_sys(il_λ); atoms=atoms_λ)
+        # The coupling must change the energy, or the λ part would go untested
+        @test !(potential_energy(sys_ref) ≈ potential_energy(specific_sys(inter_list)))
+        params_dic = extract_parameters(sys_ref)
+        keys_base = [Molly.parameter_prefix(inter_list.inters[1], "t") * k
+                     for k in Molly.parameter_keys(inter_list.inters[1])]
+        @test all(k -> haskey(params_dic, k), keys_base)
+        inter_params = Dict(k => params_dic[k] for k in keys_base)
+        test_params("$(name)λ", sys_ref, inter_params)
+    end
+
+    # Single topology λ interactions store the parameters of both end states
+    hb_single = Molly.to_lambda_function_single(HarmonicBond(k=T(100.0), r0=T(0.5)), nothing;
+                    scheduler=Molly.DefaultLambdaScheduler(dual=false))
+    sys_single = specific_sys(InteractionList2Atoms(is, js, [hb_single], ["t"]))
+    @test_throws "single topology" extract_parameters(sys_single)
+    @test_throws "single topology" ParameterPlan(sys_single, Dict("inter_HB_t_k" => T(100.0)))
+end
+
+@testset "Parameters with units" begin
+    function garnet_sys(AT, units)
+        ff = MolecularForceField(
+            joinpath(ff_dir, "ethanol_garnet.xml");
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=units,
+        )
+        return System(
+            joinpath(data_dir, "ethanol_garnet.pdb"),
+            ff;
+            units=units,
+            array_type=AT,
+            float_type=Float64,
+            nonbonded_method=SetupCoulombReactionField(),
+            dist_cutoff=(units ? 1.0u"nm" : 1.0),
+            dispersion_correction=true,
+            strictness=:nowarn,
+        )
+    end
+
+    # Single-threaded so that the energies and forces can be compared exactly
+    pe(sys) = potential_energy(sys; n_threads=1)
+    fs(sys) = from_device(forces(sys; n_threads=1))
+
+    sys_units   = garnet_sys(Array, true)
+    sys_nounits = garnet_sys(Array, false)
+    params_dic = extract_parameters(sys_units)
+
+    # Plain numbers in the units that each parameter is stored with in the system, which
+    #   for this force field are the same numbers as for the unitless system
+    @test params_dic isa Dict{String, Float64}
+    @test params_dic == extract_parameters(sys_nounits)
+    i_C1 = findfirst(ad -> ad.atom_type == "C1", sys_units.atoms_data)
+    @test params_dic["atom_C1_σ"] == ustrip(u"nm", sys_units.atoms[i_C1].σ)
+    @test params_dic["atom_C1_ϵ"] == ustrip(u"kJ * mol^-1", sys_units.atoms[i_C1].ϵ)
+    @test params_dic["atom_C1_mass"] == ustrip(u"g/mol", sys_units.atoms[i_C1].mass)
+
+    bonds_units = sys_units.specific_inter_lists[1]
+    bond_key = "inter_HB_$(bonds_units.types[1])_k"
+    @test params_dic[bond_key] == ustrip(u"kJ * mol^-1 * nm^-2", bonds_units.inters[1].k)
+
+    # Per-interaction helpers take plain numbers in the units of the fields or values
+    #   with units
+    bond = bonds_units.inters[1]
+    @test Molly.inject_parameters(bond, Molly.parameter_values(bond)...) == bond
+    @test Molly.inject_parameters(bond, ustrip.(Molly.parameter_values(bond))...) == bond
+    bond_Å = Molly.inject_parameters(bond, bond.k / 100 * u"nm^2/Å^2", 10 * bond.r0 * u"Å/nm")
+    @test bond_Å.k ≈ bond.k
+    @test bond_Å.r0 ≈ bond.r0
+    torsion = sys_units.specific_inter_lists[3].inters[1]
+    @test Molly.inject_parameters(torsion, ustrip.(Molly.parameter_values(torsion))...) == torsion
+
+    # Injecting unchanged values leaves the system unchanged
+    plan = ParameterPlan(sys_units, params_dic)
+    sys_rt = inject_gradients(sys_units, params_dic, plan)
+    @test sys_rt.atoms == sys_units.atoms
+    @test sys_rt.masses == sys_units.masses
+    @test all(il_rt.inters == il.inters for (il_rt, il) in zip(
+                values(sys_rt.specific_inter_lists), values(sys_units.specific_inter_lists)))
+    @test values(sys_rt.pairwise_inters) == values(sys_units.pairwise_inters)
+    @test pe(sys_rt) == pe(sys_units)
+    @test fs(sys_rt) == fs(sys_units)
+
+    # Inject one modified value per parameter family, into the system with units and into
+    #   the unitless system
+    torsion_key = only(k for k in keys(params_dic)
+                       if startswith(k, "inter_PT_H1/C1/C2/H4_") && endswith(k, "_k_3"))
+    modified = Dict(
+        "atom_C1_σ"     => params_dic["atom_C1_σ"] * 1.05,
+        "atom_O1_ϵ"     => params_dic["atom_O1_ϵ"] * 0.9,
+        "atom_H1_mass"  => params_dic["atom_H1_mass"] * 2,
+        bond_key        => params_dic[bond_key] * 0.8,
+        torsion_key     => params_dic[torsion_key] + 1.0,
+        "inter_DEXP_alpha" => params_dic["inter_DEXP_alpha"] * 1.1,
+        "atom_O1_charge" => params_dic["atom_O1_charge"] * 1.1,
+    )
+    params_mod = merge(params_dic, modified)
+    sys_mod = inject_gradients(sys_units, params_mod, plan)
+    sys_mod_nounits = inject_gradients(sys_nounits, params_mod)
+
+    params_mod_extracted = extract_parameters(sys_mod)
+    for (k, v) in modified
+        @test params_mod_extracted[k] == v
+    end
+    @test params_mod_extracted == params_mod
+    @test unit(sys_mod.atoms[i_C1].σ) == u"nm"
+    @test eltype(sys_mod.masses) == eltype(sys_units.masses)
+    @test sys_mod.total_mass ≈ sum(sys_mod.masses)
+    @test sys_mod.total_mass > sys_units.total_mass
+
+    E_mod = pe(sys_mod)
+    @test !isapprox(E_mod, pe(sys_units); rtol=1e-6)
+    @test ustrip(u"kJ * mol^-1", E_mod) ≈ pe(sys_mod_nounits) rtol=1e-12
+    @test map(f -> ustrip.(u"kJ * mol^-1 * nm^-1", f), fs(sys_mod)) ≈ fs(sys_mod_nounits) rtol=1e-12
+
+    # The dispersion correction takes up the injected α, σ and ϵ, as does its λ version, so
+    #   both match those of a system set up with the modified force field
+    xml = read(joinpath(ff_dir, "ethanol_garnet.xml"), String)
+    xml_mod = replace(xml,
+        "name=\"alpha\" defaultValue=\"12.159626\"" =>
+            "name=\"alpha\" defaultValue=\"$(modified["inter_DEXP_alpha"])\"",
+        "<Atom type=\"C1\" sigma=\"0.3358508050441742\"" =>
+            "<Atom type=\"C1\" sigma=\"$(modified["atom_C1_σ"])\"",
+        "epsilon=\"0.9317593574523926\"" => "epsilon=\"$(modified["atom_O1_ϵ"])\"",
+    )
+    @test count("$(modified["inter_DEXP_alpha"])", xml_mod) == 1
+    garnet_mod = joinpath(mktempdir(), "ethanol_garnet.xml")
+    write(garnet_mod, xml_mod)
+    sys_rebuilt = System(
+        joinpath(data_dir, "ethanol_garnet.pdb"),
+        MolecularForceField(garnet_mod; units=false,
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"));
+        units=false, float_type=Float64, nonbonded_method=SetupCoulombReactionField(),
+        dist_cutoff=1.0, dispersion_correction=true, strictness=:nowarn,
+    )
+    disp(s) = potential_energy(s; pairwise_inters=(), specific_inter_lists=())
+    @test disp(sys_mod_nounits) ≈ disp(sys_rebuilt) rtol=1e-12
+    @test !isapprox(disp(sys_mod_nounits), disp(sys_nounits); rtol=1e-3)
+    solute = collect(1:9)
+    sys_λ_mod = inject_gradients(AbsoluteFESystem(sys_nounits, 0.8, solute), params_mod)
+    @test disp(sys_λ_mod) ≈ disp(AbsoluteFESystem(sys_rebuilt, 0.8, solute)) rtol=1e-12
+    @test disp(Molly.set_lambda!(sys_λ_mod, 0.6)) ≈
+          disp(AbsoluteFESystem(sys_rebuilt, 0.6, solute)) rtol=1e-12
+
+    for AT in array_list[2:end]
+        sys_gpu = garnet_sys(AT, true)
+        plan_gpu = ParameterPlan(sys_gpu, params_dic)
+        @test extract_parameters(sys_gpu) == params_dic
+        @test pe(inject_gradients(sys_gpu, params_dic, plan_gpu)) ≈ pe(sys_units) rtol=1e-10
+        sys_mod_gpu = inject_gradients(sys_gpu, params_mod, plan_gpu)
+        @test sys_mod_gpu.atoms isa AT
+        @test extract_parameters(sys_mod_gpu) == params_mod
+        @test pe(sys_mod_gpu) ≈ E_mod rtol=1e-10
+    end
+end
+
+@testset "Charge parameters" begin
+    # A copy of a force field file with the residue template charges of some atom types
+    #   changed, to compare injected charges with building the system again
+    function ff_file_with_charges(ff_file, charges)
+        xml = read(ff_file, String)
+        for (atom_type, q) in charges
+            pattern = Regex("(type=\"$atom_type\" charge=\")[^\"]*")
+            @test occursin(pattern, xml)
+            xml = replace(xml, pattern => SubstitutionString("\\g<1>$q"))
+        end
+        path = joinpath(mktempdir(), basename(ff_file))
+        write(path, xml)
+        return path
+    end
+
+    pe(sys) = potential_energy(sys; n_threads=1)
+    fs(sys) = from_device(forces(sys; n_threads=1))
+    pme_of(sys) = only(inter for inter in values(sys.general_inters) if inter isa PME)
+
+    garnet_file = joinpath(ff_dir, "ethanol_garnet.xml")
+    # O2 is the water oxygen, O1 the ethanol oxygen
+    charges_mod = ("O2" => -0.95, "O1" => -0.6)
+    garnet_file_mod = ff_file_with_charges(garnet_file, charges_mod)
+    function ethanol_solv_sys(ff_file, nonbonded_method; grad_safe=false, kwargs...)
+        ff = MolecularForceField(
+            ff_file;
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=false,
+        )
+        return System(
+            joinpath(data_dir, "ethanol_solv.pdb"),
+            ff;
+            units=false,
+            float_type=Float64,
+            nonbonded_method=nonbonded_method,
+            dist_cutoff=1.0,
+            grad_safe=grad_safe,
+            dispersion_correction=true,
+            strictness=:nowarn,
+            kwargs...,
+        )
+    end
+
+    nonbonded_methods = (("RF", SetupCoulombReactionField()),
+                         ("RF exclusions", SetupCoulombReactionField(exclusion_correction=true)),
+                         ("PME", SetupPME()))
+    @testset "Injection $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        sys = ethanol_solv_sys(garnet_file, nonbonded_method)
+        params_dic = extract_parameters(sys)
+        i_O2 = findfirst(ad -> ad.atom_type == "O2", sys.atoms_data)
+        @test params_dic["atom_O2_charge"] == sys.atoms[i_O2].charge
+        @test count(k -> endswith(k, "_charge"), keys(params_dic)) == 12
+
+        # Injecting unchanged values leaves the system unchanged
+        plan = ParameterPlan(sys, params_dic)
+        sys_rt = inject_gradients(sys, params_dic, plan)
+        @test sys_rt.atoms == sys.atoms
+        @test pe(sys_rt) == pe(sys)
+
+        # Changed charges give the system built with those charges, including the charge
+        #   sums cached by a PME with fixed charges
+        sys_mod = inject_gradients(sys, merge(params_dic,
+                        Dict("atom_$(t)_charge" => q for (t, q) in charges_mod)), plan)
+        sys_rebuilt = ethanol_solv_sys(garnet_file_mod, nonbonded_method)
+        @test sys_mod.atoms == sys_rebuilt.atoms
+        @test extract_parameters(sys_mod) == extract_parameters(sys_rebuilt)
+        if nb_name == "PME"
+            @test !isnothing(pme_of(sys_mod).pc_sum)
+            @test pme_of(sys_mod).pc_sum != pme_of(sys).pc_sum
+            @test pme_of(sys_mod).pc_sum == pme_of(sys_rebuilt).pc_sum
+            @test pme_of(sys_mod).pc_abs2_sum == pme_of(sys_rebuilt).pc_abs2_sum
+        end
+        @test !isapprox(pe(sys_mod), pe(sys); rtol=1e-6)
+        @test pe(sys_mod) ≈ pe(sys_rebuilt) rtol=1e-12
+        @test fs(sys_mod) ≈ fs(sys_rebuilt) rtol=1e-12
+
+        # The reaction field exclusions take the injected reaction field parameters
+        if nonbonded_method isa SetupCoulombReactionField
+            sys_ϵ = inject_gradients(sys, merge(params_dic, Dict(
+                        "inter_CO_solvent_dielectric" => 10.0,
+                        "inter_CO_solute_dielectric" => 2.0)), plan)
+            sys_ϵ_rebuilt = ethanol_solv_sys(garnet_file, SetupCoulombReactionField(
+                        solvent_dielectric=10.0, solute_dielectric=2.0,
+                        exclusion_correction=nonbonded_method.exclusion_correction))
+            @test pe(sys_ϵ) ≈ pe(sys_ϵ_rebuilt) rtol=1e-12
+            @test fs(sys_ϵ) ≈ fs(sys_ϵ_rebuilt) rtol=1e-12
+        end
+    end
+
+    # Enzyme against finite differencing, with every parameter of the system in the
+    #   dictionary; σ and ϵ are checked too since they share the atom injection
+    # A PME has to be passed as Duplicated, so the general interactions are passed
+    #   separately; a grad-safe PME caches no charges, so injection leaves them unchanged
+    function pe_injected(params_dic, sys_ref, plan, coords, neighbors, general_inters)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
+        return potential_energy(sys, neighbors; n_threads=1, general_inters=general_inters)
+    end
+
+    @testset "Gradients $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        sys = ethanol_solv_sys(garnet_file, nonbonded_method; grad_safe=true)
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        # The dispersion correction alongside the PME checks that Enzyme handles general
+        #   interactions of different types
+        gis = sys.general_inters
+        @test any(gi -> gi isa DExpDispersionCorrection, gis)
+        @test all(gi -> !(gi isa PME) || gi.grad_safe, gis)
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Const(sys),
+            Const(plan),
+            Duplicated(copy(sys.coords), zero(sys.coords)),
+            Const(neighbors),
+            Duplicated(gis, Enzyme.make_zero(gis)),
+        )
+        is_rf = nonbonded_method isa SetupCoulombReactionField
+        for key in ("atom_O2_charge", "atom_H7_charge", "atom_O1_charge", "atom_C1_σ",
+                    "atom_C1_ϵ", (is_rf ? ("inter_CO_solute_dielectric",) : ())...)
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+                pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
+                            copy(sys.coords), neighbors, gis)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+        end
+        # A small gradient relative to the energy, so a higher order is needed
+        if is_rf
+            key = "inter_CO_solvent_dielectric"
+            grad_fd = central_fdm(10, 1)(params_dic[key]) do val
+                pe_injected(merge(params_dic, Dict(key => val)), sys, plan,
+                            copy(sys.coords), neighbors, gis)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-5 * abs(grad_fd)
+        end
+    end
+
+    # Injecting into a system that is itself differentiated copies its neighbor finder
+    #   through differentiated memory, which Enzyme could not type when the neighbor finder
+    #   was an immutable struct with a Bool field stored inline in the system. The σ, ϵ and β
+    #   gradients include those of the dispersion correction after the PME, which Enzyme
+    #   dropped while the correction was stored inline next to the PME in the tuple of
+    #   general interactions
+    @testset "Gradients through a Duplicated system with $NF" for NF in (
+                DistanceNeighborFinder, TreeNeighborFinder)
+        sys = ethanol_solv_sys(garnet_file, SetupPME(); grad_safe=true,
+                               neighbor_finder_type=NF)
+        @test sys.neighbor_finder isa NF
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        pe_sys_injected(params_dic, sys, plan, neighbors) = potential_energy(
+                inject_gradients(sys, params_dic, plan), neighbors; n_threads=1)
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_sys_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Duplicated(sys, Enzyme.make_zero(sys)),
+            Const(plan),
+            Const(neighbors),
+        )
+        @test last(values(sys.general_inters)) isa DExpDispersionCorrection
+        for key in ("atom_O2_charge", "atom_O1_charge", "atom_C1_σ", "atom_O2_σ",
+                    "atom_O2_ϵ", "inter_DEXP_beta")
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+                pe_sys_injected(merge(params_dic, Dict(key => val)), sys, plan, neighbors)
+            end
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+        end
+    end
+
+    # The alchemical atoms keep their λ and role, so their charges are still scaled by λ
+    @testset "Alchemical $nb_name" for (nb_name, nonbonded_method) in nonbonded_methods
+        ff_files = joinpath.(ff_dir, ["tip3p_standard.xml", "benzene.xml"])
+        ff_files_mod = [ff_file_with_charges(ff_files[1], ("tip3p-O" => -0.9,)),
+                        ff_file_with_charges(ff_files[2], ("BZNC1" => -0.2,))]
+        benzene_sys(files) = System(joinpath(data_dir, "benzene_solv.pdb"),
+                                    MolecularForceField(files...; units=true);
+                                    nonbonded_method=nonbonded_method, dist_cutoff=1.0u"nm",
+                                    center_coords=false)
+        sys, sys_rebuilt = benzene_sys(ff_files), benzene_sys(ff_files_mod)
+        solute = collect(1:12)
+        for S in (Molly.DefaultLambdaScheduler, Molly.GROMACSLambdaABFEScheduler)
+            # Partly decoupled, so the charges of the solute are partly scaled
+            sys_λ = AbsoluteFESystem(sys, 0.25, solute; scheduler=S(dual=true))
+            sys_λ_rebuilt = AbsoluteFESystem(sys_rebuilt, 0.25, solute; scheduler=S(dual=true))
+            params_dic = extract_parameters(sys_λ)
+            params_mod = merge(params_dic, Dict("atom_tip3p-O_charge" => -0.9,
+                                                "atom_BZNC1_charge" => -0.2))
+            sys_λ_mod = inject_gradients(sys_λ, params_mod)
+            @test sys_λ_mod.atoms == sys_λ_rebuilt.atoms
+            @test any(a -> a.λ != 1, sys_λ_mod.atoms[solute])
+            E_mod = ustrip(pe(sys_λ_mod))
+            @test !isapprox(E_mod, ustrip(pe(sys_λ)); rtol=1e-6)
+            @test E_mod ≈ ustrip(pe(sys_λ_rebuilt)) rtol=1e-12
+        end
+    end
+
+    @testset "Charge types" begin
+        # One atom type, XX, with two charges told apart by their charge types, and a mass
+        #   that differs between its atoms
+        atoms = [Atom(index=i, mass=m, charge=q, σ=0.3, ϵ=0.4)
+                 for (i, (m, q)) in enumerate(((10.0, -0.2), (10.0, 0.2), (12.0, 0.2)))]
+        function sys_with(atoms, charge_types)
+            return System(
+                atoms=atoms,
+                coords=[SVector(x, 1.0, 1.0) for x in (0.5, 1.0, 1.5)],
+                boundary=CubicBoundary(4.0),
+                atoms_data=[AtomData(atom_type="XX", charge_type=t) for t in charge_types],
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+        end
+        sys = sys_with(atoms, ("XX-", "XX+", "XX+"))
+        params_dic = extract_parameters(sys)
+        @test params_dic["atom_XX-_charge"] == -0.2
+        @test params_dic["atom_XX+_charge"] == 0.2
+        @test !haskey(params_dic, "atom_XX_charge")
+        @test haskey(params_dic, "atom_XX_σ")
+        @test !haskey(params_dic, "atom_XX_mass") # The masses differ
+        @test inject_gradients(sys, params_dic).atoms == sys.atoms
+        sys_mod = inject_gradients(sys, merge(params_dic, Dict("atom_XX+_charge" => 0.3)))
+        @test charges(sys_mod) == [-0.2, 0.3, 0.3]
+        @test_throws ArgumentError ParameterPlan(sys, merge(params_dic, Dict("atom_XX_mass" => 10.0)))
+
+        # Masses that differ are left out silently, other parameters are reported
+        @test_logs extract_parameters(sys)
+
+        # Without charge types, the atom type groups charges that differ
+        sys_type = sys_with(atoms, ("", "", ""))
+        @test !haskey(extract_parameters(sys_type; strictness=:nowarn), "atom_XX_charge")
+        @test_logs (:warn, r"atom_XX_charge") extract_parameters(sys_type; strictness=:warn)
+        @test_throws ErrorException extract_parameters(sys_type; strictness=:error)
+        @test_logs extract_parameters(sys_type; strictness=:nowarn)
+        @test_throws ArgumentError ParameterPlan(sys_type, Dict("atom_XX_charge" => 0.0))
+
+        # Atoms with two end states, as in single topology, are not supported
+        atoms_two = [Atom(a.index, a.atom_type, a.mass, (a.charge, a.charge), a.σ, a.ϵ, a.λ,
+                          a.alch_role) for a in atoms]
+        sys_two = sys_with(atoms_two, ("", "", ""))
+        @test_throws ArgumentError extract_parameters(sys_two)
+        @test_throws ArgumentError ParameterPlan(sys_two, Dict{String, Float64}())
+    end
+
+    @testset "Protein charge types" begin
+        # LEU CA shares its atom type with atoms of other charges, so it has its own
+        #   charge type
+        ff99_file = joinpath(ff_dir, "ff99SBildn.xml")
+        xml = read(ff99_file, String)
+        pattern = r"(<Residue name=\"LEU\">.*?<Atom name=\"CA\" type=\"CT\" charge=\")[^\"]*"s
+        @test occursin(pattern, xml)
+        ff99_file_mod = joinpath(mktempdir(), "ff99SBildn.xml")
+        write(ff99_file_mod, replace(xml, pattern => s"\g<1>-0.1"))
+        key = "atom_LEU/CT/CA_charge"
+        protein_sys(ff_file, nonbonded_method; grad_safe=false) = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            MolecularForceField(ff_file; units=false);
+            units=false,
+            nonbonded_method=nonbonded_method,
+            dispersion_correction=false,
+            grad_safe=grad_safe,
+            strictness=:nowarn,
+        )
+
+        for (nb_name, nonbonded_method) in nonbonded_methods
+            sys = protein_sys(ff99_file, nonbonded_method)
+            params_dic = extract_parameters(sys)
+            # Every charge type is a parameter
+            @test count(k -> endswith(k, "_charge"), keys(params_dic)) ==
+                    length(unique(ad.charge_type for ad in sys.atoms_data))
+            @test params_dic[key] == -0.0518
+            plan = ParameterPlan(sys, params_dic)
+            @test inject_gradients(sys, params_dic, plan).atoms == sys.atoms
+
+            sys_mod = inject_gradients(sys, merge(params_dic, Dict(key => -0.1)), plan)
+            sys_rebuilt = protein_sys(ff99_file_mod, nonbonded_method)
+            @test sys_mod.atoms == sys_rebuilt.atoms
+            @test !isapprox(pe(sys_mod), pe(sys); rtol=1e-8)
+            @test pe(sys_mod) ≈ pe(sys_rebuilt) rtol=1e-12
+            @test fs(sys_mod) ≈ fs(sys_rebuilt) rtol=1e-12
+        end
+
+        # Enzyme against finite differencing with PME, passed as Duplicated
+        sys = protein_sys(ff99_file, SetupPME(); grad_safe=true)
+        params_dic = extract_parameters(sys)
+        plan = ParameterPlan(sys, params_dic)
+        neighbors = find_neighbors(sys; n_threads=1)
+        gis = sys.general_inters
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(
+            set_runtime_activity(Reverse),
+            Const(pe_injected),
+            Active,
+            Duplicated(params_dic, grads_enzyme),
+            Const(sys),
+            Const(plan),
+            Duplicated(copy(sys.coords), zero(sys.coords)),
+            Const(neighbors),
+            Duplicated(gis, Enzyme.make_zero(gis)),
+        )
+        grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+            pe_injected(merge(params_dic, Dict(key => val)), sys, plan, copy(sys.coords),
+                        neighbors, gis)
+        end
+        @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+    end
+end
+
+@testset "Dispersion correction gradients" begin
+    # The corrections are recomputed from the injected parameters inside the differentiated
+    #   function, so Enzyme gives their gradients, checked against finite differencing
+    function disp_injected(params_dic, sys_ref, plan)
+        sys = inject_gradients(sys_ref, params_dic, plan)
+        return potential_energy(sys, nothing; n_threads=1, pairwise_inters=(),
+                                specific_inter_lists=())
+    end
+    function build(ff_files, pdb; nonbonded_method=SetupCoulombReactionField(), kwargs...)
+        ff = MolecularForceField(joinpath.(ff_dir, ff_files)...; units=false, kwargs...)
+        return System(joinpath(data_dir, pdb), ff; units=false, float_type=Float64,
+                      nonbonded_method=nonbonded_method, dist_cutoff=1.0,
+                      grad_safe=(nonbonded_method isa SetupPME), dispersion_correction=true,
+                      strictness=:nowarn)
+    end
+    garnet_templates = joinpath(ff_dir, "ethanol_garnet_residues.xml")
+    sys_dexp = build(["ethanol_garnet.xml"], "ethanol_solv.pdb";
+                     custom_residue_templates=garnet_templates)
+    sys_lj = build(["tip3p_standard.xml", "benzene.xml"], "benzene_solv.pdb")
+    # A PME comes before the correction in the general interactions
+    sys_dexp_pme = build(["ethanol_garnet.xml"], "ethanol_solv.pdb";
+                         custom_residue_templates=garnet_templates,
+                         nonbonded_method=SetupPME())
+    sys_lj_pme = build(["tip3p_standard.xml", "benzene.xml"], "benzene_solv.pdb";
+                       nonbonded_method=SetupPME())
+    cases = (
+        ("DEXP", sys_dexp, ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
+         DExpDispersionCorrection),
+        ("DEXP λ", AbsoluteFESystem(sys_dexp, 0.8, collect(1:9)),
+         ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
+         Molly.DExpDispersionCorrectionλ),
+        ("LJ", sys_lj, ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_σ"),
+         LJDispersionCorrection),
+        ("LJ λ", AbsoluteFESystem(sys_lj, 0.8, collect(1:12)),
+         ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_ϵ"), Molly.LJDispersionCorrectionλ),
+        ("DEXP PME", sys_dexp_pme,
+         ("inter_DEXP_alpha", "inter_DEXP_beta", "atom_C1_σ", "atom_O1_ϵ"),
+         DExpDispersionCorrection),
+        ("LJ PME", sys_lj_pme, ("atom_BZNC1_σ", "atom_BZNC1_ϵ", "atom_tip3p-O_σ"),
+         LJDispersionCorrection),
+    )
+    @testset "$name" for (name, sys, ks, DC) in cases
+        @test last(values(sys.general_inters)) isa DC
+        @test count(gi -> gi isa DC, values(sys.general_inters)) == 1
+        params_dic = extract_parameters(sys; strictness=:nowarn)
+        plan = ParameterPlan(sys, params_dic)
+        grads_enzyme = Dict(k => zero(v) for (k, v) in params_dic)
+        autodiff(set_runtime_activity(Reverse), Const(disp_injected), Active,
+                 Duplicated(params_dic, grads_enzyme), Const(sys), Const(plan))
+        for key in ks
+            grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+                disp_injected(merge(params_dic, Dict(key => val)), sys, plan)
+            end
+            @test !iszero(grad_fd)
+            @test abs(grads_enzyme[key] - grad_fd) <= 1e-6 * abs(grad_fd)
+        end
+    end
+end
+
+@testset "Gradients of a converted system" begin
+    ff_dexp = MolecularForceField(joinpath(ff_dir, "ethanol_garnet.xml"))
+    ff_water = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+
+    sys_vac = System(joinpath(data_dir, "ethanol_vac.pdb"), ff_dexp; float_type=Float32,
+                     nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
+                     strictness=:nowarn)
+    sys_ref = System(sys_vac; float_type=Float64, units=false, grad_safe=true)
+    params_dic = extract_parameters(sys_ref)
+    plan = ParameterPlan(sys_ref, params_dic)
+    neighbors = find_neighbors(sys_ref; n_threads=1)
+    function pe_injected(params_dic, sys_ref, plan, coords, neighbors)
+        sys = inject_gradients(sys_ref, params_dic, plan, coords)
+        return potential_energy(sys, neighbors; n_threads=1)
+    end
+    grads = Dict(k => zero(v) for (k, v) in params_dic)
+    autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_injected),
+        Active,
+        Duplicated(params_dic, grads),
+        Const(sys_ref),
+        Const(plan),
+        Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
+        Const(neighbors),
+    )
+    keys_checked = filter(k -> occursin("DEXP", k) || endswith(k, "_σ"),
+                          collect(keys(params_dic)))
+    @test !isempty(keys_checked)
+    for key in keys_checked
+        grad_fd = central_fdm(6, 1)(params_dic[key]) do val
+            dic = copy(params_dic)
+            dic[key] = val
+            pe_injected(dic, sys_ref, plan, copy(sys_ref.coords), neighbors)
+        end
+        @test isapprox(grads[key], grad_fd; rtol=1e-6, atol=1e-8)
+    end
+
+    # The PME of a gradient safe converted system can be differentiated
+    sys_water = System(joinpath(data_dir, "tip4pew.pdb"), ff_water; float_type=Float32,
+                       nonbonded_method=SetupPME(), center_coords=false)
+    sys = System(sys_water; float_type=Float64, units=false, grad_safe=true)
+    pme = sys.general_inters[1]
+    @test pme.grad_safe
+    fs = zero(sys.coords)
+    Molly.ewald_pe_forces!(fs, nothing, sys, pme, Val(false))
+    d_sys = zero(sys)
+    autodiff(
+        Reverse,
+        Molly.ewald_pe_forces!,
+        Active,
+        Const(zero(sys.coords)),
+        Const(nothing),
+        Duplicated(sys, d_sys),
+        Duplicated(pme, zero(pme)),
+        Const(Val(false)),
+    )
+    @test maximum(norm.(-d_sys.coords .- fs)) < 1e-8 * maximum(norm.(fs))
 end

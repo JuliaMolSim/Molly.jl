@@ -1,7 +1,8 @@
 export SoftSphere
 
 @doc raw"""
-    SoftSphere(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
+    SoftSphere(; cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+               σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.GeometricMixing())
 
 The soft-sphere potential.
 
@@ -12,7 +13,7 @@ V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 """
 @kwdef struct SoftSphere{C, H, S, E} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -44,17 +45,20 @@ end
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     σ2 = σ^2
     params = (σ2, ϵ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    return (f / r) * dr
+    return (f * inv_r) * dr
 end
 
 function pairwise_force(::SoftSphere, r, (σ2, ϵ))
-    six_term = (σ2 / r^2) ^ 3
-    return (24ϵ / r) * 2 * six_term ^ 2
+    inv_r = inv(r)
+    six_term = (σ2 * inv_r^2) ^ 3
+    return (24ϵ * inv_r) * 2 * six_term ^ 2
 end
 
 @inline function potential_energy(inter::SoftSphere,

@@ -35,7 +35,7 @@ For training force fields, gradients are required with respect to all force fiel
 In this case [`extract_parameters`](@ref) can be used to get a dictionary of parameters, a [`ParameterPlan`](@ref) is used to insert the parameters into the loss function, and [`inject_gradients`](@ref) is used inside the loss function to set up the system.
 For example, to get the gradient of the potential energy with respect to each parameter:
 ```julia
-using Enzyme
+using Molly, Enzyme
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"); units=false)
@@ -70,7 +70,26 @@ autodiff(
 grads_enzyme # Contains gradients
 ```
 If the system is on GPU, this will run on GPU as well.
-A custom interaction becomes compatible with this interface by defining [`parameter_prefix`](@ref) and [`parameter_fields`](@ref).
+Atom masses, σ and ϵ are keyed by atom type, for example `"atom_N_σ"`, so a value applies to every atom of that type.
+Charges are keyed by the `charge_type` of each [`AtomData`](@ref), for example `"atom_LEU/CT/CA_charge"`, since many force fields assign charges per residue template atom rather than per atom type.
+When the force field takes charges from the residue templates, the `charge_types` argument of [`System`](@ref) sets how atoms are grouped, otherwise the charge type is the atom type:
+
+- `:atom_type` groups by atom type, e.g. `"HC"`.
+- `:template_type` groups by residue template and atom type, e.g. `"ALA/HC"`, so equivalent atoms such as methyl hydrogens share a charge.
+- `:template_atom` groups by residue template and atom name, labelled with the atom type too, e.g. `"ALA/CT/CA"`.
+- `:auto`, the default, uses the atom type if every template atom of that type has the same charge, otherwise the template and atom type if every atom of that type in the template has the same charge, otherwise the template and atom name.
+
+An atom parameter whose atoms have different values, such as the masses of an atom type after hydrogen mass repartitioning, is left out of [`extract_parameters`](@ref), with a warning for charges, σ and ϵ, and is an error in [`ParameterPlan`](@ref).
+The same holds for an interaction parameter whose interactions have different values, such as a bond type that the two end states of a [`RelativeFESystem`](@ref) parametrise differently, which is left out with a warning.
+To group charges differently, give the atoms other charge types with `System(sys; atoms_data=...)`.
+
+Alchemical systems set up with [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) have the parameter keys of the systems they were built from: their λ interactions, such as `HarmonicBondλ` or [`Molly.LennardJones14Scaled`](@ref), take the keys of the interactions they replace, so `"inter_HB_CT/CT_k"` is the same parameter in the original and the alchemical system.
+The pairwise soft-core interactions add their own keys, e.g. `"inter_CO_α"`; the `α` of the 1-4 soft cores is not a parameter.
+Single topology [`RelativeFESystem`](@ref)s, whose atoms and λ interactions store the parameters of both end states, are not supported by these functions.
+A custom interaction becomes compatible with this interface by defining [`Molly.parameter_prefix`](@ref) and [`Molly.parameter_fields`](@ref).
+
+The same functions also work on systems with units, for example to put modified parameters into a system that is then simulated without gradients.
+In this case [`extract_parameters`](@ref) returns plain numbers in the units that each parameter is stored with in the system, and [`ParameterPlan`](@ref) and [`inject_gradients`](@ref) take the dictionary values in those units and re-attach the units of each parameter.
 
 ## Pairwise interaction gradients
 
@@ -116,17 +135,16 @@ simulator = VelocityVerlet(
 )
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-lj = LennardJones(cutoff=DistanceCutoff(1.5), use_neighbors=true)
+lj = LennardJones(cutoff=DistanceCutoff(1.5))
 pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
     n_atoms=n_atoms,
-    n_steps=10,
     dist_cutoff=1.8,
 )
 
 function loss(σ, coords, velocities, boundary, pairwise_inters,
               neighbor_finder, simulator, n_steps, n_atoms, atom_mass, dist_true)
-    atoms = [Atom(i, 1, atom_mass, 0.0, σ, 0.2) for i in 1:n_atoms]
+    atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=σ, ϵ=0.2) for i in 1:n_atoms]
 
     sys = System(
         atoms=atoms,
@@ -254,7 +272,7 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
-atoms = [Atom(i, 1, atom_mass, 0.0, 0.0, 0.0) for i in 1:n_atoms]
+atoms = [Atom(index=i, mass=atom_mass, charge=0.0, σ=0.0, ϵ=0.0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.05,
     coupling=BerendsenThermostat(temp, 0.5),
@@ -405,7 +423,7 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
-atoms = [Atom(i, 1, 10.0f0, 0.0f0, 0.0f0, 0.0f0) for i in 1:n_atoms]
+atoms = [Atom(index=i, mass=10.0f0, charge=0.0f0, σ=0.0f0, ϵ=0.0f0, λ=1.0f0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02f0,
     coupling=BerendsenThermostat(temp, 0.5f0),
@@ -528,5 +546,5 @@ Gradients propagate through the values recorded by loggers, so a loss function c
 - The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities and conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. Langevin dynamics also seems to work. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
 - Forward mode AD holds much promise for differentiable simulation, provided that the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach is likely to use finite differencing with the simulation as a black box. Adjoint sensitivity is another approach to getting gradients which is not yet available in Molly.jl.
-- [`PME`](@ref) stores mesh buffers that carry gradient information, so it must be passed as `Duplicated` with a `zero` shadow rather than as `Const`. Marking it `Const` silently gives the wrong gradient rather than erroring, which also means that a [`System`](@ref) containing a `PME` interaction should not be passed as `Const`.
+- [`PME`](@ref) stores mesh buffers that carry gradient information, so it must be passed as `Duplicated` with a `zero` shadow rather than as `Const`. Marking it `Const` silently gives the wrong gradient rather than erroring, which also means that a [`System`](@ref) containing a [`PME`](@ref) interaction should not be passed as `Const`.
 - Second derivatives can be obtained by applying forward mode over reverse mode with `autodiff_deferred`, for example to get the Hessian of the potential energy for normal mode analysis. This currently works when differentiating the interaction energy functions directly but not when going through [`System`](@ref).

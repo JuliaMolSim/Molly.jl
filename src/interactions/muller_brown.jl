@@ -1,13 +1,19 @@
 export MullerBrown
 
 @doc raw"""
-    MullerBrown(; A, a, b, c, x0, y0, force_units, energy_units)
+    MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
+                a=SVector(-1.0, -1.0, -6.5, 0.7)u"nm^-2",
+                b=SVector(0.0, 0.0, 11.0, 0.6)u"nm^-2",
+                c=SVector(-10.0, -10.0, -6.5, 0.7)u"nm^-2",
+                x0=SVector(1.0, 0.0, -0.5, -1.0)u"nm", y0=SVector(0.0, 0.5, 1.5, 1.0)u"nm",
+                force_units=u"kJ * mol^-1 * nm^-1", energy_units=u"kJ * mol^-1")
 
 The Müller-Brown potential energy surface implemented as an AtomsCalculators.jl calculator.
 
+See [Müller and Brown 1979](https://doi.org/10.1007/BF00547608).
 The potential energy is defined as
 ```math
-V(x,y) = \sum_{n=1}^{4} A_k \exp[a_k(x-x_k^0)^2 + b_k(x-x_k^0)(y-y_k^0) + c_k(y-y_k^0)^2]
+V(x,y) = \sum_{k=1}^{4} A_k \exp[a_k(x-x_k^0)^2 + b_k(x-x_k^0)(y-y_k^0) + c_k(y-y_k^0)^2]
 ```
 where `A`, `a`, `b`, `c`, `x0`, `y0` are 4-element `SVector`s with standard defaults.
 
@@ -76,6 +82,10 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
     fs .+= force_muller_brown.((inter,), sys.coords)
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::MullerBrown) = zero_forces(sys)
+
+concurrent_with_pairwise(::MullerBrown) = true
 
 @inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})
     x, y = coord

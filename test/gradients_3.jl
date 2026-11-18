@@ -88,11 +88,10 @@
         coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng)
         velocities = [random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms]
         nb_cutoff = T(1.2)
-        lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+        lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
         crf = CoulombReactionField(
             dist_cutoff=nb_cutoff,
             solvent_dielectric=T(Molly.crf_solvent_dielectric),
-            use_neighbors=true,
             coulomb_const=T(ustrip(Molly.coulomb_const)),
         )
         pairwise_inters = (lj, crf)

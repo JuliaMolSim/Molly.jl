@@ -1,19 +1,15 @@
 # Loggers to record properties throughout a simulation
 
 export
-    apply_loggers!,
     GeneralObservableLogger,
     values,
-    log_property!,
-    logger_virial_interval,
-    logger_pressure_interval,
     TemperatureLogger,
     CoordinatesLogger,
     BoxLogger,
     VelocitiesLogger,
-    TotalEnergyLogger,
     KineticEnergyLogger,
     PotentialEnergyLogger,
+    TotalEnergyLogger,
     ForcesLogger,
     VolumeLogger,
     DensityLogger,
@@ -29,6 +25,11 @@ export
     AverageObservableLogger,
     ReplicaExchangeLogger,
     MonteCarloLogger
+
+@public apply_loggers!,
+    log_property!,
+    logger_virial_interval,
+    logger_pressure_interval
 
 function check_run_loggers(run_loggers)
     if !(run_loggers == true || run_loggers == false || run_loggers == :skipstart)
@@ -60,6 +61,33 @@ function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, buffe
 end
 
 logger_collection_empty(loggers) = isnothing(loggers) || isempty(values(loggers))
+
+function logger_due_on_step(logger_interval, step_n::Integer, run_loggers)
+    run_loggers == false && return false
+    run_loggers == :skipstart && step_n == 0 && return false
+    return !isinf(logger_interval) && (step_n % logger_interval == 0)
+end
+
+function virial_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_virial_interval(logger), step_n,
+                                            run_loggers), loggers)
+end
+
+function pressure_logger_due_on_step(loggers, step_n::Integer, run_loggers)
+    return any(logger -> logger_due_on_step(logger_pressure_interval(logger), step_n,
+                                            run_loggers), loggers)
+end
+
+# Whether a logger may log on a step, so that simulators can skip calculating values that
+#   are only given to the loggers on other steps
+# true unless it is known that the logger only logs on some steps
+logger_may_log_on_step(logger, step_n::Integer) = true
+
+function any_logger_may_log_on_step(loggers, step_n::Integer, run_loggers)
+    run_loggers == false && return false
+    run_loggers == :skipstart && step_n == 0 && return false
+    return any(logger -> logger_may_log_on_step(logger, step_n), values(loggers))
+end
 
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
@@ -106,6 +134,9 @@ function log_property!(logger::GeneralObservableLogger, s::System, neighbors=not
     end
 end
 
+logger_may_log_on_step(logger::GeneralObservableLogger, step_n::Integer) =
+                                                            (step_n % logger.n_steps) == 0
+
 """
     logger_virial_interval(logger)
 
@@ -122,7 +153,7 @@ logger_virial_interval(logger) = Inf
 Return the interval in simulation steps at which `logger` needs a valid pressure.
 
 Custom pressure loggers should extend this function in addition to
-[`logger_virial_interval`](@ref). The default `Inf` means that the logger does
+[`Molly.logger_virial_interval`](@ref). The default `Inf` means that the logger does
 not require pressure-specific pre-coupling state.
 """
 logger_pressure_interval(logger) = Inf
@@ -176,7 +207,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-box_wrapper(sys, args...; kwargs...) = boxmatrix(sys.boundary)
+box_wrapper(sys, args...; kwargs...) = box_matrix(sys.boundary)
 
 """
     BoxLogger(n_steps)
@@ -432,7 +463,7 @@ end
     ScalarVirialLogger(n_steps)
     ScalarVirialLogger(T, n_steps)
 
-Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+Log the [`scalar_virial`](@ref) of a system throughout a simulation.
 
 For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling scalar virial for that step.
@@ -474,7 +505,8 @@ For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling pressure used for coupling, not a pressure recomputed with the
 post-coupling box.
 
-This should only be used on 3-dimensional systems.
+The default type is for 3D systems with units, for 2D systems with units the pressure is in
+bar nm so give the type, e.g. `PressureLogger(typeof(ones(2, 2) * u"bar * nm"), 10)`.
 """
 PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure_wrapper, T, n_steps)
 PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{Float64}(undef, 3, 3).*u"bar"), n_steps)
@@ -511,7 +543,8 @@ For constrained systems on coordinate-scaling coupling steps, this records the
 pre-coupling pressure used for coupling, not a pressure recomputed with the
 post-coupling box.
 
-This should only be used on 3-dimensional systems.
+The default type is for 3D systems with units, for 2D systems with units the pressure is in
+bar nm so give the type, e.g. `ScalarPressureLogger(typeof(1.0u"bar * nm"), 10)`.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
 ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(Float64)*u"bar"), n_steps)
@@ -578,6 +611,9 @@ end
 
 Base.values(dl::DisplacementsLogger) = dl.displacements
 
+logger_may_log_on_step(dl::DisplacementsLogger, step_n::Integer) =
+                                                            (step_n % dl.n_steps_update) == 0
+
 function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
                        step_n::Integer=0, buffers=nothing; kwargs...)
     if (step_n % dl.n_steps_update) == 0
@@ -629,6 +665,13 @@ function BioStructures.AtomRecord(at_data::AtomData, i, coord)
     )
 end
 
+# Structure files need the atom names, residues and elements from atoms_data
+function check_atoms_data(sys)
+    if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
+        throw(ArgumentError("structure writing requires atoms_data to be set"))
+    end
+end
+
 function write_pdb_coords(output, sys, correction=:pbc, atom_inds_arg=Int[], excluded_res=())
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     coords_cpu = from_device(sys.coords)
@@ -656,6 +699,7 @@ end
 
 function write_chemfiles!(topology, filepath, sys, format, correction, atom_inds_arg, excluded_res,
                           write_velocities, write_boundary, calc_topology, append)
+    calc_topology && check_atoms_data(sys)
     atom_inds_all_res = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     if iszero(length(excluded_res))
         atom_inds = atom_inds_all_res
@@ -667,9 +711,6 @@ function write_chemfiles!(topology, filepath, sys, format, correction, atom_inds
     end
 
     if calc_topology
-        if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
-            throw(ArgumentError("structure writing requires atoms_data to be set"))
-        end
         if !all(in(eachindex(sys)), atom_inds)
             throw(ArgumentError("structure writing requires all atom_inds values to " *
                                 "be valid indices in the system"))
@@ -777,6 +818,7 @@ function write_structure(filepath, sys; format::AbstractString="", correction::S
     check_correction_arg(correction)
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         # Special case PDB so more residue information can be written
+        check_atoms_data(sys)
         open(filepath, "w") do output
             if write_boundary && !has_infinite_boundary(sys.boundary)
                 println(output, pdb_cryst1_line(sys.boundary))
@@ -828,6 +870,12 @@ Not compatible with 2D systems.
 For the PDB format, the box size for the CRYST1 record is taken from the first
 snapshot; different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
+
+Many formats store coordinates at reduced precision, for example 0.001 Å for PDB, about
+0.001 nm for XTC and single precision for DCD.
+Energies calculated from frames read back, for example with [`EnsembleSystem`](@ref),
+are affected by this, so a full precision format or [`CoordinatesLogger`](@ref) should
+be used if that matters.
 """
 mutable struct TrajectoryWriter{I, T}
     n_steps::Int
@@ -908,12 +956,16 @@ function Base.show(io::IO, tw::TrajectoryWriter)
           "\", correction ", tw.correction, ", ", tw.structure_n, " frames written")
 end
 
+logger_may_log_on_step(logger::TrajectoryWriter, step_n::Integer) =
+                                                            (step_n % logger.n_steps) == 0
+
 function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                        step_n::Integer=0, buffers=nothing; kwargs...)
     if step_n % logger.n_steps == 0
         logger.structure_n += 1
         if logger.format == "PDB"
             # Special case PDB so more residue information can be written
+            check_atoms_data(sys)
             open(logger.filepath, "a") do output
                 if logger.write_boundary && logger.structure_n == 1 &&
                             !has_infinite_boundary(sys.boundary)
@@ -936,7 +988,7 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
     end
 end
 
-function validate_replica_loggers(replica_loggers)
+function validate_replica_loggers(replica_loggers; name::AbstractString="replica_loggers")
     seen_loggers = Tuple{Any, Int}[]
     seen_paths = Dict{String, Int}()
     for (replica_i, loggers) in pairs(replica_loggers)
@@ -944,7 +996,7 @@ function validate_replica_loggers(replica_loggers)
             if !isbitstype(typeof(logger))
                 for (seen_logger, prev_i) in seen_loggers
                     if logger === seen_logger && prev_i != replica_i
-                        throw(ArgumentError("replica_loggers cannot reuse the same " *
+                        throw(ArgumentError("$(name) cannot reuse the same " *
                                             "stateful logger object across replicas"))
                     end
                 end
@@ -954,7 +1006,7 @@ function validate_replica_loggers(replica_loggers)
                 filepath = abspath(logger.filepath)
                 prev_i = get(seen_paths, filepath, nothing)
                 if !isnothing(prev_i) && prev_i != replica_i
-                    throw(ArgumentError("replica_loggers cannot contain multiple " *
+                    throw(ArgumentError("$(name) cannot contain multiple " *
                                         "TrajectoryWriters with the same filepath ($filepath)"))
                 end
                 seen_paths[filepath] = replica_i
@@ -1007,7 +1059,6 @@ mutable struct TimeCorrelationLogger{T_A, T_A2, T_B, T_B2, T_AB, TF_A, TF_B}
     observableA::TF_A
     observableB::TF_B
     n_correlation::Int
-    history_A::CircularBuffer{T_A}
     history_B::CircularBuffer{T_B}
     sum_offset_products::Vector{T_AB}
     n_timesteps::Int
@@ -1036,8 +1087,7 @@ function TimeCorrelationLogger(observableA::TF_A, observableB::TF_B,
     T_AB = typeof(dot(zero(TA), zero(TB)))
 
     return TimeCorrelationLogger{T_A, T_A2, T_B, T_B2, T_AB, TF_A, TF_B}(
-        observableA, observableB, n_correlation,
-        CircularBuffer{T_A}(n_correlation), CircularBuffer{T_B}(n_correlation),
+        observableA, observableB, n_correlation, CircularBuffer{T_B}(n_correlation),
         zeros(T_AB, n_correlation), 0, ini_sum_A, ini_sum_B,
         ini_sum_sq_A, ini_sum_sq_B,
     )
@@ -1080,11 +1130,11 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
     logger.n_timesteps += 1
 
-    # Update history lists
-    # Values of A and B older than `n_correlation` steps are overwritten
+    # Update history list
+    # Values of B older than `n_correlation` steps are overwritten
     # See DataStructures.jl `CircularBuffer`
-    push!(logger.history_A, A)
-    push!(logger.history_B, B)
+    # Arrays are copied since they may be the system's own arrays, e.g. the velocities
+    push!(logger.history_B, B isa AbstractArray ? copy(B) : B)
 
     # Update running sums
     # Numerically stable method sums and computes averages at output time
@@ -1094,16 +1144,22 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
     logger.sum_sq_A += dot(A, A)
     logger.sum_sq_B += dot(B, B)
 
-    buff_length = length(logger.history_A)
+    # Pair the new A with each stored B, so that every pair of samples less than
+    #   n_correlation steps apart is counted once, with B at the earlier step
+    buff_length = length(logger.history_B)
 
     if n_threads > 1
         chunk_size = ceil(Int, buff_length / n_threads)
         ix_ranges = [i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
         Threads.@threads for ixs in ix_ranges
-            logger.sum_offset_products[ixs] .+= dot.(logger.history_A[ixs], (first(logger.history_B),))
+            for i in ixs
+                logger.sum_offset_products[i] += dot(A, logger.history_B[buff_length - i + 1])
+            end
         end
     else
-        logger.sum_offset_products[1:buff_length] .+= dot.(logger.history_A, (first(logger.history_B),))
+        for i in 1:buff_length
+            logger.sum_offset_products[i] += dot(A, logger.history_B[buff_length - i + 1])
+        end
     end
 end
 
@@ -1169,6 +1225,9 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
         return avg
     end
 end
+
+logger_may_log_on_step(aol::AverageObservableLogger, step_n::Integer) =
+                                                            (step_n % aol.n_steps) == 0
 
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
                         step_n::Integer=0, buffers=nothing;
@@ -1261,12 +1320,11 @@ function finish_logs!(rexl::ReplicaExchangeLogger;
 end
 
 @doc raw"""
-    MonteCarloLogger()
-    MonteCarloLogger(T)
+    MonteCarloLogger(T=Float64)
 
 A logger that records acceptances in a Monte Carlo simulation.
 
-The logged quantities include the number of new selections (`n_select`),
+The logged quantities include the number of trial moves (`n_trials`),
 the number of successful acceptances (`n_accept`), an array named `energy_rates` which stores
 the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states,
 and a `BitVector` named `state_changed` that stores whether a new state was accepted for the

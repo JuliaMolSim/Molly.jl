@@ -1,7 +1,9 @@
 export PeriodicTorsion
 
+@public PeriodicTorsionλ
+
 @doc raw"""
-    PeriodicTorsion(; periodicities, phases, ks, proper)
+    PeriodicTorsion(; periodicities, phases, ks, proper=true)
 
 A periodic torsion angle between four atoms.
 
@@ -80,39 +82,48 @@ parameter_values(inter::PeriodicTorsion) = (inter.phases..., inter.ks...)
 @inline function inject_parameters(inter::PeriodicTorsion{N, T, E}, vals::Tuple) where {N, T, E}
     return PeriodicTorsion{N, T, E}(
         inter.periodicities,
-        ntuple(i -> convert(T, vals[i]    ), N),
-        ntuple(i -> convert(E, vals[N + i]), N),
+        ntuple(i -> convert_parameter(T, vals[i]    ), N),
+        ntuple(i -> convert_parameter(E, vals[N + i]), N),
         inter.proper,
     )
 end
 
 
-function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
-                                bc_norm, θ)
-    dEdθ = -k * periodicity * sin((periodicity * θ) - phase)
-    fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
-    fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
-    v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
+# The derivative of the energy of one term with respect to the torsion angle
+@inline function periodic_torsion_dEdθ(periodicity, phase, k, θ)
+    return -k * periodicity * sin((periodicity * θ) - phase)
+end
+
+# The forces on the four atoms for a derivative of the energy with respect to the torsion
+#   angle, with the divisions done once for each vector rather than for each component
+@inline function torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    fi = ( dEdθ * bc_norm / dot(cross_ab_bc, cross_ab_bc)) * cross_ab_bc
+    fl = (-dEdθ * bc_norm / dot(cross_bc_cd, cross_bc_cd)) * cross_bc_cd
+    inv_bc_norm2 = inv(bc_norm^2)
+    v = (dot(-ab, bc) * inv_bc_norm2) * fi - (dot(-cd, bc) * inv_bc_norm2) * fl
     fj =  v - fi
     fk = -v - fl
     return fi, fj, fk, fl
+end
+
+function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                bc_norm, θ)
+    dEdθ = periodic_torsion_dEdθ(periodicity, phase, k, θ)
+    return torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
 end
 
 @inline function force(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
                        coords_l, boundary, args...) where N
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
-    fi_sum, fj_sum, fk_sum, fl_sum = periodic_torsion_force(d.periodicities[1], d.phases[1],
-                                        d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
+    # The forces are linear in the derivative with respect to the angle, so the terms are
+    #   summed before the forces are found
+    dEdθ = periodic_torsion_dEdθ(d.periodicities[1], d.phases[1], d.ks[1], θ)
     for i in 2:N
-        fi, fj, fk, fl = periodic_torsion_force(d.periodicities[i], d.phases[i], d.ks[i], ab, bc,
-                                                cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-        fi_sum += fi
-        fj_sum += fj
-        fk_sum += fk
-        fl_sum += fl
+        dEdθ += periodic_torsion_dEdθ(d.periodicities[i], d.phases[i], d.ks[i], θ)
     end
-    return SpecificForce4Atoms(fi_sum, fj_sum, fk_sum, fl_sum)
+    fi, fj, fk, fl = torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
 @inline function potential_energy(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
@@ -127,7 +138,41 @@ end
     return E
 end
 
-# λ version of `PeriodicTorsion` for alchemical systems, built by `to_lambda_function`.
+@doc raw"""
+    PeriodicTorsionλ(; periodicities, phases, ks, proper=true,
+                     λ_mixing=Molly.MinimumMixing(),
+                     scheduler=Molly.DefaultLambdaScheduler())
+
+A periodic torsion angle between four atoms in an alchemical system, the λ version of
+[`PeriodicTorsion`](@ref).
+
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`PeriodicTorsion`](@ref) to this type.
+`phases` and `ϕ` are as for [`PeriodicTorsion`](@ref).
+The weights below depend on the alchemical roles of the atoms and on ``\lambda``, the `λ` of
+the atoms mixed with `λ_mixing`.
+`scheduler` is a [`Molly.LambdaScheduler`](@ref), which selects dual or single topology.
+
+In dual topology the potential energy is defined as
+```math
+V(\phi) = w \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
+```
+where ``w = 1 - \lambda`` if the torsion involves a core atom with the parameters of state A,
+``w = \lambda`` if it involves a core atom with the parameters of state B and ``w = 1`` if it
+involves only unique and environment atoms.
+
+In single topology the first half of the terms are those of state A and the second half are
+those of state B, and the potential energy is defined as
+```math
+V(\phi) = w_A V_A(\phi) + w_B V_B(\phi)
+```
+where ``V_A`` and ``V_B`` are the [`PeriodicTorsion`](@ref) potential energies of the two
+halves.
+``w_A = 1 - \lambda`` and ``w_B = \lambda`` if the torsion involves a core atom, and
+``w_A = w_B = 1`` otherwise.
+
+Only compatible with 3D systems.
+"""
 struct PeriodicTorsionλ{N, T, E, LM, SCH} <: AlchemicalBondedInteraction
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}
@@ -154,6 +199,28 @@ function PeriodicTorsionλ(; periodicities, phases, ks, proper::Bool=true,
 end
 
 is_torsion(::PeriodicTorsionλ) = true
+
+parameter_prefix(inter::PeriodicTorsionλ, inter_type) =
+    (inter.proper ? "inter_PT_$(inter_type)_" : "inter_IT_$(inter_type)_")
+
+n_parameters(::Type{<:PeriodicTorsionλ{N}}) where {N} = 2 * N
+
+parameter_keys(::Type{<:PeriodicTorsionλ{N}}) where {N} =
+    (ntuple(torsion_phase_key, N)..., ntuple(torsion_k_key, N)...)
+
+parameter_values(inter::PeriodicTorsionλ) = (inter.phases..., inter.ks...)
+
+@inline function inject_parameters(inter::PeriodicTorsionλ{N, T, E, LM, SCH},
+                                   vals::Tuple) where {N, T, E, LM, SCH}
+    return PeriodicTorsionλ{N, T, E, LM, SCH}(
+        inter.periodicities,
+        ntuple(i -> convert_parameter(T, vals[i]    ), N),
+        ntuple(i -> convert_parameter(E, vals[N + i]), N),
+        inter.proper,
+        copied_field(inter.λ_mixing),
+        copied_field(inter.scheduler),
+    )
+end
 
 function Base.zero(d::PeriodicTorsionλ{N, T, E}) where {N, T, E}
     return PeriodicTorsionλ(
@@ -251,18 +318,12 @@ end
 
 @inline function periodic_torsion_force_λ(d, λs, ab, bc, cd, cross_ab_bc, cross_bc_cd,
                                           bc_norm, θ, ::Val{N}) where N
-    fi1, fj1, fk1, fl1 = periodic_torsion_force(d.periodicities[1], d.phases[1],
-                                        d.ks[1], ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-    fi_sum, fj_sum, fk_sum, fl_sum = λs[1]*fi1, λs[1]*fj1, λs[1]*fk1, λs[1]*fl1
+    dEdθ = λs[1] * periodic_torsion_dEdθ(d.periodicities[1], d.phases[1], d.ks[1], θ)
     for i in 2:N
-        fi, fj, fk, fl = periodic_torsion_force(d.periodicities[i], d.phases[i], d.ks[i], ab, bc,
-                                                cd, cross_ab_bc, cross_bc_cd, bc_norm, θ)
-        fi_sum += λs[i]*fi
-        fj_sum += λs[i]*fj
-        fk_sum += λs[i]*fk
-        fl_sum += λs[i]*fl
+        dEdθ += λs[i] * periodic_torsion_dEdθ(d.periodicities[i], d.phases[i], d.ks[i], θ)
     end
-    return SpecificForce4Atoms(fi_sum, fj_sum, fk_sum, fl_sum)
+    fi, fj, fk, fl = torsion_forces(dEdθ, ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm)
+    return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
 @inline function potential_energy(d::PeriodicTorsionλ{N, T, E}, coords_i, coords_j, coords_k,

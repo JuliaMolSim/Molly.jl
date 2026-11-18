@@ -1,5 +1,7 @@
 # KernelAbstractions.jl kernels, the tiled kernels of GPUNeighborFinder are in gpu_tiles.jl
 
+@public required_atom_fields
+
 kernel_maybe_velocity(velocities, i) = velocities[i]
 kernel_maybe_velocity(::Nothing, i) = nothing
 
@@ -61,12 +63,16 @@ end
     return pe
 end
 
-# Atom fields read by a pairwise interaction in its force/energy calculation,
-# as a tuple of field name Symbols. Returning `nothing` (the default) conservatively
-# shuffles all Atom fields in the tiled GPU pairwise kernel. Narrowing this to the
-# fields actually used cuts warp-shuffle traffic (the dominant cost of that kernel),
-# but must list every field read or forces/energies will be silently wrong, so the
-# default is safe.
+"""
+    required_atom_fields(inter)
+
+Atom fields read by a pairwise interaction in its force or potential energy calculation,
+as a tuple of field name `Symbol`s.
+
+The default `nothing` conservatively shuffles all atom fields in the tiled GPU pairwise kernel.
+Narrowing this to the fields actually used cuts warp-shuffle traffic (the dominant cost of
+that kernel), but must list every field read or forces/energies will be silently wrong.
+"""
 required_atom_fields(inter) = nothing
 
 @inline merge_atom_fields(::Nothing, _) = nothing
@@ -111,29 +117,92 @@ function gpu_threads_env(name, default)
     return haskey(ENV, name) ? parse(Int, ENV[name]) : default
 end
 
+#=
+Launch a KernelAbstractions kernel, as `kernel!(args...; ndrange=ndrange)` does.
+The CUDA extension has a faster method for kernels with a static workgroup size, which
+keeps the compiled kernel rather than looking it up at every launch. The kernels of a
+simulation step are small enough that the host time to launch them is often what limits
+the speed, so this is used for the kernels that run every step.
+=#
+@inline launch_kernel!(kernel!, args...; ndrange) = kernel!(args...; ndrange=ndrange)
+
+#=
+Work launched with `run_side_work!` can run on the device at the same time as the work
+launched after it, which the CUDA extension does with a second stream. `forces!` uses this
+to calculate the specific and general interactions during the pairwise force kernel, as
+they launch kernels too small to fill the device.
+`side_work_start(backend)` returns a handle, `run_side_work!(f, side, shared)` launches the
+work of `f()` to start once the work launched before `side_work_start` is done, and
+`side_work_finish!(side)` makes the work launched after it wait for the side work.
+`shared` are the arrays that both the side work and the work launched between
+`side_work_start` and `side_work_finish!` use, which they may only both write to with
+atomic operations. Without a method for the backend the side work is run in order.
+=#
+side_work_start(backend) = nothing
+
+function run_side_work!(f, side, shared)
+    f()
+    return side
+end
+
+side_work_finish!(side) = side
+
+const default_threads_specific = 32
+const default_threads_copy = 256
+
 gpu_threads_pairwise(n_neighbors) = gpu_threads_env("MOLLY_GPUNTHREADS_PAIRWISE", 512)
-gpu_threads_specific(n_inters) = gpu_threads_env("MOLLY_GPUNTHREADS_SPECIFIC", 32)
-gpu_threads_copy(n_items) = gpu_threads_env("MOLLY_GPUNTHREADS_COPY", 256)
+gpu_threads_specific(n_inters) = gpu_threads_env("MOLLY_GPUNTHREADS_SPECIFIC",
+                                                 default_threads_specific)
+gpu_threads_copy(n_items) = gpu_threads_env("MOLLY_GPUNTHREADS_COPY", default_threads_copy)
+
+#=
+KernelAbstractions makes the workgroup size part of the type of a kernel, so a size only
+known at run time, such as one that can be set with an environment variable, makes the
+launch a dynamic dispatch that takes microseconds on the host. The kernel is made with the
+size as a constant when it is the default.
+=#
+@inline function ka_kernel(kernel_fn::F, backend, n_threads::Integer,
+                           ::Val{default}) where {F, default}
+    return (n_threads == default ? kernel_fn(backend, default) :
+                                   kernel_fn(backend, n_threads))
+end
+
+# Set GPU forces to zero with a memory set, which `fill!` does not use for arrays of
+#   static vectors
+function zero_forces_gpu!(fs::AbstractArray{SVector{D, F}}) where {D, F}
+    T = typeof(ustrip(zero(F)))
+    fill!(reinterpret(T, fs), zero(T))
+    return fs
+end
+
+zero_forces_gpu!(fs) = fill!(fs, zero(eltype(fs)))
 
 @inline apply_force_units_gpu(f, ::Val{force_units}) where {force_units} = f .* force_units
 @inline apply_force_units_gpu(f, ::Val{NoUnits}) = f
 
 function apply_force_units_gpu!(fs::AbstractGPUArray, fs_mat, force_units,
-                                ::Val{D}, ::Val{T}) where {D, T}
+                                ::Val{D}, ::Val{T},
+                                ::Val{accumulate}=Val(false)) where {D, T, accumulate}
     backend = get_backend(fs)
     n_threads_gpu = gpu_threads_copy(length(fs))
-    kernel! = apply_force_units_kernel!(backend, n_threads_gpu)
-    kernel!(fs, fs_mat, Val(force_units), Val(D), Val(T); ndrange=length(fs))
+    kernel! = ka_kernel(apply_force_units_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_copy))
+    launch_kernel!(kernel!, fs, fs_mat, Val(force_units), Val(D), Val(T), Val(accumulate);
+                   ndrange=length(fs))
     return fs
 end
 
 @kernel inbounds=true function apply_force_units_kernel!(fs, @Const(fs_mat),
                                          ::Val{force_units}, ::Val{D},
-                                         ::Val{T}) where {force_units, D, T}
+                                         ::Val{T}, ::Val{accumulate}) where {force_units, D, T, accumulate}
     atom_i = @index(Global, Linear)
     if atom_i <= length(fs)
         f = SVector{D, T}(ntuple(dim -> fs_mat[dim, atom_i], Val(D)))
-        fs[atom_i] = apply_force_units_gpu(f, Val(force_units))
+        if accumulate
+            fs[atom_i] += apply_force_units_gpu(f, Val(force_units))
+        else
+            fs[atom_i] = apply_force_units_gpu(f, Val(force_units))
+        end
     end
 end
 
@@ -141,25 +210,40 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
                     step_n) where {D, needs_vir}
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA " *
-              "GPU you should use DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         vels = (any_uses_velocity(pairwise_inters) ? sys.velocities : nothing)
-        kernel!(buffers.fs_mat, buffers.virial_nounits, sys.coords, vels, sys.atoms,
+        kernel!(buffers.fs_mat, buffers.virial_slots, sys.coords, vels, sys.atoms,
                 sys.boundary, pairwise_inters, nbs, step_n, Val(needs_vir), Val(D),
                 Val(sys.force_units); ndrange=length(nbs))
     end
     return buffers
 end
+
+#=
+Launch the pairwise forces of the interactions that use the neighbor list, possibly
+leaving work to `finish_pairwise_forces_gpu!`, which `gpu_forces!` calls once the specific
+forces are launched. Together they add the forces to `buffers.fs_mat` as
+`pairwise_forces_loop_gpu!` does. The CUDA tiled path uses this to wait for the check of
+its tile list as late as possible, so that the host launches the specific forces rather
+than waiting for the device to catch up.
+=#
+function start_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                                    step_n)
+    return pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                                     step_n)
+end
+
+finish_pairwise_forces_gpu!(buffers, sys, pairwise_inters, neighbors, needs_vir,
+                            step_n) = buffers
 
 @kernel inbounds=true function pairwise_force_kernel_nl!(fs_mat, vir, @Const(coords),
                                            @Const(velocities), @Const(atoms),
@@ -177,17 +261,57 @@ end
         dr = vector(coord_i, coord_j, boundary)
         f = sum_pairwise_forces_gpu(inters, dr, atoms[i], atoms[j], Val(F), special,
                                     coord_i, coord_j, boundary, vel_i, vel_j, step_n)
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic fs_mat[dim, i] += -fval
             Atomix.@atomic fs_mat[dim, j] +=  fval
             if needs_vir
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[dim, alpha] += ustrip(dr[alpha]) * fval
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += ustrip(dr[alpha]) * fval
                 end
             end
         end
     end
+end
+
+# Add the virial slots into the tensor `vir`, see `virial_slot`, leaving the slots at zero
+function fold_virial_slots!(vir, slots)
+    backend = get_backend(vir)
+    kernel! = fold_virial_slots_kernel!(backend, 256)
+    launch_kernel!(kernel!, vir, slots; ndrange=length(slots))
+    return vir
+end
+
+@kernel inbounds=true function fold_virial_slots_kernel!(vir, slots)
+    i = @index(Global, Linear)
+    if i <= length(slots)
+        v = slots[i]
+        if !iszero(v)
+            n_rows = size(slots, 1)
+            n_cols = size(slots, 2)
+            i0 = i - 1
+            row = i0 % n_rows + 1
+            col = (i0 ÷ n_rows) % n_cols + 1
+            Atomix.@atomic vir[row, col] += v
+            slots[i] = zero(v)
+        end
+    end
+end
+
+#=
+The forces of a tuple of interaction lists, with a kernel for each list. A single kernel
+for every list was tried, which saves launches, but took longer on the device than the
+kernels for the lists together, as each thread then needs the registers and instruction
+cache of every type of interaction.
+=#
+function specific_forces_gpu!(fs_mat, vir, inter_lists::Tuple, coords, velocities, atoms,
+                              boundary, needs_vir, step_n, force_units, float_type)
+    for inter_list in inter_lists
+        specific_forces_gpu!(fs_mat, vir, inter_list, coords, velocities, atoms, boundary,
+                             needs_vir, step_n, force_units, float_type)
+    end
+    return fs_mat
 end
 
 function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList1Atoms,
@@ -196,8 +320,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList1Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_1_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.inters, inter_list.data, Val(needs_vir), Val(D), Val(force_units);
             ndrange=length(inter_list))
     return fs_mat
@@ -209,8 +335,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList2Atoms,
                               ::Val{T}) where {D, C, T, needs_vir}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_2_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.inters, inter_list.data, Val(needs_vir), Val(D),
             Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -222,8 +350,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList3Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_3_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.inters, inter_list.data, Val(needs_vir),
             Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -235,8 +365,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList4Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_4_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, inter_list.data,
             Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -248,8 +380,10 @@ function specific_forces_gpu!(fs_mat, vir, inter_list::InteractionList5Atoms,
                               ::Val{T}) where {D, C, needs_vir, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
-    kernel! = specific_force_5_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, vir, coords, velocities, atoms, boundary, step_n, inter_list.is,
+    kernel! = ka_kernel(specific_force_5_atoms_kernel!, backend, n_threads_gpu,
+                        Val(default_threads_specific))
+    launch_kernel!(kernel!, fs_mat, vir, coords, velocities, atoms, boundary, step_n,
+            inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.ms, inter_list.inters,
             inter_list.data, Val(needs_vir), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
@@ -290,6 +424,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -299,7 +434,7 @@ end
                 r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += λ * ustrip(r_ji[alpha]) * f1val
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += λ * ustrip(r_ji[alpha]) * f1val
                 end
             end
         end
@@ -321,6 +456,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -333,7 +469,7 @@ end
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val)
                 end
             end
@@ -357,6 +493,7 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -372,7 +509,7 @@ end
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
                                                        λ * ustrip(r_jl[alpha]) * f4val)
                 end
@@ -398,6 +535,7 @@ end
                         unit(fs.f4[1]) != F || unit(fs.f5[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        vir_slot = virial_slot(inter_i, size(vir, 3))
         for dim in 1:D
             f1val = ustrip(fs.f1[dim])
             f2val = ustrip(fs.f2[dim])
@@ -416,7 +554,7 @@ end
                 r_jm = vector(coords[j], coords[m], boundary) # r_m - r_j
                 λ = virial_lambda_factor(inters[inter_i], (atoms[i], atoms[j], atoms[k], atoms[l], atoms[m]))
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic vir[alpha, dim] += (λ * ustrip(r_ji[alpha]) * f1val +
+                    Atomix.@atomic vir[alpha, dim, vir_slot] += (λ * ustrip(r_ji[alpha]) * f1val +
                                                        λ * ustrip(r_jk[alpha]) * f3val +
                                                        λ * ustrip(r_jl[alpha]) * f4val +
                                                        λ * ustrip(r_jm[alpha]) * f5val)
@@ -426,18 +564,30 @@ end
     end
 end
 
+#=
+Whether a kernel may be compiled with fast math for arguments `args`, which back-ends that
+support it can read when launching it. As with the CUDA pairwise force kernel, and OpenMM,
+the specific force kernels are compiled with approximate division, square roots and
+reciprocal square roots in Float32, which changes the forces by about the rounding error of
+Float32.
+=#
+kernel_fastmath(kernel_fn, args) = false
+
+for n in 1:5
+    kernel_fn = Symbol("gpu_specific_force_", n, "_atoms_kernel!")
+    @eval kernel_fastmath(::typeof($kernel_fn), args::Tuple) = (eltype(first(args)) == Float32)
+end
+
 function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
                                pairwise_inters, neighbors, step_n)
     if isnothing(neighbors)
-        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
-              "should use DistanceNeighborFinder instead")
+        error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
+              "interactions used without a neighbor finder need use_neighbors=false and " *
+              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
-    if typeof(neighbors) == NoNeighborList
-        nbs = neighbors
-    else
-        nbs = @view neighbors.list[1:neighbors.n]
-    end
-    if length(neighbors) > 0
+    nbs = neighbor_pairs(neighbors)
+    if length(nbs) > 0
         backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
@@ -462,7 +612,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -532,7 +682,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -548,7 +698,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -565,7 +715,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -583,7 +733,7 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
@@ -601,48 +751,99 @@ end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[energy_slot(inter_i, length(energy))] += ustrip(pe)
     end
 end
 
 #=
-    sorted_morton_seq!(buffers, coords, w, morton_bits)
+    sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
 
 Compute a Morton (Z-order) sequence for a set of coordinates.
 The indices are stored in `buffers.morton_seq`.
 =#
-function sorted_morton_seq!(buffers, coords, w, morton_bits)
+function sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
     backend = get_backend(buffers.morton_seq)
     n_threads_gpu = 32
+    w, masks = morton_grid(boundary, morton_bits)
     kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
-    kernel!(buffers.morton_seq_buffer_1, coords, w, morton_bits; ndrange=length(coords))
-    # AcceleratedKernels 0.5 chooses a sort on the host itself, and takes the block size
-    #   of the GPU merge sort through the algorithm
-    alg = backend isa KernelAbstractions.CPU ? AcceleratedKernels.Auto() :
-                                               AcceleratedKernels.MergeSort(block_size=512)
-    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1; alg=alg)
+    kernel!(buffers.morton_seq_buffer_1, coords, boundary, w, masks, morton_bits;
+            ndrange=length(coords))
+    # The sort reuses scratch memory kept with the buffers, see `morton_sort_workspace`
+    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
+                                 alg=morton_sort_alg(backend),
+                                 workspace=morton_sort_workspace(buffers, backend))
     return buffers
 end
 
+#=
+The cell widths of the Morton grid and, for each axis, the number of cells minus one.
+The grid covers the box, or for a TriclinicBoundary the brick of the diagonal components
+    of the basis vectors, see `morton_coord`.
+The number of cells along an axis is a power of two, at most 2^bits, chosen so that the
+    cells are within a factor of sqrt(2) of cubic. The same number of cells along each
+    axis of an elongated box would give long or flat cells, and so blocks of consecutive
+    atoms that interact with more blocks.
+An infinite side has one cell.
+=#
+function morton_grid(boundary, bits)
+    sides = box_sides(boundary)
+    max_side = maximum(s -> isfinite(s) ? s : zero(s), sides)
+    n_cells = map(sides) do s
+        if !isfinite(s) || !(max_side > zero(max_side))
+            return 1
+        else
+            return 1 << clamp(bits - round(Int, log2(max_side / s)), 0, bits)
+        end
+    end
+    return sides ./ n_cells, map(n -> UInt32(n - 1), n_cells)
+end
+
+#=
+The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
+    tile search of the CUDA pairwise kernels.
+Coordinates in an orthorhombic box are used as they are.
+Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
+    using the basis vectors. The brick holds one image of each point, as the triclinic cell
+    does, but is aligned with the grid, so that atoms close on the grid are close in the
+    box. Wrapping each axis with the side lengths does not move y with the x component of
+    b, so atoms from distant parts of the box end up in the same blocks.
+=#
+@inline morton_coord(c, boundary) = c
+
+@inline function morton_coord(c, boundary::TriclinicBoundary)
+    bv, rs = boundary.basis_vectors, boundary.reciprocal_size
+    c_wrap = c - bv[3] * floor(c[3] * rs[3])
+    c_wrap -= bv[2] * floor(c_wrap[2] * rs[2])
+    c_wrap -= bv[1] * floor(c_wrap[1] * rs[1])
+    return c_wrap
+end
+
+# The cell indices are taken modulo the number of cells along each axis, which wraps
+#   orthorhombic coordinates that are outside the box
 @kernel function sorted_morton_seq_kernel!(morton_seq,
                                            @Const(coords::AbstractVector{SVector{D, C}}),
+                                           boundary,
                                            w,
+                                           masks,
                                            bits::Integer) where {D, C}
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
-        scaled_coord = floor.(Int32, coords[i] ./ w)
-        morton_seq[i] = generalized_morton_code(scaled_coord, bits, D)
+        scaled_coord = floor.(Int32, morton_coord(coords[i], boundary) ./ w)
+        cell = (scaled_coord .% UInt32) .& masks
+        morton_seq[i] = generalized_morton_code(cell, bits, Val(D))
     end
 end
 
 # See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
 # and https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN for
 # the bit-interleaving pattern used in the specialized 2D/3D fast paths.
-function generalized_morton_code(indices, bits::Integer, D::Integer)
+# `% UInt32` keeps the bits of a negative index rather than erroring like `UInt32`, so the
+#   masks below take it modulo the grid size.
+function generalized_morton_code(indices, bits::Integer, ::Val{D}) where D
     if D == 3 && bits <= 10
-        x = UInt32(indices[1]) & 0x000003ff
-        y = UInt32(indices[2]) & 0x000003ff
-        z = UInt32(indices[3]) & 0x000003ff
+        x = (indices[1] % UInt32) & 0x000003ff
+        y = (indices[2] % UInt32) & 0x000003ff
+        z = (indices[3] % UInt32) & 0x000003ff
         
         x = (x | (x << 16)) & 0x030000ff
         x = (x | (x << 8))  & 0x0300f00f
@@ -661,8 +862,8 @@ function generalized_morton_code(indices, bits::Integer, D::Integer)
 
         return Int32(x | (y << 1) | (z << 2))
     elseif D == 2 && bits <= 15
-        x = UInt32(indices[1]) & 0x00007fff
-        y = UInt32(indices[2]) & 0x00007fff
+        x = (indices[1] % UInt32) & 0x00007fff
+        y = (indices[2] % UInt32) & 0x00007fff
 
         x = (x | (x << 8)) & 0x00ff00ff
         x = (x | (x << 4)) & 0x0f0f0f0f
@@ -815,5 +1016,107 @@ end
     @inbounds if i<= length(vels)
         noise = randn_svec(SVector{D, FT}, philox_ctr0, philox_ctr1, philox_key, natoms)
         vels[i] = muladd(vel_scales[i], vels[i], noise*noise_scales[i])
+    end
+end
+
+# `vels .+= calc_accels.(forces, masses) .* dt` as a kernel, which is launched faster, see
+#   `launch_kernel!`
+function velocity_force_step!(vels, forces, masses, dt)
+    backend = get_backend(vels)
+    kernel! = velocity_force_step_kernel!(backend, 256)
+    launch_kernel!(kernel!, vels, forces, masses, dt; ndrange=length(vels))
+    return vels
+end
+
+@kernel inbounds=true function velocity_force_step_kernel!(vels, @Const(forces), @Const(masses),
+                                                           dt)
+    i = @index(Global, Linear)
+    if i <= length(vels)
+        vels[i] = vels[i] + calc_accels(forces[i], masses[i]) * dt
+    end
+end
+
+#=
+The drift of the coordinates by the velocities over `dt` in one pass over the atoms on the
+GPU, doing what `coords .+= vels .* dt` and the stores or wrapping around it do. With
+`store` the coordinates before the drift are stored in `coord_storage` and minus the
+coordinates after it divided by `dt` in `vel_storage`, for
+`apply_position_constraints_wrap!`. Without `store` the coordinates are wrapped into the
+box, as there are no constraints to apply first.
+=#
+function drift_step!(coords, vels, coord_storage, vel_storage, dt, boundary,
+                     ::Val{store}) where store
+    backend = get_backend(coords)
+    kernel! = drift_kernel!(backend, 256)
+    launch_kernel!(kernel!, coords, vels, coord_storage, vel_storage, dt, boundary,
+                   Val(store); ndrange=length(coords))
+    return coords
+end
+
+@kernel inbounds=true function drift_kernel!(coords, @Const(vels), coord_storage,
+                                             vel_storage, dt, boundary,
+                                             ::Val{store}) where store
+    i = @index(Global, Linear)
+    if i <= length(coords)
+        x = coords[i]
+        if store
+            coord_storage[i] = x
+        end
+        x = x + vels[i] * dt
+        if store
+            coords[i] = x
+            vel_storage[i] = -x / dt
+        else
+            coords[i] = wrap_coords(x, boundary)
+        end
+    end
+end
+
+#=
+The A, O and A steps of the Langevin integrator in one pass over the atoms on the GPU,
+doing what the coordinate updates and `langevin_o_step!` do between the velocity and
+position constraints. With `store` the coordinates before the step are stored in
+`coord_storage` and minus the coordinates after the step divided by `dt` in `vel_storage`,
+for `apply_position_constraints_wrap!`. Without `store` the coordinates are wrapped into
+the box, as there are no constraints to apply first.
+Each step of the host launching work costs about as much as a small kernel takes to run,
+so this is one launch rather than five.
+=#
+function langevin_aoa_step!(coords, vels, coord_storage, vel_storage, vel_scales,
+                            noise_scales, dt_div2, dt, philox_ctr1::UInt64,
+                            philox_key::UInt64, boundary, ::Type{FT},
+                            ::Val{store}) where {FT, store}
+    backend = get_backend(vels)
+    kernel! = langevin_aoa_kernel!(backend, 256)
+    launch_kernel!(kernel!, coords, vels, coord_storage, vel_storage, vel_scales,
+                   noise_scales, dt_div2, dt, philox_ctr1, philox_key, boundary, Val(FT),
+                   Val(store); ndrange=length(vels))
+    return vels
+end
+
+@kernel inbounds=true function langevin_aoa_kernel!(coords,
+                    vels::AbstractVector{SVector{D, C}}, coord_storage, vel_storage,
+                    @Const(vel_scales), @Const(noise_scales), dt_div2, dt,
+                    philox_ctr1::UInt64, philox_key::UInt64, boundary, ::Val{FT},
+                    ::Val{store}) where {D, C, FT, store}
+    i = @index(Global, Linear)
+    natoms = length(vels) % UInt64
+    if i <= length(vels)
+        x = coords[i]
+        if store
+            coord_storage[i] = x
+        end
+        v = vels[i]
+        x = muladd(dt_div2, v, x)
+        noise = randn_svec(SVector{D, FT}, i % UInt64, philox_ctr1, philox_key, natoms)
+        v = muladd(vel_scales[i], v, noise * noise_scales[i])
+        vels[i] = v
+        x = muladd(dt_div2, v, x)
+        if store
+            coords[i] = x
+            vel_storage[i] = -x / dt
+        else
+            coords[i] = wrap_coords(x, boundary)
+        end
     end
 end

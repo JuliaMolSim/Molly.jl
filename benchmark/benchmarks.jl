@@ -51,7 +51,7 @@ SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($
 SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(c1), $(c2), $(boundary))
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(c1), $(c2), $(boundary))
 
-SUITE["spatial"]["vector_1D"] = @benchmarkable vector_1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
+SUITE["spatial"]["vector_1D"] = @benchmarkable Molly.vector_1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
 SUITE["spatial"]["vector"   ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(CubicBoundary(SVector(10.0, 5.0, 3.5)u"nm")))
 
 n_atoms = 400
@@ -94,9 +94,9 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
         end
-        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(cutoff=cutoff),)
     else
-        neighbor_finder = NoNeighborFinder()
+        neighbor_finder = nothing
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     end
 

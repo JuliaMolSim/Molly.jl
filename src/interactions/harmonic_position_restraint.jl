@@ -11,6 +11,8 @@ V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
 ```
 
 Does not contribute to the virial.
+`x0` does not change when the box size changes, so be careful when using this
+alongside a barostat.
 """
 @kwdef struct HarmonicPositionRestraint{K, C}
     k::K

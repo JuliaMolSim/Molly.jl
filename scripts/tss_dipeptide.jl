@@ -126,7 +126,7 @@ tss_state = TSSState(
     graph = tss_graph,
     first_state = 1,
     first_window = 1,
-    history_forgetting = TSSHistoryForgetting(alpha=FT(0.19), n_epochs=16),
+    history_forgetting = Molly.TSSHistoryForgetting(alpha=FT(0.19), n_epochs=16),
     adaptive_gamma = :covdet,
 )
 
@@ -234,7 +234,7 @@ simulate!(
 )
 
 ##
-pmf_result = pmf(pmf_deconv)
+pmf_result = Molly.pmf(pmf_deconv)
 
 ##
 

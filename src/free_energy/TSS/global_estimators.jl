@@ -765,12 +765,7 @@ function tss_free_energies(state::TSSState;
     return reported
 end
 
-
-#     TSSJackknifeResult
-
-# Jackknife uncertainty summary returned by
-# [`tss_free_energy_uncertainties`](@ref).
-
+# Jackknife uncertainty summary returned by `tss_free_energy_uncertainties`.
 # `free_energies` and `standard_errors` are reported relative to
 # `reference_state`. `mse`, retained `epoch_indices`, epoch weights, and the
 # jackknife `replicates` matrix are stored for diagnostics.
@@ -888,7 +883,7 @@ end
 
 Estimate TSS free-energy standard errors with a delete-one-epoch jackknife.
 
-The TSS state must use [`TSSHistoryForgetting`](@ref), and each window must have
+The TSS state must use [`Molly.TSSHistoryForgetting`](@ref), and each window must have
 samples in the retained epochs. The returned `TSSJackknifeResult`
 contains relative free energies, standard errors, mean-square errors, and the
 jackknife replicates.

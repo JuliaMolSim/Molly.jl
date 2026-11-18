@@ -242,3 +242,14 @@ function convert_setup_quantity(x, units, T)
         end
     end
 end
+
+# Unit handling when converting a System, see `System(sys; ...)`
+
+# Values with units have their units stripped if required
+function convert_component(c::SystemConversion, x::Unitful.Quantity)
+    val = convert_component(c, ustrip(x))
+    return (c.strip_units ? val : val * unit(x))
+end
+
+# Units stored in a struct, such as the force and energy units of `MullerBrown`
+convert_component(c::SystemConversion, x::Unitful.Units) = (c.strip_units ? NoUnits : x)

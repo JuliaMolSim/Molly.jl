@@ -1,3 +1,8 @@
+"""
+Main module for Molly.jl - molecular simulation in Julia.
+
+See https://juliamolsim.github.io/Molly.jl/stable for documentation.
+"""
 module Molly
 
 using Reexport
@@ -5,6 +10,7 @@ using Reexport
 @reexport using Unitful
 
 using AcceleratedKernels
+import Adapt
 using Atomix
 import AtomsBase
 import AtomsCalculators
@@ -29,6 +35,7 @@ using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
+using Suppressor
 using Unitful
 using UnitfulAtomic
 using StructArrays
@@ -39,9 +46,20 @@ using SparseArrays
 using Statistics
 using StatsBase
 
+# Replace with public keyword when support for Julia 1.10 is dropped
+macro public(ex)
+    if VERSION >= v"1.11.0-DEV.469"
+        args = (ex isa Symbol ? (ex,) : (Base.isexpr(ex, :tuple) ? ex.args : error("@public failed to parse")))
+        esc(Expr(:public, args...))
+    else
+        nothing
+    end
+end
+
 include("types.jl")
 include("sparse_pairs.jl")
 include("parameters.jl")
+include("conversion.jl")
 include("units.jl")
 include("cuda_config.jl")
 include("spatial.jl")
@@ -52,6 +70,7 @@ include("kernels.jl")
 include("force.jl")
 include("energy.jl")
 include("free_energy/alchemy.jl")
+include("interactions/charge_equilibration.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
@@ -87,7 +106,6 @@ include("analysis.jl")
 include("residues.jl")
 include("force_field.jl")
 include("setup.jl")
-include("trajectory.jl")
 include("free_energy/thermo.jl")
 include("free_energy/extended_ensemble.jl")
 include("free_energy/stats.jl")
@@ -99,8 +117,10 @@ include("free_energy/alchemical_system.jl")
 include("free_energy/scale_single.jl")
 include("free_energy/scale_dual.jl")
 include("free_energy/TSS.jl")
+include("free_energy/cycle.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
-
+include("bias/metadynamics.jl")
+include("interactions/reaxff.jl")
 
 end

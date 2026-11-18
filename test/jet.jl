@@ -27,8 +27,7 @@
             coords=coords,
             boundary=boundary,
             velocities=velocities,
-            pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),
-                             Coulomb(cutoff=cutoff, use_neighbors=true)),
+            pairwise_inters=(LennardJones(cutoff=cutoff), Coulomb(cutoff=cutoff)),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -59,30 +58,30 @@
 
     for (sys_name, sys) in jet_systems
         neighbors = find_neighbors(sys)
-        JET.test_call(find_neighbors       , Base.typesof(sys); jet_config...)
-        JET.test_call(forces               , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(forces_virial        , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(accelerations        , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(potential_energy     , Base.typesof(sys, neighbors); jet_config...)
-        JET.test_call(kinetic_energy       , Base.typesof(sys); jet_config...)
-        JET.test_call(kinetic_energy_tensor, Base.typesof(sys); jet_config...)
-        JET.test_call(total_energy         , Base.typesof(sys); jet_config...)
-        JET.test_call(temperature          , Base.typesof(sys); jet_config...)
-        JET.test_call(virial               , Base.typesof(sys); jet_config...)
-        JET.test_call(scalar_virial        , Base.typesof(sys); jet_config...)
-        JET.test_call(pressure             , Base.typesof(sys); jet_config...)
-        JET.test_call(scalar_pressure      , Base.typesof(sys); jet_config...)
-        JET.test_call(masses               , Base.typesof(sys); jet_config...)
-        JET.test_call(density              , Base.typesof(sys); jet_config...)
-        JET.test_call(dipole_moment        , Base.typesof(sys); jet_config...)
+        JET.test_call(find_neighbors             , Base.typesof(sys); jet_config...)
+        JET.test_call(forces                     , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(forces_virial              , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(accelerations              , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(potential_energy           , Base.typesof(sys, neighbors); jet_config...)
+        JET.test_call(kinetic_energy             , Base.typesof(sys); jet_config...)
+        JET.test_call(Molly.kinetic_energy_tensor, Base.typesof(sys); jet_config...)
+        JET.test_call(total_energy               , Base.typesof(sys); jet_config...)
+        JET.test_call(temperature                , Base.typesof(sys); jet_config...)
+        JET.test_call(virial                     , Base.typesof(sys); jet_config...)
+        JET.test_call(scalar_virial              , Base.typesof(sys); jet_config...)
+        JET.test_call(pressure                   , Base.typesof(sys); jet_config...)
+        JET.test_call(scalar_pressure            , Base.typesof(sys); jet_config...)
+        JET.test_call(masses                     , Base.typesof(sys); jet_config...)
+        JET.test_call(density                    , Base.typesof(sys); jet_config...)
+        JET.test_call(dipole_moment              , Base.typesof(sys); jet_config...)
 
         # The observables that do not need the forces or the potential energy are also
         #   gated on being free of runtime dispatch
-        JET.test_opt(kinetic_energy       , Base.typesof(sys); jet_config...)
-        JET.test_opt(kinetic_energy_tensor, Base.typesof(sys); jet_config...)
-        JET.test_opt(temperature          , Base.typesof(sys); jet_config...)
-        JET.test_opt(masses               , Base.typesof(sys); jet_config...)
-        JET.test_opt(density              , Base.typesof(sys); jet_config...)
+        JET.test_opt(kinetic_energy             , Base.typesof(sys); jet_config...)
+        JET.test_opt(Molly.kinetic_energy_tensor, Base.typesof(sys); jet_config...)
+        JET.test_opt(temperature                , Base.typesof(sys); jet_config...)
+        JET.test_opt(masses                     , Base.typesof(sys); jet_config...)
+        JET.test_opt(density                    , Base.typesof(sys); jet_config...)
     end
 
     # These functions do not go through the force and energy function barriers, so they are
@@ -98,7 +97,7 @@
             (hydrodynamic_radius   , Base.typesof(coords, boundary)),
             (Molly.molecule_centers, Base.typesof(coords, boundary, sys.topology)),
             (volume                , Base.typesof(boundary)),
-            (box_center            , Base.typesof(boundary)),
+            (Molly.box_center      , Base.typesof(boundary)),
             (scale_boundary        , Base.typesof(boundary, 1.01)),
             (random_coord          , Base.typesof(boundary)),
             (vector                , Base.typesof(coords[1], coords[2], boundary)),
@@ -141,7 +140,8 @@
             coords=coords,
             boundary=boundary,
             velocities=velocities,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
+                                          use_neighbors=false),),
         )
         neighbors = find_neighbors(sys)
         JET.test_call(forces          , Base.typesof(sys, neighbors); jet_config...)
@@ -149,10 +149,10 @@
         JET.test_call(virial          , Base.typesof(sys); jet_config...)
         JET.test_call(pressure        , Base.typesof(sys); jet_config...)
         JET.test_call(simulate!       , Base.typesof(sys, VelocityVerlet(dt=0.0002u"ps"), 1);
-                        jet_config...)
+                      jet_config...)
         JET.test_call(displacements   , Base.typesof(coords, boundary); jet_config...)
         JET.test_call(volume          , Base.typesof(boundary); jet_config...)
-        JET.test_call(box_center      , Base.typesof(boundary); jet_config...)
+        JET.test_call(Molly.box_center, Base.typesof(boundary); jet_config...)
         JET.test_call(random_coord    , Base.typesof(boundary); jet_config...)
         JET.test_call(scale_boundary  , Base.typesof(boundary, 1.01); jet_config...)
     end
@@ -165,7 +165,7 @@
                 for _ in 1:n_atoms]
     velocities = [random_velocity(10.0u"g/mol", 100.0u"K") for _ in 1:n_atoms]
     neighbor_finders = [
-        "NoNeighborFinder"          => NoNeighborFinder(),
+        "no neighbor finder"        => nothing,
         "DistanceNeighborFinder"    => DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=1.2u"nm"),
         "TreeNeighborFinder"        => TreeNeighborFinder(
@@ -181,7 +181,7 @@
             boundary=boundary,
             velocities=velocities,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                use_neighbors=!(neighbor_finder isa NoNeighborFinder)),),
+                                use_neighbors=!isnothing(neighbor_finder)),),
             neighbor_finder=neighbor_finder,
         )
         JET.test_call(find_neighbors, Base.typesof(sys); jet_config...)
@@ -208,24 +208,24 @@
     #   interaction, since the analysis covers every element of the interaction tuple
     pairwise_inters_sets = [
         "pairwise" => (
-            LennardJones(cutoff=cutoff, use_neighbors=true),
-            AshbaughHatch(cutoff=cutoff, use_neighbors=true),
-            SoftSphere(cutoff=cutoff, use_neighbors=true),
-            Mie(m=6, n=12, cutoff=cutoff, use_neighbors=true),
-            Buckingham(cutoff=cutoff, use_neighbors=true),
-            DoubleExponential(α=16.766, β=4.427, cutoff=cutoff, use_neighbors=true),
-            Coulomb(cutoff=cutoff, use_neighbors=true),
-            CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
-            Yukawa(cutoff=cutoff, use_neighbors=true, kappa=1.0u"nm^-1"),
-            Gravity(use_neighbors=true),
+            LennardJones(cutoff=cutoff),
+            AshbaughHatch(cutoff=cutoff),
+            SoftSphere(cutoff=cutoff),
+            Mie(m=6, n=12, cutoff=cutoff),
+            Buckingham(cutoff=cutoff),
+            DoubleExponential(α=16.766, β=4.427, cutoff=cutoff),
+            Coulomb(cutoff=cutoff),
+            CoulombReactionField(dist_cutoff=1.0u"nm"),
+            Yukawa(cutoff=cutoff, kappa=1.0u"nm^-1"),
+            Gravity(),
         ),
         "cutoffs" => (
-            LennardJones(cutoff=NoCutoff(), use_neighbors=true),
-            LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
-            LennardJones(cutoff=PolynomialCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+            LennardJones(cutoff=NoCutoff()),
+            LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+            LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+            LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+            LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
+            LennardJones(cutoff=PolynomialCutoff(0.6u"nm", 1.0u"nm")),
         ),
     ]
     for (pis_name, pairwise_inters) in pairwise_inters_sets
@@ -246,11 +246,10 @@
         boundary=boundary,
         velocities=velocities,
         pairwise_inters=(
-            LennardJonesSoftCoreBeutler(cutoff=cutoff, use_neighbors=true, α=0.3),
-            LennardJonesSoftCoreGapsys(cutoff=cutoff, use_neighbors=true, α=0.85),
-            CoulombSoftCoreBeutler(cutoff=cutoff, use_neighbors=true, α=0.3),
-            CoulombSoftCoreGapsys(cutoff=cutoff, use_neighbors=true, α=0.3,
-                                    σQ=1.0u"nm"),
+            LennardJonesSoftCoreBeutler(cutoff=cutoff, α=0.3),
+            LennardJonesSoftCoreGapsys(cutoff=cutoff, α=0.85),
+            CoulombSoftCoreBeutler(cutoff=cutoff, α=0.3),
+            CoulombSoftCoreGapsys(cutoff=cutoff, α=0.3, σQ=1.0u"nm"),
         ),
         neighbor_finder=neighbor_finder,
     )
@@ -366,14 +365,15 @@
                                         gi_fractions=ntuple(i -> 1, length(sys.general_inters)),
                                         remove_CM_motion=false),
             "MetropolisMonteCarlo" => MetropolisMonteCarlo(temperature=temp,
-                                        trial_moves=random_uniform_translation!,
+                                        trial_moves=Molly.random_uniform_translation!,
                                         trial_args=Dict(:shift_size => 0.1u"nm")),
             "AndersenThermostat" => Langevin(dt=dt, temperature=temp, friction=friction,
                                         coupling=AndersenThermostat(temp, 1.0u"ps")),
             "MonteCarloBarostat" => VelocityVerlet(dt=dt,
-                                        coupling=MonteCarloBarostat(press, temp, sys.boundary)),
+                                        coupling=MonteCarloBarostat(press, temp, sys.boundary;
+                                                                    n_steps=1)),
             "BerendsenBarostat"  => VelocityVerlet(dt=dt,
-                                        coupling=BerendsenBarostat(press, 1.0u"ps")),
+                                        coupling=BerendsenBarostat(press, 1.0u"ps"; n_steps=1)),
         ]
         for (sim_name, sim) in simulators
             JET.test_call(simulate!, Base.typesof(sys, sim, 1); jet_config...)
@@ -433,11 +433,11 @@
         ]
         for (coupler_name, coupler) in couplers
             types = Base.typesof(sys, buffers, coupler, sim, neighbors, 1)
-            JET.test_call(apply_coupling!, types; jet_config...)
+            JET.test_call(Molly.apply_coupling!, types; jet_config...)
             # The barostats call pressure and potential_energy, which go through the
             #   function barriers, so only the thermostats can be gated on runtime dispatch
             if coupler isa Molly.AbstractThermostat
-                JET.test_opt(apply_coupling!, types; jet_config...)
+                JET.test_opt(Molly.apply_coupling!, types; jet_config...)
             end
         end
     end
@@ -453,7 +453,7 @@
         coords=coords,
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", 100.0u"K") for _ in 1:n_atoms],
-        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),),
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
         neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                 dist_cutoff=1.2u"nm"),
         loggers=(
@@ -480,13 +480,13 @@
     )
     neighbors = find_neighbors(sys)
     buffers = Molly.init_buffers!(sys, 1)
-    JET.test_call(apply_loggers!, Base.typesof(sys, neighbors, 1, buffers, true);
-                    jet_config...)
+    JET.test_call(Molly.apply_loggers!, Base.typesof(sys, neighbors, 1, buffers, true);
+                  jet_config...)
     JET.test_call(simulate!, Base.typesof(sys, VelocityVerlet(dt=0.0002u"ps"), 1);
-                    jet_config...)
+                  jet_config...)
     for (logger_name, logger) in pairs(sys.loggers)
-        JET.test_call(log_property!, Base.typesof(logger, sys, neighbors, 1, buffers);
-                        jet_config...)
+        JET.test_call(Molly.log_property!, Base.typesof(logger, sys, neighbors, 1, buffers);
+                      jet_config...)
     end
 
     # Constraints
@@ -494,15 +494,15 @@
         sys = jet_protein(; constraints=:hbonds, rigid_water=true, constraint_algorithm=algo)
         coord_storage = copy(sys.coords)
         vel_storage = copy(sys.velocities)
-        JET.test_call(apply_position_constraints!, Base.typesof(sys, coord_storage);
+        JET.test_call(Molly.apply_position_constraints!, Base.typesof(sys, coord_storage);
                       jet_config...)
-        JET.test_call(apply_position_constraints!,
+        JET.test_call(Molly.apply_position_constraints!,
                       Base.typesof(sys, coord_storage, vel_storage, 0.0005f0u"ps");
                       jet_config...)
-        JET.test_call(apply_velocity_constraints!, Base.typesof(sys); jet_config...)
-        JET.test_call(check_position_constraints , Base.typesof(sys); jet_config...)
-        JET.test_call(check_velocity_constraints , Base.typesof(sys); jet_config...)
-        JET.test_call(check_constraints          , Base.typesof(sys); jet_config...)
+        JET.test_call(Molly.apply_velocity_constraints!, Base.typesof(sys); jet_config...)
+        JET.test_call(check_position_constraints       , Base.typesof(sys); jet_config...)
+        JET.test_call(check_velocity_constraints       , Base.typesof(sys); jet_config...)
+        JET.test_call(check_constraints                , Base.typesof(sys); jet_config...)
         dt, temp = 0.0005u"ps", 300.0u"K"
         simulators = [
             "VelocityVerlet"    => VelocityVerlet(dt=dt),

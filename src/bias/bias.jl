@@ -2,12 +2,12 @@
 
 export
     LinearBias,
-    bias_gradient,
     SquareBias,
     FlatBottomSquareBias,
     PeriodicFlatBottomBias,
     BiasPotential
 
+@public bias_gradient
 
 @doc raw"""
     LinearBias(k, cv_target)
@@ -35,17 +35,23 @@ function potential_energy(lb::LinearBias, cv_sim; kwargs...)
 end
 
 """
-    bias_gradient(bias::BiasType, cv_sim::Real)
+    bias_gradient(bias_type, cv_sim; kwargs...)
 
 Calculate the gradient of a bias potential with respect to the value of a
 collective variable.
 
+Custom bias types should implement this function along with [`potential_energy`](@ref).
+Both are given the keyword arguments of the force or energy call, such as `step_n`,
+`visit_state` and `strictness`, so a bias type that changes with the simulation history
+can update when `visit_state` is `true`.
+
 # Arguments
-- `b::BiasType`: A struct that defines the type of bias to be used.
-- `cv_sim::Real`: The value of a measured collective variable given
-    the coordinates of a simulation.
+- `bias_type`: a struct that defines the type of bias to be used, such as
+    [`LinearBias`](@ref).
+- `cv_sim`: the value of a measured collective variable given the coordinates
+    of a simulation.
 """
-function bias_gradient(lb::LinearBias, cv_sim)
+function bias_gradient(lb::LinearBias, cv_sim; kwargs...)
     d = cv_sim - lb.cv_target
     iszero(d) && return zero(lb.k)
     return lb.k * d / abs(d)
@@ -76,7 +82,7 @@ function potential_energy(sb::SquareBias, cv_sim; kwargs...)
     return (sb.k / 2) * (cv_sim - sb.cv_target)^2
 end
 
-function bias_gradient(sb::SquareBias, cv_sim)
+function bias_gradient(sb::SquareBias, cv_sim; kwargs...)
     return sb.k * (cv_sim - sb.cv_target)
 end
 
@@ -132,7 +138,7 @@ function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     return (fb.k / 2) * (d_abs - fb.r_fb)^2 * H
 end
 
-function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
+function bias_gradient(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
     d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
@@ -153,7 +159,8 @@ The potential energy is defined as
 ```math
 V(\boldsymbol{s}) = \frac{1}{2} k (|\boldsymbol{s} - \boldsymbol{s}_t| - r_{fb})^2 H
 ```
-where $s$ and $s_t$ are the system and target CV values respectively, and
+where $s$ and $s_t$ are the system and target CV values respectively,
+``\boldsymbol{s} - \boldsymbol{s}_t`` is wrapped into the range ``[-\pi, \pi)``, and
 ```math
 H = \left\{ \begin{array}{cl}
 0 & \text{if} & |\boldsymbol{s} - \boldsymbol{s}_t| < r_{fb} \\
@@ -179,12 +186,17 @@ struct PeriodicFlatBottomBias{K, R, T}
     end
 end
 
+# Displacement d wrapped into [-period/2, period/2); a zero period means a non-periodic CV
+function periodic_displacement(d, period)
+    iszero(period) && return d
+    half_period = period / 2
+    return mod(d + half_period, period) - half_period
+end
+
  function periodic_flat_bottom_displacement(cv_sim, cv_target)
     d = cv_sim - cv_target
     FT = typeof(float(ustrip(d)))
-    twopi = FT(2π) * oneunit(d)
-    half_period = twopi / FT(2)
-    return mod(d + half_period, twopi) - half_period
+    return periodic_displacement(d, FT(2π) * oneunit(d))
 end
 
 function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
@@ -201,7 +213,7 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     end
 end
 
-function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
+function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
@@ -223,22 +235,31 @@ as an AtomsCalculators.jl calculator.
 The `cv_type` could for example be [`CalcDist`](@ref) and the `bias_type`
 could be [`LinearBias`](@ref).
 
-Forces resulting from the bias potential are evaluated in two steps, specfically by
-(1) calculating the gradient of the bias potential with respect to the value of the CV, and
-(2) calculating the gradient of the CV with respect to the atomic coordinates.
+Forces resulting from the bias potential are evaluated in two steps, specifically by
+(1) calculating the gradient of the bias potential with respect to the value of the CV
+using [`Molly.bias_gradient`](@ref), and
+(2) calculating the gradient of the CV with respect to the atomic coordinates using
+[`Molly.cv_gradient`](@ref).
 
 Gradients can be calculated with either automatic differentiation or explicitly defined
 gradient functions.
 Enzyme should be imported in the first case.
 
-Virial contributions must be explicitly defined.
+Molecules are made whole before calculating the CV if the `correction` of `cv_type`
+is `:pbc`.
+The virial contribution is only calculated for CV types that define it, which includes
+the built-in CV types when `has_virial` is `true`.
 """
 struct BiasPotential{C, B}
     cv_type::C
     bias_type::B
 end
 
+# A bias type that changes with the simulation history makes the whole bias potential do so
+is_history_dependent(bias::BiasPotential) = is_history_dependent(bias.bias_type)
+
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
+bias_all_finite(values::Tuple) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
 
  function bias_max_abs_ustrip(values::AbstractArray)
@@ -248,11 +269,14 @@ end
 
 bias_max_abs_ustrip(value) = abs(ustrip(value))
 
- function check_bias_finite(value, label::AbstractString, bias::BiasPotential;
-                            cv_sim=nothing, max_abs_component=nothing)
+bias_description(bias::BiasPotential) =
+    "BiasPotential with CV $(typeof(bias.cv_type)) and bias $(typeof(bias.bias_type))"
+
+# Errors on non-finite values of a bias, which must never be applied as forces
+function check_bias_finite(value, label::AbstractString, bias;
+                           cv_sim=nothing, max_abs_component=nothing)
     bias_all_finite(value) && return value
-    msg = "BiasPotential with CV $(typeof(bias.cv_type)) and bias " *
-          "$(typeof(bias.bias_type)) produced non-finite $(label)"
+    msg = "$(bias_description(bias)) produced non-finite $(label)"
     if !isnothing(cv_sim)
         msg *= ", cv_sim=$(cv_sim)"
     end
@@ -262,7 +286,8 @@ bias_max_abs_ustrip(value) = abs(ustrip(value))
     error(msg)
 end
 
-function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                            bias::BiasPotential; kwargs...)
     if bias.cv_type.correction == :pbc
         coords = unwrap_molecules(sys)
     else
@@ -283,7 +308,7 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     return check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
 end
 
-function AtomsCalculators.forces!(
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
@@ -306,8 +331,8 @@ function AtomsCalculators.forces!(
     check_bias_finite(cv_sim, "collective variable", bias)
     check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
-    # Gradient of bias function with respect to CV
-    d_bias = bias_gradient(bias.bias_type, cv_sim)
+    # Gradient of bias function with respect to CV, given the keyword arguments of the force call
+    d_bias = bias_gradient(bias.bias_type, cv_sim; kwargs...)
     check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
     fs_svec = d_bias .* d_coords
@@ -327,3 +352,7 @@ function AtomsCalculators.forces!(
     fs .-= to_device(fs_svec, typeof(fs))
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::BiasPotential) = zero_forces(sys)
+
+concurrent_with_pairwise(::BiasPotential) = true

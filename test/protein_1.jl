@@ -101,16 +101,19 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
         @test typeof(ustrip(sys_float.total_mass)) == T
         @test typeof(ustrip(sys_float.k)) == T
         @test typeof(ustrip(forces(sys_float, neighbors)[1][1])) == T
+        @test float_type(sys_float) == T
         @test float_type(sys_float.boundary) == T
         @test typeof(ustrip(potential_energy(sys_float))) == TH
         @test typeof(ustrip(total_energy(sys_float))) == TH
-        @test typeof(ustrip(kinetic_energy_tensor(sys_float)[1][1])) == TH
+        @test typeof(ustrip(Molly.kinetic_energy_tensor(sys_float)[1][1])) == TH
         @test typeof(ustrip(kinetic_energy(sys_float))) == TH
         @test typeof(ustrip(temperature(sys_float))) == TH
         @test typeof(ustrip(pressure(sys_float)[1][1])) == TH
         @test typeof(ustrip(scalar_pressure(sys_float))) == TH
         @test typeof(ustrip(virial(sys_float)[1][1])) == TH
         @test typeof(ustrip(scalar_virial(sys_float))) == TH
+        @test Molly.length_type(sys_float) == typeof(T(1.0)u"nm")
+        @test Molly.length_type(sys_float.boundary) == typeof(T(1.0)u"nm")
     end
 
     cs = charges(sys)
@@ -125,8 +128,8 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
     @test sys.data == "data_string"
 
     @test length(sys) == length(sys.atoms) == length(sys.coords) == length(sys.velocities) == 15954
-    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
-    @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
+    @test count(i -> Molly.is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
+    @test count(i -> Molly.is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
     @test length(sys.topology.atom_molecule_inds) == 15954
     @test sys.topology.atom_molecule_inds[10] == 1
     @test length(sys.topology.molecule_atom_counts) == 4929
@@ -290,6 +293,21 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
     )
     @test potential_energy(sys_ljcut) ≈ 42906.57411130544u"kJ * mol^-1"
 
+    # The dispersion correction includes the part removed by the switching function
+    sys_ljcut_dc = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        nonbonded_method=SetupCoulombReactionField(),
+        center_coords=false,
+        lj_cutoff=PolynomialCutoff(0.8u"nm", 1.0u"nm"),
+        dispersion_correction=true,
+        strictness=:nowarn,
+    )
+    @test only(gi for gi in sys_ljcut_dc.general_inters if gi isa LJDispersionCorrection).cutoff ==
+            PolynomialCutoff(0.8u"nm", 1.0u"nm")
+    @test isapprox(potential_energy(sys_ljcut_dc), 41781.805721469114u"kJ * mol^-1";
+                   atol=1e-5u"kJ * mol^-1")
+
     # Test with no units
     ff_nounits = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
@@ -371,16 +389,19 @@ tyk2_dir = LazyArtifacts.ensure_artifact_installed("tyk2_data",
                 @test typeof(ustrip(sys_float.total_mass)) == T
                 @test typeof(ustrip(sys_float.k)) == T
                 @test typeof(ustrip(forces(sys_float)[1][1])) == T
+                @test float_type(sys_float) == T
                 @test float_type(sys_float.boundary) == T
                 @test typeof(ustrip(potential_energy(sys_float))) == TH
                 @test typeof(ustrip(total_energy(sys_float))) == TH
-                @test typeof(ustrip(kinetic_energy_tensor(sys_float)[1][1])) == TH
+                @test typeof(ustrip(Molly.kinetic_energy_tensor(sys_float)[1][1])) == TH
                 @test typeof(ustrip(kinetic_energy(sys_float))) == TH
                 @test typeof(ustrip(temperature(sys_float))) == TH
                 @test typeof(ustrip(pressure(sys_float)[1][1])) == TH
                 @test typeof(ustrip(scalar_pressure(sys_float))) == TH
                 @test typeof(ustrip(virial(sys_float)[1][1])) == TH
                 @test typeof(ustrip(scalar_virial(sys_float))) == TH
+                @test Molly.length_type(sys_float) == typeof(T(1.0)u"nm")
+                @test Molly.length_type(sys_float.boundary) == typeof(T(1.0)u"nm")
             end
         end
 
@@ -566,9 +587,34 @@ end
                 @test potential_energy(inject_gradients(sys_nu, params); n_threads=1) ≈
                         potential_energy(System(sys_nu; general_inters=()); n_threads=1)
 
+                # Implicit solvent uses the Coulomb constant of the non-bonded method unless
+                #   it sets its own, and without the surface area term its energy is
+                #   proportional to the constant
+                c0 = Molly.coulomb_const
+                is_c = (solvent_model == :obc2 ?
+                    c -> SetupImplicitSolventOBC(use_OBC2=true, kappa=1.0u"nm^-1",
+                                                 use_ACE=false, coulomb_const=c) :
+                    c -> SetupImplicitSolventGBN2(kappa=1.0u"nm^-1", use_ACE=false,
+                                                  coulomb_const=c))
+                function gb_energy(nonbonded_method, is)
+                    sys_gb = System(joinpath(data_dir, "6mrr_nowater.pdb"), ff;
+                                    boundary=CubicBoundary(100.0u"nm"), dist_cutoff=5.0u"nm",
+                                    nonbonded_method=nonbonded_method,
+                                    dispersion_correction=false, implicit_solvent=is,
+                                    strictness=:nowarn, n_threads=1)
+                    return potential_energy(sys_gb; pairwise_inters=(), specific_inter_lists=(),
+                                            n_threads=1)
+                end
+                coul_2 = SetupCoulomb(cutoff=DistanceCutoff(5.0u"nm"), coulomb_const=(2 * c0))
+                E_gb_1 = gb_energy(DistanceCutoff(5.0u"nm"), is_c(nothing))
+                @test gb_energy(coul_2, is_c(nothing)) ≈ 2 * E_gb_1
+                @test gb_energy(coul_2, is_c(c0)) ≈ E_gb_1
+
                 bench_result = @benchmark AtomsCalculators.forces!($forces_molly, $sys_1,
                                     $(sys_1.general_inters[1]); n_threads=1) samples=5 evals=1
-                @test bench_result.allocs == 0
+                if VERSION >= v"1.11-" # On CI this sometimes fails for Julia 1.10
+                    @test bench_result.allocs == 0
+                end
                 bench_result = @benchmark AtomsCalculators.potential_energy($sys_1,
                                     $(sys_1.general_inters[1]); n_threads=1) samples=5 evals=1
                 @test bench_result.allocs == 0
@@ -644,6 +690,35 @@ end
     end
     @test count(==(0.14u"nm"), radii[1]) == 34
     @test radii[1] == radii[2]
+end
+
+@testset "Implicit solvent parameter injection" begin
+    # Parameters given when setting up the system are kept when they are extracted and
+    #   injected again, and a changed value in the dictionary is used
+    ff = MolecularForceField(joinpath(ff_dir, "ff99SBildn.xml"); units=false)
+    radii = merge(Molly.mbondi2_element_to_radius, Dict("N" => 0.165u"nm"))
+    for (implicit_solvent, key) in (
+                (SetupImplicitSolventOBC(element_to_radius=radii,
+                    element_to_screen=merge(Molly.obc_element_to_screen, Dict("O" => 0.9))),
+                 "inter_OBC_radius_O"),
+                (SetupImplicitSolventGBN2(element_to_radius=radii,
+                    atom_params=merge(Molly.gbn2_atom_params, Dict("C_α" => 0.8))),
+                 "inter_GB_radius_O"))
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            units=false,
+            boundary=CubicBoundary(100.0),
+            dispersion_correction=false,
+            implicit_solvent=implicit_solvent,
+            strictness=:nowarn,
+        )
+        gb_energy(s) = potential_energy(System(s; pairwise_inters=(), specific_inter_lists=()))
+        params_dic = Molly.extract_parameters(sys, ff)
+        @test gb_energy(inject_gradients(sys, params_dic)) ≈ gb_energy(sys)
+        params_dic[key] += 0.01
+        @test !(gb_energy(inject_gradients(sys, params_dic)) ≈ gb_energy(sys))
+    end
 end
 
 @testset "GBn2 sulfur forces" begin

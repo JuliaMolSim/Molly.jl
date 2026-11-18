@@ -49,6 +49,8 @@ On CUDA systems, this benchmarks a small launch-candidate set for Molly's tiled
 pairwise kernels, caches the result for the current device/system signature,
 and writes the winning values into `system.launch_config`.
 A fallback is provided for non-CUDA systems that does nothing.
+This is called when setting up a [`System`](@ref) from a file unless
+`autotune_launch=false` is given.
 """
 function optimize_cuda_launch_config!(sys)
     return nothing

@@ -30,10 +30,7 @@ function setup_benchmark_system(n_atoms;
     velocities = [zero(SVector{3, typeof(T(1.0)u"nm/ps")}) for _ in 1:n_atoms]
     atoms = [Atom(index=i, mass=atom_mass, charge=T(0.0), σ=σ, ϵ=ϵ) for i in 1:n_atoms]
 
-    pairwise_inters = (LennardJones(
-        cutoff=DistanceCutoff(r_cut),
-        use_neighbors=true,
-    ),)
+    pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
     
     sys_gpu = System(
         atoms=CuArray(atoms),
@@ -59,32 +56,35 @@ function print_profile(name, force_profile, energy_profile)
     force_times = force_profile.times
     stats = force_profile.tile_stats
     @printf(
-        "%-14s tiles=%7d clean=%7d masked=%7d frac=%7.4f overflow=%d\n",
+        "%-14s tiles=%7d candidates=%7d clean=%7d masked=%7d frac=%7.4f overflow=%d\n",
         name,
         stats.num_tiles,
+        stats.num_candidates,
         stats.clean_tiles,
         stats.masked_tiles,
         stats.interacting_fraction,
         stats.overflow_count,
     )
     @printf(
-        "  force stages : morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f kernel=%7.3f reverse=%7.3f\n",
+        "  force stages : morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f reverse=%7.3f\n",
         force_times.morton_sort_ms,
         force_times.compress_ms,
         force_times.reorder_ms,
         force_times.bounds_ms,
         force_times.tile_find_ms,
+        force_times.prune_ms,
         force_times.force_kernel_ms,
         force_times.reverse_reorder_ms,
     )
     energy_times = energy_profile.times
     @printf(
-        "  energy stages: morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f kernel=%7.3f\n",
+        "  energy stages: morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f\n",
         energy_times.morton_sort_ms,
         energy_times.compress_ms,
         energy_times.reorder_ms,
         energy_times.bounds_ms,
         energy_times.tile_find_ms,
+        energy_times.prune_ms,
         energy_times.energy_kernel_ms,
     )
 end
@@ -131,7 +131,6 @@ function run_benchmark()
         CUDA.synchronize()
 
         profile_gpu_force_path!(sys; buffers=buffers_f)
-        sys.neighbor_finder.initialized = false
         force_profile = profile_gpu_force_path!(sys; buffers=buffers_f)
         profile_gpu_energy_path!(sys; buffers=buffers_e)
         energy_profile = profile_gpu_energy_path!(sys; buffers=buffers_e)

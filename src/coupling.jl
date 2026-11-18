@@ -1,7 +1,6 @@
 # Temperature and pressure coupling methods
 
 export
-    apply_coupling!,
     ImmediateThermostat,
     VelocityRescaleThermostat,
     AndersenThermostat,
@@ -9,6 +8,9 @@ export
     BerendsenBarostat,
     CRescaleBarostat,
     MonteCarloBarostat
+
+@public apply_coupling!,
+    needs_virial
 
 """
     apply_coupling!(system, buffers, coupling, simulator, neighbors=nothing, step_n=0;
@@ -35,8 +37,15 @@ function apply_coupling!(sys, buffers, couplers::Union{Tuple, NamedTuple}, sim, 
     return recompute_forces
 end
 
-# By default, couplers do not require the virial
-needs_virial(c) = Inf
+"""
+    needs_virial(coupler)
+
+The step interval at which a coupler requires the [`virial`](@ref), e.g. to calculate pressure.
+
+`Inf` by default, indicating that the virial is not required.
+Custom coupler should implement this function if the virial is required.
+"""
+needs_virial(c) = Inf # By default, couplers do not require the virial
 
 apply_coupling!(sys, buffers, ::Nothing, sim, neighbors, step_n; kwargs...) = false
 
@@ -71,7 +80,7 @@ end
 
 The immediate velocity rescaling thermostat for controlling temperature.
 
-Velocities are immediately rescaled to match a target temperature.
+Velocities are immediately rescaled to match a target temperature (isokinetic ensemble).
 The scaling factor for the velocities each step is
 ```math
 \lambda = \sqrt{\frac{T_0}{T}}
@@ -87,6 +96,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     sys.velocities .*= sqrt(thermostat.temperature / temp)
     return false
 end
@@ -97,15 +108,17 @@ end
 The stochastic velocity rescaling thermostat.
 
 See [Bussi et al. 2007](https://doi.org/10.1063/1.2408420).
-In brief, acts like the [`BerendsenThermostat`](@ref) but adds an
+In brief, acts like the [`BerendsenThermostat`](@ref) but adds a
 stochastic term, allowing correct sampling of isothermal ensembles.
 
-Let `Δt` be the simulation timestep, `Nf` the kinetic DOFs used to calculate the instantaneous
-temperature of the system. Then, ``K = \frac{1}{2} \cdot \sum m \cdot v^2`` is the current
-kinetic energy, and ``K̄ = \frac{1}{2} Nf k_B T_0`` is the target kinetic energy for
-a reference temperature `T_0`.
+Let ``\Delta t`` be the simulation time step multiplied by `n_steps`, ``\tau`` the coupling
+constant and ``N_f`` the number of degrees of freedom used to calculate the instantaneous
+temperature of the system. Then ``K = \frac{1}{2} \sum_i m_i v_i^2`` is the current
+kinetic energy and ``\bar{K} = \frac{1}{2} N_f k_B T_0`` is the target kinetic energy for
+the reference temperature ``T_0``.
 
-Define ``c = e^{-Δt/τ}``. Draw ``R \sim 𝒩(0,1)`` and ``S \sim \chi^{2}_{Nf-1}``. Then
+Define ``c = e^{-\Delta t/\tau}``. Draw ``R \sim \mathcal{N}(0, 1)`` and
+``S \sim \chi^{2}_{N_f-1}``. Then
 ```math
 \lambda^2 = c + (1-c) \cdot \frac{\bar K}{N_f K} \cdot (R^2 + S)\;+\;
             2 \cdot \sqrt{c(1-c) \frac{\bar K}{N_f K}} \cdot R,
@@ -146,13 +159,9 @@ function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRe
     c = exp(-dt / τ) # e^{-Δt/τ}
     A = Kbar / (Nf * K) # = (K̄/(Nf*K)), dimensionless
 
-    # Draw R1 ~ N(0,1), and χ²_{Nf-1} via sum of squares
+    # Draw R1 ~ N(0,1), and χ²_{Nf-1} directly, with χ²_0 being zero
     R1 = randn(rng)
-    rsum = zero(eltype(R1))
-    for _ in 1:(Nf-1)
-        x = randn(rng)
-        rsum += x*x
-    end
+    rsum = (Nf > 1 ? rand(rng, Chisq(Nf - 1)) : zero(R1))
 
     # λ² (Appendix A7), guard tiny negatives from roundoff
     lam2 = c + (1 - c) * A * (R1*R1 + rsum) + 2 * sqrt(c * (1 - c) * A) * R1
@@ -174,7 +183,8 @@ end
 The Andersen thermostat for controlling temperature.
 
 The velocity of each atom is randomly changed each time step with probability
-`dt / coupling_const` to a velocity drawn from the Maxwell-Boltzmann distribution.
+`1 - exp(-dt / coupling_const)`, which is approximately `dt / coupling_const`, to a velocity
+drawn from the Maxwell-Boltzmann distribution.
 See [Andersen 1980](https://doi.org/10.1063/1.439486).
 
 Note that when used with constraints this can lead to velocities that violate
@@ -193,13 +203,17 @@ function andersen_warn(sys, strictness)
     end
 end
 
+# Probability of a collision during a time step for collisions with rate 1 / coupling_const
+andersen_prob(thermostat, sim) = -expm1(-uconvert(NoUnits, sim.dt / thermostat.coupling_const))
+
 function apply_coupling!(sys::System{D}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(), strictness=default_strictness()) where D
     andersen_warn(sys, strictness)
+    prob = andersen_prob(thermostat, sim)
     for i in eachindex(sys)
-        if rand(rng) < (sim.dt / thermostat.coupling_const) && !sys.virtual_site_flags[i]
+        if rand(rng) < prob && !sys.virtual_site_flags[i]
             sys.velocities[i] = random_velocity_svector(Val(D), mass(sys.atoms[i]),
                                                         thermostat.temperature, sys.k; rng=rng)
         end
@@ -215,7 +229,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     backend = get_backend(sys.velocities)
     ctr1 = rand(rng, UInt64)
     key = rand(rng, UInt64)
-    prob_val = clamp(Float64(sim.dt / thermostat.coupling_const), 0.0, prevfloat(1.0))
+    prob_val = clamp(Float64(andersen_prob(thermostat, sim)), 0.0, prevfloat(1.0))
     prob_val_u64 = round(UInt64, prob_val*2.0^64)
     kernel! = apply_andersen_coupling_kernel!(backend)
     kernel!(
@@ -230,6 +244,7 @@ end
 
 The Berendsen thermostat for controlling temperature.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the velocities each step is
 ```math
 \lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
@@ -246,6 +261,8 @@ end
 function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
     temp = temperature(sys; kin_tensor=buffers.kin_tensor, recompute=true)
+    # Velocities that are all zero can not be scaled, and would become NaN
+    iszero(temp) && return false
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temp) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
@@ -255,10 +272,11 @@ end
     BerendsenBarostat(pressure, coupling_const;
                       coupling_type=:isotropic,
                       compressibility=4.6e-5u"bar^-1",
-                      max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
+                      max_scale_frac=0.1, n_steps=30) <: AbstractBarostat
 
 The Berendsen barostat for controlling pressure.
 
+See [Berendsen et al. 1984](https://doi.org/10.1063/1.448118).
 The scaling factor for the box every `n_steps` steps is
 ```math
 \mu_{ij} = \delta_{ij} - \frac{\Delta t}{3\, \tau_p} \kappa_{ij} \left(P_{0ij} - P_{ij}(t) \right).
@@ -267,9 +285,9 @@ with the fractional change limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix and ``\delta`` is a Kronecker delta,
 allowing non-isotropic pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 
-This barostat should be used with caution as it known not to properly sample
+This barostat should be used with caution as it is known not to properly sample
 isobaric ensembles and therefore can lead to simulation artifacts.
 """
 struct BerendsenBarostat{P, C, S, IC, T} <: AbstractBarostat
@@ -289,7 +307,7 @@ isibar(x::Number) = (unit(x) == NoUnits || dimension(x) == DIM_INV_P)
 
 function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1) where {PT}
+                           max_scale_frac=0.1, n_steps=30) where {PT}
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic"))
     end
@@ -404,13 +422,13 @@ virial_incompatible_sites(vs::AbstractVector{<:VirtualSite}) =
     any(v -> v.type == 4 || v.type == 5, from_device(vs))
 virial_incompatible_sites(vs) = false
 
-function warn_virial_sites(sys, barostat)
+function warn_virial_sites(sys, barostat, strictness)
     if virial_incompatible_sites(sys.virtual_sites)
-        report_issue("the system has virtual sites that are not compatible with the virial, so " *
-                     "the pressure $(nameof(typeof(barostat))) uses is wrong; " *
-                     "MonteCarloBarostat needs no virial", :warn; maxlog=1)
+        err_msg = "the system has virtual sites that are not compatible with the virial, so " *
+                  "the pressure used by $(nameof(typeof(barostat))) is wrong; " *
+                  "MonteCarloBarostat needs no virial"
+        report_issue(err_msg, strictness; maxlog=1)
     end
-    return nothing
 end
 
 function apply_coupling!(sys::System{D},
@@ -426,7 +444,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -495,25 +513,28 @@ end
     CRescaleBarostat(pressure, coupling_const;
                      coupling_type=:isotropic,
                      compressibility=4.6e-5u"bar^-1",
-                     max_scale_frac=0.1, n_steps=1) <: AbstractBarostat
+                     max_scale_frac=0.1, n_steps=30) <: AbstractBarostat
 
 The stochastic cell rescale barostat.
 
-See [Bernetti and Bussi 2020] (https://doi.org/10.1063/5.0020514)
-and [Del Tatto et al. 2022] (https://doi.org/10.3390/app12031139).
-In brief, this is an extension of the Berendsen barostat that includes a
+See [Bernetti and Bussi 2020](https://doi.org/10.1063/5.0020514)
+and [Del Tatto et al. 2022](https://doi.org/10.3390/app12031139).
+In brief, this is an extension of the [`BerendsenBarostat`](@ref) that includes a
 stochastic term to the scaling matrix.
 This allows proper sampling of isobaric ensembles.
 
 ```math
-\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot dt}{V(t) \cdot \tau_P}} \cdot dW \right]
+\mu = \rm{exp}\left[ \frac{-\kappa_T \cdot \Delta t}{\tau_P} \cdot (P(t) - P_0) + \sqrt{\frac{2 \cdot k_BT \cdot \kappa_T \cdot \Delta t}{V(t) \cdot \tau_P}} \cdot dW \right]
 ```
 where ``\kappa_T`` is the isothermal compressibility, ``\tau_P`` is the barostat coupling constant
 and ``\rm{dW}`` represents a Wiener process.
+The fractional change is limited to `max_scale_frac`.
 
 The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
-Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Available options for `coupling_type` are `:isotropic`, `:semiisotropic` and `:anisotropic`.
+Generally, `n_steps` multiplied by the simulator `dt` should fit at least 25 times
+inside ``\tau_P``.
 """
 struct CRescaleBarostat{P, C, S, IC, T} <: AbstractBarostat
     pressure::P
@@ -526,7 +547,7 @@ end
 
 function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1) where {PT}
+                           max_scale_frac=0.1, n_steps=30) where {PT}
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic"))
     end
@@ -647,7 +668,7 @@ function apply_coupling!(sys::System{D},
     if step_n % barostat.n_steps != 0
         return false
     end
-    warn_virial_sites(sys, barostat)
+    warn_virial_sites(sys, barostat, strictness)
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads,
@@ -656,8 +677,9 @@ function apply_coupling!(sys::System{D},
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = energy_remove_mol(sys.k * temperature(
-        sys; kin_tensor=buffers.kin_tensor, recompute=isnothing(pressure_kin_tensor)))
+    temp      = hasproperty(sim, :temperature) ? sim.temperature :
+                temperature(sys; kin_tensor=buffers.kin_tensor, recompute=isnothing(pressure_kin_tensor))
+    kT_energy = energy_remove_mol(sys.k * temp)
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
@@ -777,7 +799,11 @@ The barostat assumes that the simulation is being run at a constant temperature 
 does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
-The neighbor list is not updated when making trial moves or after accepted moves.
+With a neighbor finder with `auto_update=true`, the default, the neighbor list is checked
+at the trial coordinates and rebuilt if the trial move could have invalidated it.
+Otherwise by default the neighbor list is not updated when calculating the energy of
+trial moves, which assumes that the volume changes are small.
+Set `trial_find_neighbors` to `true` to rebuild it for every trial move.
 Note that the barostat can change the bounding box of the system.
 Does not work with shear stresses, the anisotropic variant only applies
 independent linear scaling of the box vectors.
@@ -879,6 +905,9 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
     end
 end
 
+save_trial_state(inter) = nothing
+restore_trial_state!(sys, inter, ::Nothing) = nothing
+
 function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarloBarostat, sim,
                          neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng(), strictness=default_strictness(),
@@ -913,10 +942,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E  = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                               strictness=strictness)
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V  = volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
 
@@ -929,9 +960,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
                                          zero(T) zero(T) l_scale])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -946,13 +980,31 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:isotropic
                                                     n_molecules * kT * log(v_scale)
 
         if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            neighbors = neighbors_trial
             recompute_forces = true
             barostat.n_accepted += 1
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
+                                           n_threads=n_threads)
+            end
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_trial_state!(sys, inter, snapshot)
+            end
+        end
+        if barostat.trial_find_neighbors
+            recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end
@@ -965,10 +1017,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                      strictness=strictness)
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -980,7 +1034,7 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         w1 = w1/s
         w2 = w2/s
 
-        l_scale_xy = v_scale^w1
+        l_scale_xy = v_scale^(w1 / 2)
         l_scale_z  = v_scale^w2
 
         old_coords  .= sys.coords
@@ -991,9 +1045,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
                                          zero(T) zero(T) l_scale_z])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -1009,13 +1066,31 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:semiisotr
         dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
 
         if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            neighbors = neighbors_trial
             recompute_forces = true
             barostat.n_accepted += 1
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
+                                           n_threads=n_threads)
+            end
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_trial_state!(sys, inter, snapshot)
+            end
+        end
+        if barostat.trial_find_neighbors
+            recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end
@@ -1028,10 +1103,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
+    neighbors_in = neighbors
 
     for attempt_n in 1:barostat.n_iterations
         E         = potential_energy(sys, neighbors, step_n, buffers; n_threads=n_threads,
                                      strictness=strictness)
+        trial_states = map(save_trial_state, values(sys.general_inters))
         V         = volume(sys.boundary)
         dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
         V_plus_dV = V + dV
@@ -1056,9 +1133,12 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
                                          zero(T)   zero(T)   l_scale_z])
         scale_coords!(sys, scale_matrix; strictness=strictness)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                                n_threads=n_threads)
+        if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+            # A neighbor finder that tracks displacements checks whether the trial move
+            #   could invalidate the list, accounting for the change in the box
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n,
+                                             barostat.trial_find_neighbors;
+                                             n_threads=n_threads)
         else
             # Assume neighbors are unchanged by the change in coordinates
             # This may not be valid for larger changes
@@ -1073,13 +1153,31 @@ function apply_coupling_mc!(sys::System{D, <:Any, T}, barostat, ::Val{:anisotrop
         dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
 
         if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+            neighbors = neighbors_trial
             recompute_forces = true
             barostat.n_accepted += 1
         else
             sys.coords .= old_coords
             sys.boundary = old_boundary
+            if barostat.trial_find_neighbors || tracks_displacements(sys.neighbor_finder)
+                # The trial list may have been built in the buffers of the previous one
+                neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors_trial, step_n,
+                                           barostat.trial_find_neighbors;
+                                           n_threads=n_threads)
+            end
+            for (inter, snapshot) in zip(values(sys.general_inters), trial_states)
+                restore_trial_state!(sys, inter, snapshot)
+            end
+        end
+        if barostat.trial_find_neighbors
+            recompute_forces = true
         end
         barostat.n_attempted += 1
+    end
+    # A list built during the moves may have reused the buffers of the list passed in, so
+    #   the caller has to find the neighbors again
+    if neighbors !== neighbors_in
+        recompute_forces = true
     end
     return recompute_forces
 end

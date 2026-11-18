@@ -1,8 +1,8 @@
 # Allocation measurements are made through this so that the call is cleanly inferred,
 # rather than from the `@testset` scope where the arguments are captured locals
 function apply_constraints_n_threads!(sys, coords_ref, n_threads)
-    apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
-    apply_velocity_constraints!(sys; n_threads=n_threads)
+    Molly.apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
+    Molly.apply_velocity_constraints!(sys; n_threads=n_threads)
     return sys
 end
 
@@ -20,6 +20,7 @@ end
         Verlet(dt=0.002u"ps"),
         StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+        NoseHoover(dt=0.002u"ps", temperature=temp),
     )
 
     bond_length = 0.74u"Å"
@@ -33,7 +34,7 @@ end
     @test length(cons_shake.clusters12) == (n_atoms ÷ 2)
 
     boundary = CubicBoundary(200.0u"Å")
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
@@ -62,7 +63,8 @@ end
 
             @test check_position_constraints(sys, cons)
             if simulator isa VelocityVerlet
-                # Verlet and Langevin are half-step integrators so this is not expected to be true
+                # Verlet, Langevin and NoseHoover are half-step integrators so this is not
+                #   expected to be true
                 @test check_velocity_constraints(sys, cons)
             end
         end
@@ -105,7 +107,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -117,8 +119,8 @@ end
         sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
+    Molly.apply_position_constraints!(sys, old_coords)
+    Molly.apply_velocity_constraints!(sys)
 
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
@@ -164,7 +166,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -176,8 +178,8 @@ end
         sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
+    Molly.apply_position_constraints!(sys, old_coords)
+    Molly.apply_velocity_constraints!(sys)
 
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
@@ -223,7 +225,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -235,8 +237,8 @@ end
         sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
+    Molly.apply_position_constraints!(sys, old_coords)
+    Molly.apply_velocity_constraints!(sys)
 
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
@@ -300,7 +302,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder
     )
@@ -312,8 +314,8 @@ end
         sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
+    Molly.apply_position_constraints!(sys, old_coords)
+    Molly.apply_velocity_constraints!(sys)
 
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
@@ -364,8 +366,8 @@ end
                 @test !check_velocity_constraints(sys)
                 @test !check_constraints(sys)
 
-                apply_position_constraints!(sys, coords_copy)
-                apply_velocity_constraints!(sys)
+                Molly.apply_position_constraints!(sys, coords_copy)
+                Molly.apply_velocity_constraints!(sys)
                 @test check_position_constraints(sys)
                 @test check_velocity_constraints(sys)
                 @test check_constraints(sys)
@@ -406,7 +408,7 @@ end
         )
         # Relax onto the constraint manifold so that the check below is a fair one
         for _ in 1:5
-            apply_position_constraints!(sys_base, copy(sys_base.coords); n_threads=1)
+            Molly.apply_position_constraints!(sys_base, copy(sys_base.coords); n_threads=1)
         end
         coords_ref = copy(sys_base.coords)
         coords_bump = randn(Xoshiro(20), SVector{3, Float64}, length(sys_base))u"nm" ./ 1000
@@ -415,8 +417,8 @@ end
             sys = deepcopy(sys_base)
             sys.coords .= coords_ref .+ coords_bump
             sys.velocities .= vels_start
-            apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
-            apply_velocity_constraints!(sys; n_threads=n_threads)
+            Molly.apply_position_constraints!(sys, coords_ref; n_threads=n_threads)
+            Molly.apply_velocity_constraints!(sys; n_threads=n_threads)
             sys
         end
         @test check_position_constraints(systems[1])
@@ -460,7 +462,7 @@ end
             for _ in 1:n_atoms
         ], AT)
         boundary = CubicBoundary(T(3.0)u"nm")
-        pairwise_inters = (LennardJones(use_neighbors=true),)
+        pairwise_inters = (LennardJones(),)
 
         constraints = (
             SHAKE_RATTLE(n_atoms=n_atoms, dist_tolerance=T(1e-6)u"nm",
@@ -763,7 +765,7 @@ end
         Molly.clear_constraint_virial!(buffers, sys, step_n)
         context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
 
-        apply_position_constraints!(sys, cons, old_coords; context)
+        Molly.apply_position_constraints!(sys, cons, old_coords; context)
         expected = expected_position_constraint_virial(old_coords, unconstrained, sys.coords,
                                                        masses_val, dt, sys.boundary, cons)
 
@@ -787,7 +789,7 @@ end
         Molly.clear_constraint_virial!(buffers, sys, step_n)
         context = shake_velocity_context(buffers; step_n, virial_scale=inv(dt))
 
-        apply_velocity_constraints!(sys, cons; context)
+        Molly.apply_velocity_constraints!(sys, cons; context)
         expected = expected_velocity_constraint_virial(coords, velocities_before,
                                                        sys.velocities, masses_val, dt,
                                                        sys.boundary, cons)
@@ -822,7 +824,7 @@ end
         Molly.clear_constraint_virial!(buffers, sys, step_n)
         context = shake_position_context(buffers; step_n, virial_scale=inv(dt^2))
 
-        apply_position_constraints!(sys, cons, old_coords; context)
+        Molly.apply_position_constraints!(sys, cons, old_coords; context)
         expected = expected_position_constraint_virial(old_coords, unconstrained, sys.coords,
                                                        masses_val, dt, sys.boundary, cons)
 
@@ -898,10 +900,10 @@ end
         gpu_context = shake_position_context(gpu_buffers; step_n,
                                              virial_scale=inv(dt^2))
 
-        apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
-                                    context=cpu_context)
-        apply_position_constraints!(gpu_sys, gpu_sys.constraints[1], to_device(old_coords, AT);
-                                    context=gpu_context)
+        Molly.apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
+                                          context=cpu_context)
+        Molly.apply_position_constraints!(gpu_sys, gpu_sys.constraints[1],
+                                          to_device(old_coords, AT); context=gpu_context)
 
         @test from_device(gpu_sys.coords) ≈ cpu_sys.coords atol=T(1e-5)
         @test from_device(gpu_buffers.constraint_virial_nounits) ≈
@@ -927,8 +929,8 @@ end
         cpu_context = shake_velocity_context(cpu_buffers; step_n, virial_scale=inv(dt))
         gpu_context = shake_velocity_context(gpu_buffers; step_n, virial_scale=inv(dt))
 
-        apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1]; context=cpu_context)
-        apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1]; context=gpu_context)
+        Molly.apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1]; context=cpu_context)
+        Molly.apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1]; context=gpu_context)
 
         @test from_device(gpu_sys.velocities) ≈ cpu_sys.velocities atol=T(1e-5)
         @test from_device(gpu_buffers.constraint_virial_nounits) ≈
@@ -982,13 +984,13 @@ end
             sentinel = T(3.0)
             fill!(gpu_buffers.constraint_virial_nounits, sentinel)
             position_context = shake_position_context(gpu_buffers; needs_virial=false)
-            apply_position_constraints!(
+            Molly.apply_position_constraints!(
                 gpu_sys, gpu_sys.constraints[1], to_device(old_2, AT);
                 context=position_context,
             )
             velocity_context = shake_velocity_context(gpu_buffers; needs_virial=false)
-            apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
-                                        context=velocity_context)
+            Molly.apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
+                                              context=velocity_context)
             @test all(==(sentinel), from_device(gpu_buffers.constraint_virial_nounits))
         end
     end
@@ -1090,6 +1092,7 @@ end
         Verlet(dt=dt, remove_CM_motion=0),
         StormerVerlet(dt=dt),
         Langevin(dt=dt, temperature=1.0, friction=0.0, remove_CM_motion=0),
+        NoseHoover(dt=dt, temperature=1.0, remove_CM_motion=0),
     )
 
     @testset "Initial constrained virial preview" begin
@@ -1403,7 +1406,7 @@ end
         Molly.clear_constraint_virial!(buffers, sys, step_n)
         context = Molly.position_constraint_context(buffers, sys, step_n, dt, true)
 
-        apply_position_constraints!(sys, lincs, old_coords; context)
+        Molly.apply_position_constraints!(sys, lincs, old_coords; context)
 
         return copy(buffers.constraint_virial_nounits) .* u"kJ/mol"
     end
@@ -1485,7 +1488,7 @@ end
                 (dot(B, coords[1] - coords[2]) - bond_length)
     expected_constraint = scale * (-bond_length * factor * (B * transpose(B)))
 
-    apply_position_constraints!(sys, lincs, old_coords; context)
+    Molly.apply_position_constraints!(sys, lincs, old_coords; context)
     Molly.merge_constraint_virial!(buffers, sys, step_n)
 
     @test norm(sys.coords[1] - sys.coords[2]) ≈ bond_length atol=1e-14
@@ -1534,7 +1537,7 @@ end
                  vel_tolerance=T(1e-4)u"Å^2 * ps^-1", dist_constraints=dist_constraints)
 
     boundary = CubicBoundary(T(200.0)u"Å")
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut))
 
     for AT in array_list[2:end]
         if Molly.uses_gpu_neighbor_finder(AT)
@@ -1656,10 +1659,10 @@ end
             gpu_context = lincs_position_context(gpu_buffers; step_n,
                                                  virial_scale=inv(dt^2))
 
-            apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
-                                        context=cpu_context)
-            apply_position_constraints!(gpu_sys, gpu_sys.constraints[1],
-                                        to_device(old_coords, AT); context=gpu_context)
+            Molly.apply_position_constraints!(cpu_sys, cpu_sys.constraints[1], old_coords;
+                                              context=cpu_context)
+            Molly.apply_position_constraints!(gpu_sys, gpu_sys.constraints[1],
+                                              to_device(old_coords, AT); context=gpu_context)
 
             @test from_device(gpu_sys.coords) ≈ cpu_sys.coords atol=T(1e-5)
             @test from_device(gpu_buffers.constraint_virial_nounits) ≈
@@ -1686,10 +1689,10 @@ end
             gpu_context = lincs_velocity_context(gpu_buffers; step_n,
                                                  virial_scale=inv(dt))
 
-            apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1];
-                                        context=cpu_context)
-            apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
-                                        context=gpu_context)
+            Molly.apply_velocity_constraints!(cpu_sys, cpu_sys.constraints[1];
+                                              context=cpu_context)
+            Molly.apply_velocity_constraints!(gpu_sys, gpu_sys.constraints[1];
+                                              context=gpu_context)
 
             @test from_device(gpu_sys.velocities) ≈ cpu_sys.velocities atol=T(1e-5)
             @test from_device(gpu_buffers.constraint_virial_nounits) ≈
@@ -1763,7 +1766,7 @@ end
         coords=full_coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
     )
@@ -1794,7 +1797,8 @@ end
     d_w = Molly.build_lincs_data(c_w, m_w)
     ws_w = Molly.create_lincs_workspace(d_w)
     xp_w = x_w .+ v_w .* 0.002
-    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0))
+    Molly.lincs_apply!(xp_w, x_w, d_w, ws_w, CubicBoundary(5.0),
+                       Molly.default_position_constraint_context())
 
     # apply_lincs! zero allocations. The solve itself allocates nothing; running it over
     #   more than one thread allocates only the tasks that `Threads.@threads` spawns,

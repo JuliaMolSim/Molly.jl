@@ -8,6 +8,15 @@ export
     LocalCoordinatesSite,
     place_virtual_sites!
 
+@public VirtualSite
+
+"""
+A virtual site, with coordinates determined by the coordinates of other atoms.
+
+Created with [`OneParticleSite`](@ref), [`TwoParticleAverageSite`](@ref),
+[`ThreeParticleAverageSite`](@ref), [`OutOfPlaneSite`](@ref) or [`LocalCoordinatesSite`](@ref)
+and given to a [`System`](@ref) as `virtual_sites`.
+"""
 struct VirtualSite{T, IC, P}
     type::Int # 1/2/3/4/5 for OneParticleSite/TwoParticleAverageSite/ThreeParticleAverageSite/OutOfPlaneSite/LocalCoordinatesSite
     atom_ind::Int
@@ -61,7 +70,7 @@ end
 
 A virtual site defined to have the same coordinates as another atom.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = \mathbf{r}_1
 ```
@@ -82,7 +91,7 @@ end
 
 A virtual site defined by the weighted average of the coordinates of two atoms.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2
 ```
@@ -105,7 +114,7 @@ end
 
 A virtual site defined by the weighted average of the coordinates of three atoms.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = w_1 \mathbf{r}_1 + w_2 \mathbf{r}_2 + w_3 \mathbf{r}_3
 ```
@@ -130,7 +139,7 @@ end
 A virtual site defined by the weighted average of the coordinates of three atoms
 and the cross product of their relative displacements.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \mathbf{r} = \mathbf{r}_1 + w_{12} \mathbf{r}_{12} + w_{13} \mathbf{r}_{13} + w_{\mathrm{cross}} (\mathbf{r}_{12} \times \mathbf{r}_{13})
 ```
@@ -152,7 +161,7 @@ end
 A virtual site defined by a position in a local coordinate system given by three atoms,
 matching the `LocalCoordinatesSite` of OpenMM.
 
-Returns a `VirtualSite` defined by:
+Returns a [`Molly.VirtualSite`](@ref) defined by:
 ```math
 \begin{aligned}
 \mathbf{o} &= \sum_i w_i^o \mathbf{r}_i &
@@ -289,51 +298,70 @@ function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites;
     # Assumes that each virtual site is only defined once
     n_vs = length(virtual_sites)
     if n_vs > 0
-        backend = get_backend(sys.coords)
-        n_threads_dev = 256
-        kernel! = backend_kernel(place_virtual_sites_kernel!, backend, n_threads_dev)
-        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
-                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
+        place_virtual_sites_coords!(sys.coords, sys.boundary, virtual_sites)
     end
     return sys
+end
+
+#=
+The virtual sites of CPU systems are placed in a loop rather than with a kernel, since
+Enzyme can not differentiate kernels of the CPU backend of KernelAbstractions 0.10 (PoCL),
+which it would have to compile even for a system without virtual sites
+=#
+function place_virtual_sites_coords!(coords, boundary, virtual_sites)
+    for i in eachindex(virtual_sites)
+        place_virtual_site!(coords, boundary, virtual_sites[i])
+    end
+    return coords
+end
+
+function place_virtual_sites_coords!(coords::AbstractGPUArray, boundary, virtual_sites)
+    backend = get_backend(coords)
+    kernel! = place_virtual_sites_kernel!(backend, 256)
+    kernel!(coords, boundary, virtual_sites; ndrange=length(virtual_sites))
+    return coords
 end
 
 @kernel function place_virtual_sites_kernel!(coords, boundary, @Const(virtual_sites))
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
-        vs = virtual_sites[i]
-        if vs.type == 1
-            vs_coord = coords[vs.atom_1]
-        elseif vs.type == 2
-            # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
-            # Only one absolute coordinate, r1, can be used, with others defined relatively
-            # This is why w1 + w2 must equal 1, which is assumed here and checked on creation
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
-        elseif vs.type == 3
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
-        elseif vs.type == 4
-            # Assumes 3D
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            cross_r12_r13 = cross(r12, r13) # Units L^2
-            vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
-                       vs.weight_cross * cross_r12_r13
-        else # vs.type == 5
-            # Assumes 3D
-            # The origin weights sum to 1 and the direction weights to 0, so the sums over the
-            #   atoms can use r1 and relative vectors and stay in one periodic image
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            w, p = vs.local_weights, vs.local_position
-            dx, dy, dz = local_axes(w[5] * r12 + w[6] * r13, w[8] * r12 + w[9] * r13)
-            vs_coord = coords[vs.atom_1] + w[2] * r12 + w[3] * r13 +
-                       p[1] * dx + p[2] * dy + p[3] * dz
-        end
-        coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
+        place_virtual_site!(coords, boundary, virtual_sites[i])
     end
+end
+
+@inline function place_virtual_site!(coords, boundary, vs)
+    if vs.type == 1
+        vs_coord = coords[vs.atom_1]
+    elseif vs.type == 2
+        # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
+        # Only one absolute coordinate, r1, can be used, with others defined relatively
+        # This is why w1 + w2 must equal 1, which is assumed here and checked on creation
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
+    elseif vs.type == 3
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
+    elseif vs.type == 4
+        # Assumes 3D
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        cross_r12_r13 = cross(r12, r13) # Units L^2
+        vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
+                   vs.weight_cross * cross_r12_r13
+    else # vs.type == 5
+        # Assumes 3D
+        # The origin weights sum to 1 and the direction weights to 0, so the sums over the
+        #   atoms can use r1 and relative vectors and stay in one periodic image
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        w, p = vs.local_weights, vs.local_position
+        dx, dy, dz = local_axes(w[5] * r12 + w[6] * r13, w[8] * r12 + w[9] * r13)
+        vs_coord = coords[vs.atom_1] + w[2] * r12 + w[3] * r13 +
+                   p[1] * dx + p[2] * dy + p[3] * dz
+    end
+    coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
+    return nothing
 end
 
 function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
@@ -343,14 +371,25 @@ function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
     n_vs = length(virtual_sites)
     if n_vs > 0
         copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
-        backend = get_backend(sys.coords)
-        n_threads_dev = 128
-        kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
-        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
-                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
+        distribute_forces_matrix!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites)
         copy_matrix_to_forces!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
     end
     return fs
+end
+
+# CPU systems use a loop rather than a kernel, see `place_virtual_sites_coords!`
+function distribute_forces_matrix!(fs_mat, coords, boundary, virtual_sites)
+    for i in eachindex(virtual_sites)
+        distribute_virtual_site_force!(fs_mat, coords, boundary, virtual_sites[i], Val(false))
+    end
+    return fs_mat
+end
+
+function distribute_forces_matrix!(fs_mat::AbstractGPUArray, coords, boundary, virtual_sites)
+    backend = get_backend(fs_mat)
+    kernel! = distribute_forces_kernel!(backend, 128)
+    kernel!(fs_mat, coords, boundary, virtual_sites; ndrange=length(virtual_sites))
+    return fs_mat
 end
 
 function copy_matrix_to_forces!(fs, fs_mat, force_units, ::Val{D}, ::Val{T}) where {D, T}
@@ -392,78 +431,94 @@ end
     end
 end
 
-@kernel function distribute_forces_kernel!(fs_mat::AbstractMatrix{T}, @Const(coords),
-                        boundary::AbstractBoundary{D}, @Const(virtual_sites)) where {T, D}
+@kernel function distribute_forces_kernel!(fs_mat, @Const(coords), boundary,
+                                           @Const(virtual_sites))
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
-        vs = virtual_sites[i]
-        if vs.type == 1
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += f
-            end
-        elseif vs.type == 2
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
-            end
-        elseif vs.type == 3
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_3] += vs.weight_3 * f
-            end
-        elseif vs.type == 4
-            # Assumes 3D
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind]) *
-                                                        unit(eltype(r12))
-            f2 = SVector(
-                vs.weight_12 * f[1] - vs.weight_cross * r13[3] * f[2] + vs.weight_cross * r13[2] * f[3],
-                vs.weight_cross * r13[3] * f[1] + vs.weight_12 * f[2] - vs.weight_cross * r13[1] * f[3],
-                -vs.weight_cross * r13[2] * f[1] + vs.weight_cross * r13[1] * f[2] + vs.weight_12 * f[3],
-            )
-            f3 = SVector(
-                vs.weight_13 * f[1] + vs.weight_cross * r12[3] * f[2] - vs.weight_cross * r12[2] * f[3],
-                -vs.weight_cross * r12[3] * f[1] + vs.weight_13 * f[2] + vs.weight_cross * r12[1] * f[3],
-                vs.weight_cross * r12[2] * f[1] - vs.weight_cross * r12[1] * f[2] + vs.weight_13 * f[3],
-            )
-            f1 = f - f2 - f3
-            for dim in 1:D
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += ustrip(f1[dim])
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += ustrip(f2[dim])
-                Atomix.@atomic fs_mat[dim, vs.atom_3] += ustrip(f3[dim])
-            end
-        elseif vs.type == 5
-            # Assumes 3D, the lengths are stripped to the unit of the coordinates so that the
-            #   derivatives below are in force units
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            lu = unit(eltype(r12))
-            w = vs.local_weights
-            xdir = ustrip.(lu, w[5] * r12 + w[6] * r13)
-            ydir = ustrip.(lu, w[8] * r12 + w[9] * r13)
-            p = ustrip.(lu, vs.local_position)
-            dx, dy, dz, inv_norm_x, inv_norm_z = local_axes(xdir, ydir)
-            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind])
-            for j in 1:3
-                atom_j = (j == 1 ? vs.atom_1 : (j == 2 ? vs.atom_2 : vs.atom_3))
-                f_j = local_coords_force(f, p, w[j], w[3 + j], w[6 + j], xdir, ydir, dx, dy, dz,
-                                         inv_norm_x, inv_norm_z)
-                for dim in 1:D
-                    Atomix.@atomic fs_mat[dim, atom_j] += f_j[dim]
-                end
-            end
-        end
-        # Now the virtual site force has been distributed onto the other atoms,
-        #   it can be set to zero
+        distribute_virtual_site_force!(fs_mat, coords, boundary, virtual_sites[i], Val(true))
+    end
+end
+
+# Atomic on GPUs, where virtual sites that share an atom are distributed concurrently
+@inline function add_virtual_site_force!(fs_mat, dim, atom_i, ::Val{true}, f)
+    Atomix.@atomic fs_mat[dim, atom_i] += f
+    return nothing
+end
+
+@inline function add_virtual_site_force!(fs_mat, dim, atom_i, ::Val{false}, f)
+    fs_mat[dim, atom_i] += f
+    return nothing
+end
+
+@inline function distribute_virtual_site_force!(fs_mat::AbstractMatrix{T}, coords,
+                        boundary::AbstractBoundary{D}, vs, atomic) where {T, D}
+    if vs.type == 1
         for dim in 1:D
-            fs_mat[dim, vs.atom_ind] = zero(T)
+            f = fs_mat[dim, vs.atom_ind]
+            add_virtual_site_force!(fs_mat, dim, vs.atom_1, atomic, f)
+        end
+    elseif vs.type == 2
+        for dim in 1:D
+            f = fs_mat[dim, vs.atom_ind]
+            add_virtual_site_force!(fs_mat, dim, vs.atom_1, atomic, vs.weight_1 * f)
+            add_virtual_site_force!(fs_mat, dim, vs.atom_2, atomic, vs.weight_2 * f)
+        end
+    elseif vs.type == 3
+        for dim in 1:D
+            f = fs_mat[dim, vs.atom_ind]
+            add_virtual_site_force!(fs_mat, dim, vs.atom_1, atomic, vs.weight_1 * f)
+            add_virtual_site_force!(fs_mat, dim, vs.atom_2, atomic, vs.weight_2 * f)
+            add_virtual_site_force!(fs_mat, dim, vs.atom_3, atomic, vs.weight_3 * f)
+        end
+    elseif vs.type == 4
+        # Assumes 3D
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind]) *
+                                                    unit(eltype(r12))
+        f2 = SVector(
+            vs.weight_12 * f[1] - vs.weight_cross * r13[3] * f[2] + vs.weight_cross * r13[2] * f[3],
+            vs.weight_cross * r13[3] * f[1] + vs.weight_12 * f[2] - vs.weight_cross * r13[1] * f[3],
+            -vs.weight_cross * r13[2] * f[1] + vs.weight_cross * r13[1] * f[2] + vs.weight_12 * f[3],
+        )
+        f3 = SVector(
+            vs.weight_13 * f[1] + vs.weight_cross * r12[3] * f[2] - vs.weight_cross * r12[2] * f[3],
+            -vs.weight_cross * r12[3] * f[1] + vs.weight_13 * f[2] + vs.weight_cross * r12[1] * f[3],
+            vs.weight_cross * r12[2] * f[1] - vs.weight_cross * r12[1] * f[2] + vs.weight_13 * f[3],
+        )
+        f1 = f - f2 - f3
+        for dim in 1:D
+            add_virtual_site_force!(fs_mat, dim, vs.atom_1, atomic, ustrip(f1[dim]))
+            add_virtual_site_force!(fs_mat, dim, vs.atom_2, atomic, ustrip(f2[dim]))
+            add_virtual_site_force!(fs_mat, dim, vs.atom_3, atomic, ustrip(f3[dim]))
+        end
+    elseif vs.type == 5
+        # Assumes 3D, the lengths are stripped to the unit of the coordinates so that the
+        #   derivatives below are in force units
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        lu = unit(eltype(r12))
+        w = vs.local_weights
+        xdir = ustrip.(lu, w[5] * r12 + w[6] * r13)
+        ydir = ustrip.(lu, w[8] * r12 + w[9] * r13)
+        p = ustrip.(lu, vs.local_position)
+        dx, dy, dz, inv_norm_x, inv_norm_z = local_axes(xdir, ydir)
+        f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind])
+        for j in 1:3
+            atom_j = (j == 1 ? vs.atom_1 : (j == 2 ? vs.atom_2 : vs.atom_3))
+            f_j = local_coords_force(f, p, w[j], w[3 + j], w[6 + j], xdir, ydir, dx, dy, dz,
+                                     inv_norm_x, inv_norm_z)
+            for dim in 1:D
+                add_virtual_site_force!(fs_mat, dim, atom_j, atomic, f_j[dim])
+            end
         end
     end
+    # Now the virtual site force has been distributed onto the other atoms,
+    #   it can be set to zero
+    for dim in 1:D
+        fs_mat[dim, vs.atom_ind] = zero(T)
+    end
+    return nothing
 end
 
 # The force on one of the three atoms of a LocalCoordinatesSite, the closed form derivative of

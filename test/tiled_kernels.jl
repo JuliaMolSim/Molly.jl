@@ -5,6 +5,8 @@
     tiled_array_types = filter(AT -> Molly.supports_tiled_kernels(get_backend(AT{Float32}(undef, 0))),
                                array_list)
 
+    # The kernels add the virial to slots, which `gpu_forces!` folds, and the energy to
+    #   `n_energy_slots` entries
     function tiled_forces_pe(sys)
         inters = Tuple(filter(Molly.use_neighbors, values(sys.pairwise_inters)))
         buffers = Molly.init_buffers_gpu(sys, 1)
@@ -12,12 +14,14 @@
         fill!(buffers.fs_mat, zero(T))
         fill!(buffers.fs_mat_reordered, zero(T))
         fill!(buffers.virial_nounits, zero(TH))
+        fill!(buffers.virial_slots, zero(TH))
         Molly.tiled_pairwise_forces!(buffers, sys, inters, Val(true), 0)
+        Molly.fold_virial_slots!(buffers.virial_nounits, buffers.virial_slots)
         fs_mat = from_device(buffers.fs_mat)
         fs = [SVector{size(fs_mat, 1)}(fs_mat[:, i]) for i in axes(fs_mat, 2)]
-        pe_vec = KernelAbstractions.zeros(get_backend(sys.coords), TH, 1)
+        pe_vec = KernelAbstractions.zeros(get_backend(sys.coords), TH, Molly.n_energy_slots)
         Molly.tiled_pairwise_pe!(pe_vec, buffers, sys, inters, 0)
-        return fs, from_device(buffers.virial_nounits), only(from_device(pe_vec))
+        return fs, from_device(buffers.virial_nounits), sum(from_device(pe_vec))
     end
 
     for AT in tiled_array_types, (n_atoms, boundary) in (
@@ -62,6 +66,92 @@
         @test maximum(norm.(fs .- fs_ref)) < 1e-10 * maximum(norm.(fs_ref))
         @test isapprox(vir, vir_ref; rtol=1e-10)
         @test isapprox(pe, pe_ref; rtol=1e-10)
+    end
+
+    # Several steps with the same buffers and a buffer distance, so that the displacement
+    #   check made with the reorder, the inner masks of the dynamic pruning and a rebuild
+    #   after a check that fails are used, in 3D for every array type and in 2D for GPU arrays
+    function tiled_forces_pe!(buffers, sys, step_n)
+        inters = Tuple(filter(Molly.use_neighbors, values(sys.pairwise_inters)))
+        T, TH = Molly.float_type(sys), Molly.float_type_high(sys)
+        fill!(buffers.fs_mat, zero(T))
+        fill!(buffers.fs_mat_reordered, zero(T))
+        fill!(buffers.virial_nounits, zero(TH))
+        fill!(buffers.virial_slots, zero(TH))
+        Molly.tiled_pairwise_forces!(buffers, sys, inters, Val(true), step_n)
+        Molly.fold_virial_slots!(buffers.virial_nounits, buffers.virial_slots)
+        fs_mat = from_device(buffers.fs_mat)
+        fs = [SVector{size(fs_mat, 1)}(fs_mat[:, i]) for i in axes(fs_mat, 2)]
+        fill!(buffers.pe_vec_nounits, zero(TH))
+        Molly.tiled_pairwise_pe!(buffers.pe_vec_nounits, buffers, sys, inters, step_n)
+        return fs, from_device(buffers.virial_nounits), sum(from_device(buffers.pe_vec_nounits))
+    end
+
+    for AT in tiled_array_types, D in (3, 2)
+        (D == 2 && AT == Array) && continue
+        Random.seed!(D)
+        n_atoms = 1000
+        r_cut = 1.0
+        boundary = (D == 3 ? CubicBoundary(3.0) : RectangularBoundary(6.0))
+        coords = place_atoms(n_atoms, boundary; min_dist=(D == 3 ? 0.1 : 0.12))
+        atoms = [Atom(index=i, mass=10.0, charge=(isodd(i) ? 0.2 : -0.2), σ=0.2, ϵ=0.2)
+                 for i in 1:n_atoms]
+        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut),
+                                        weight_special=0.5),
+                           CoulombReactionField(dist_cutoff=r_cut, use_neighbors=true,
+                                                weight_special=0.5, coulomb_const=138.935458))
+        sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                                                                dist_cutoff=r_cut),
+                         force_units=NoUnits, energy_units=NoUnits)
+        close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
+        shuffle!(close_pairs)
+        n_exceptions = length(close_pairs) ÷ 4
+        excluded_pairs = close_pairs[1:n_exceptions]
+        special_pairs = close_pairs[(n_exceptions + 1):(2 * n_exceptions)]
+        cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                            dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
+                            special_pairs=special_pairs),
+                         force_units=NoUnits, energy_units=NoUnits)
+        tiled_sys = System(atoms=to_device(atoms, AT), coords=to_device(coords, AT),
+                           boundary=boundary, pairwise_inters=pairwise_inters,
+                           neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
+                                dist_cutoff=(r_cut + 0.3), excluded_pairs=excluded_pairs,
+                                special_pairs=special_pairs, array_type=AT),
+                           force_units=NoUnits, energy_units=NoUnits)
+        nf = tiled_sys.neighbor_finder
+        buffers = Molly.init_buffers_gpu(tiled_sys, 1)
+        rng = Xoshiro(D)
+        for step_n in 0:4
+            if 1 <= step_n <= 3
+                # Small moves, which the tile list and the inner masks allow
+                shifts = [SVector{D}(0.005 .* randn(rng, D)) for _ in 1:n_atoms]
+            elseif step_n == 4
+                # Two atoms moving 0.2 nm each, more than the buffer distance between them
+                shifts = [(i <= 2 ? SVector{D}(ntuple(k -> k == 1 ? 0.2 : 0.0, D)) :
+                                    zero(SVector{D, Float64})) for i in 1:n_atoms]
+            end
+            if step_n >= 1
+                cpu_sys.coords .= wrap_coords.(cpu_sys.coords .+ shifts, (boundary,))
+                tiled_sys.coords .= to_device(cpu_sys.coords, AT)
+            end
+            fs_ref, vir_ref = forces_virial(cpu_sys)
+            pe_ref = potential_energy(cpu_sys)
+            fs, vir, pe = tiled_forces_pe!(buffers, tiled_sys, step_n)
+            @test maximum(norm.(fs .- fs_ref)) < 1e-10 * maximum(norm.(fs_ref))
+            @test isapprox(vir, vir_ref; rtol=1e-10)
+            @test isapprox(pe, pe_ref; rtol=1e-10)
+            counts = Molly.neighbor_update_counts(nf)
+            if step_n == 3
+                @test counts.n_builds == 1
+                @test counts.n_checks == 7
+            elseif step_n == 4
+                @test counts.n_builds == 2
+            end
+        end
     end
 
     # A Float32 system with the default Float64 `coulomb_const` and `solvent_dielectric` of

@@ -1,7 +1,7 @@
 export Gravity
 
 @doc raw"""
-    Gravity(; cutoff, G, use_neighbors)
+    Gravity(; cutoff=NoCutoff(), G=Unitful.G, use_neighbors=true)
 
 The gravitational interaction between two atoms.
 
@@ -13,7 +13,7 @@ V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
 @kwdef struct Gravity{T, C} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     G::T = Unitful.G
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
 end
 
 use_neighbors(inter::Gravity) = inter.use_neighbors
@@ -36,10 +36,12 @@ parameter_fields(::Type{<:Gravity}) = ((:G, "G"),)
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     params = (inter.G, mass(atom_i), mass(atom_j))
     f = force_cutoff(inter.cutoff, inter, r, params)
-    return (f / r) * dr
+    return (f * inv_r) * dr
 end
 
 function pairwise_force(::Gravity, r, (G, mi, mj))

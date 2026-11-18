@@ -11,7 +11,7 @@
             atoms=CuArray(atoms),
             coords=CuArray(coords),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=T(5.0),
@@ -187,7 +187,7 @@
                 atoms=CuArray(atoms_tri),
                 coords=CuArray(coords_tri),
                 boundary=boundary_tri,
-                pairwise_inters=(LennardJones(use_neighbors=true, cutoff=DistanceCutoff(T(4.0))),),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(4.0))),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms_tri,
                     dist_cutoff=T(4.0),
@@ -208,20 +208,26 @@
         end
 
         @testset "Morton Code Granularity (Phase 1)" begin
-            morton_bits = 10
-            sides = Molly.box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            Molly.sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             
             morton_codes = Array(buffers.morton_seq_buffer_1)
             @test length(unique(morton_codes)) == n_atoms
+
+            # Each axis has a power of two cells, chosen so that the cells are close to cubic
+            w, n_cells_m1 = Molly.morton_grid(sys.boundary, 10)
+            @test w == Molly.box_sides(sys.boundary) ./ 1024
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 1023, 1023)
+            w, n_cells_m1 = Molly.morton_grid(CubicBoundary(T(16.0), T(16.0), T(4.0)), 10)
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 1023, 255)
+            @test w[1] == w[3]
+            w, n_cells_m1 = Molly.morton_grid(CubicBoundary(T(10.0), T(Inf), T(10.0)), 10)
+            @test n_cells_m1 == SVector{3, UInt32}(1023, 0, 1023)
+            w, n_cells_m1 = Molly.morton_grid(RectangularBoundary(T(4.0), T(9.0)), 10)
+            @test n_cells_m1 == SVector{2, UInt32}(511, 1023)
         end
         
         @testset "Physical Data Reordering (Phase 2)" begin
-            morton_bits = 10
-            sides = Molly.box_sides(sys.boundary)
-            w = sides ./ (2^morton_bits)
-            Molly.sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             
             backend = Molly.get_backend(sys.coords)
             Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords,
@@ -247,6 +253,73 @@
                 @test fs_mat[2, orig_idx] ≈ 1.0
                 @test fs_mat[3, orig_idx] ≈ 1.0
             end
+        end
+    end
+end
+
+# General interactions to check the order of the forces on the GPU, see
+#   `concurrent_with_pairwise`: one that adds a constant force to every atom and one that
+#   records the forces it is given
+struct ConstantForceInter{F}
+    f::F
+    concurrent::Bool
+end
+
+Molly.concurrent_with_pairwise(inter::ConstantForceInter) = inter.concurrent
+
+function AtomsCalculators.forces!(fs, sys, inter::ConstantForceInter; kwargs...)
+    fs .+= (inter.f,)
+    return fs
+end
+
+mutable struct RecordForcesInter
+    seen::Any
+end
+
+function AtomsCalculators.forces!(fs, sys, inter::RecordForcesInter; kwargs...)
+    inter.seen = from_device(fs)
+    return fs
+end
+
+@testset "Order of general interactions on the GPU" begin
+    rec = RecordForcesInter(nothing)
+    c1 = ConstantForceInter(SVector(1.0, 2.0, 3.0), true)
+    c2 = ConstantForceInter(SVector(10.0, 20.0, 30.0), true)
+    @test Molly.n_general_alongside((c1, rec, c2)) == 1
+    @test Molly.n_general_alongside((c1, c2)) == 2
+    @test Molly.n_general_alongside((rec, c1)) == 0
+    @test Molly.n_general_alongside(()) == 0
+
+    if run_cuda_tests
+        n_atoms = 100
+        T = Float64
+        coords = place_atoms(n_atoms, CubicBoundary(T(3.0)); min_dist=T(0.25),
+                             rng=Xoshiro(10))
+        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0))
+                 for i in 1:n_atoms]
+        c1 = ConstantForceInter(SVector(T(1.0), T(2.0), T(3.0)), true)
+        c2 = ConstantForceInter(SVector(T(10.0), T(20.0), T(30.0)), true)
+        for grad_safe in (false, true)
+            rec = RecordForcesInter(nothing)
+            sys = System(
+                atoms=CuArray(atoms),
+                coords=CuArray(coords),
+                boundary=CubicBoundary(T(3.0)),
+                pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(1.0))),),
+                general_inters=(c1, rec, c2),
+                neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=T(1.2),
+                                                  array_type=CuArray),
+                force_units=NoUnits,
+                energy_units=NoUnits,
+                grad_safe=grad_safe,
+            )
+            fs = from_device(forces(sys))
+            fs_pairwise = from_device(forces(System(sys; general_inters=())))
+            @test maximum(norm.(fs_pairwise)) > 1
+            # The recording interaction sees the forces of the interactions before it, and
+            #   the one after it is added afterwards
+            @test rec.seen ≈ fs_pairwise .+ (c1.f,)
+            @test fs ≈ fs_pairwise .+ (c1.f + c2.f,)
         end
     end
 end

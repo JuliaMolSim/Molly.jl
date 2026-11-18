@@ -161,7 +161,7 @@ pmf_deconv = PMFDeconvolution(
 
 awh_sim = AWHSimulation(
     awh_state;
-    num_md_steps = N_MD_STEPS,
+    n_md_steps = N_MD_STEPS,
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,
@@ -174,7 +174,7 @@ Random.seed!(RNG_SEED + 1)
 simulate!(awh_sim, TOTAL_STEPS)
 
 ##
-pmf_result = pmf(awh_sim.pmf)
+pmf_result = Molly.pmf(awh_sim.pmf)
 pmf_kbt = pmf_result.F
 pmf_plot = map(x -> isfinite(x) ? x : FT(NaN), pmf_kbt)
 

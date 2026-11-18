@@ -1,12 +1,12 @@
 @testset "Spatial" begin
-    @test vector_1D(4.0, 6.0, 10.0) ==  2.0
-    @test vector_1D(1.0, 9.0, 10.0) == -2.0
-    @test vector_1D(6.0, 4.0, 10.0) == -2.0
-    @test vector_1D(9.0, 1.0, 10.0) ==  2.0
+    @test Molly.vector_1D(4.0, 6.0, 10.0) ==  2.0
+    @test Molly.vector_1D(1.0, 9.0, 10.0) == -2.0
+    @test Molly.vector_1D(6.0, 4.0, 10.0) == -2.0
+    @test Molly.vector_1D(9.0, 1.0, 10.0) ==  2.0
 
-    @test vector_1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
-    @test vector_1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
-    @test_throws Unitful.DimensionError vector_1D(6.0u"nm", 4.0u"nm", 10.0)
+    @test Molly.vector_1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
+    @test Molly.vector_1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
+    @test_throws Unitful.DimensionError Molly.vector_1D(6.0u"nm", 4.0u"nm", 10.0)
 
     @test vector(
         SVector(4.0, 1.0, 6.0),
@@ -29,13 +29,13 @@
         CubicBoundary(SVector(10.0, 10.0, 10.0)u"nm"),
     ) == SVector(2.0, -2.0, -2.0)u"nm"
 
-    @test wrap_coord_1D(8.0 , 10.0) == 8.0
-    @test wrap_coord_1D(12.0, 10.0) == 2.0
-    @test wrap_coord_1D(-2.0, 10.0) == 8.0
+    @test Molly.wrap_coord_1D(8.0 , 10.0) == 8.0
+    @test Molly.wrap_coord_1D(12.0, 10.0) == 2.0
+    @test Molly.wrap_coord_1D(-2.0, 10.0) == 8.0
 
-    @test wrap_coord_1D(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
-    @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
-    @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
+    @test Molly.wrap_coord_1D(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
+    @test Molly.wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
+    @test_throws ErrorException Molly.wrap_coord_1D(-2.0u"nm", 10.0)
 
     # Bond and torsion angles
     b_ang = CubicBoundary(10.0u"nm")
@@ -146,7 +146,7 @@
     @test !Molly.has_infinite_boundary(b)
     @test volume(b) == 120.0u"nm^3"
     @test volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
-    @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
+    @test Molly.box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     sb = scale_boundary(b, 1.1)
     @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
@@ -180,11 +180,11 @@
     sys_dens_scaled = System(sys_dens; boundary=CubicBoundary(1.0u"nm"))
     @test density(sys_dens_scaled) ≈ 8 * density(sys_dens)
 
-    apply_loggers!(sys_dens)
+    Molly.apply_loggers!(sys_dens)
     @test values(sys_dens.loggers.density) == [density(sys_dens)]
-    apply_loggers!(sys_dens, nothing, 1, nothing, false)
+    Molly.apply_loggers!(sys_dens, nothing, 1, nothing, false)
     @test length(values(sys_dens.loggers.density)) == 1
-    apply_loggers!(sys_dens, nothing, 1)
+    Molly.apply_loggers!(sys_dens, nothing, 1)
     @test length(values(sys_dens.loggers.density)) == 2
     show(devnull, sys_dens.loggers.density)
 
@@ -196,7 +196,7 @@
     @test !Molly.has_infinite_boundary(b)
     @test volume(b) == 20.0u"m^2"
     @test volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
-    @test box_center(b) == SVector(2.0, 2.5)u"m"
+    @test Molly.box_center(b) == SVector(2.0, 2.5)u"m"
     sb = scale_boundary(b, 0.9)
     @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
@@ -264,9 +264,55 @@
         @test wrap_coords(coord, b_skewed) ≈ expected
     end
 
+    # Negative off-diagonal components, for which wrapped coordinates can be negative
+    #   e.g. a truncated octahedron, given as basis vectors and as basis vector angles
+    d_to = 5.0
+    b_to = TriclinicBoundary(
+        SVector(d_to, 0.0, 0.0),
+        SVector(d_to / 3, 2 * sqrt(2) * d_to / 3, 0.0),
+        SVector(-d_to / 3, sqrt(2) * d_to / 3, sqrt(6) * d_to / 3),
+    )
+    θ_to = acos(-1 / 3)
+    b_to_angles = TriclinicBoundary(SVector(d_to, d_to, d_to), SVector(θ_to, θ_to, θ_to))
+    @test b_to_angles.basis_vectors[3][2] < 0
+    rng_to = Xoshiro(10)
+    for b_neg in (b_to, b_to_angles)
+        H_neg = Molly.box_matrix(b_neg)
+        @test all(1:1_000) do _
+            coord = (rand(rng_to, SVector{3, Float64}) .- 0.5) .* 30
+            wrapped = wrap_coords(coord, b_neg)
+            fractional = H_neg \ wrapped
+            shift = H_neg \ (coord - wrapped)
+            return all(f -> 0 <= f < 1, fractional) && isapprox(shift, round.(shift); atol=1e-8)
+        end
+    end
+    @test Molly.cubic_bounding_box_min(b_to) ≈ SVector(-d_to / 3, 0.0, 0.0)
+    @test Molly.cubic_bounding_box(b_to) ≈ SVector(4 * d_to / 3, sqrt(2) * d_to, sqrt(6) * d_to / 3)
+    lims_to = Molly.axis_limits(Molly.cubic_bounding_box(b_to), CoordinatesLogger(1), 1,
+                                Molly.cubic_bounding_box_min(b_to))
+    @test lims_to[1] ≈ -d_to / 3
+    @test lims_to[2] ≈ 4 * d_to / 3
+
+    # The box given to Chemfiles, which is used to write trajectories, has the same lengths
+    #   and angles and gives back the same basis vectors
+    for b_cf in (b, b_to_angles) # Units of nm, and no units which are taken as nm
+        cell_cf = Chemfiles.UnitCell(b_cf)
+        lengths_nm = [norm(ustrip.(bv)) for bv in b_cf.basis_vectors]
+        @test Chemfiles.lengths(cell_cf) ≈ 10 .* lengths_nm
+        @test Chemfiles.angles(cell_cf) ≈ rad2deg.([b_cf.α, b_cf.β, b_cf.γ])
+    end
+    b_cf_back = Molly.boundary_from_chemfiles(Chemfiles.UnitCell(b))
+    @test all(isapprox.(b_cf_back.basis_vectors, b.basis_vectors; atol=1e-6u"nm"))
+
+    # The minimum image setting is kept when the box is changed
+    b_exact_images = TriclinicBoundary(H_skewed; approx_images=false)
+    @test typeof(scale_boundary(b_exact_images, 1.1)) == typeof(b_exact_images)
+    @test typeof(Molly.rebuild_boundary(b_exact_images, 1.1 * H_skewed)) == typeof(b_exact_images)
+    @test typeof(ustrip(b_exact_images)) == typeof(b_exact_images)
+
     @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
-    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
+    @test isapprox(Molly.box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
     sb = scale_boundary(b, 1.2)
     @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
     @test volume(sb) ≈ volume(b) * 1.2^3
@@ -406,7 +452,8 @@
             atoms=[Atom(mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary_sc; min_dist=0.3u"nm"),
             boundary=boundary_sc,
-            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm")),),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.5u"nm"),
+                                          use_neighbors=false),),
         )
         μ_ok = SMatrix{3, 3}(Diagonal(fill(0.99, 3))) # 3.96 nm sides, cutoff still fits
         μ_small = SMatrix{3, 3}(Diagonal(fill(0.7, 3))) # 2.8 nm sides, less than 2 * 1.5 nm
@@ -427,7 +474,7 @@
         a2 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(7.0, 8.0)u"nm/ps"], AT)
         a3 = to_device([SVector(5.0, 6.0)u"nm/ps", SVector(NaN, 8.0)u"nm/ps"], AT)
         Molly.check_array_nans((a1, a2), ("a1", "a2"), 10)
-        @test_throws NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
+        @test_throws Molly.NaNSimulationError Molly.check_array_nans((a1, a3), ("a1", "a3"), 10)
     end
 end
 
@@ -479,6 +526,47 @@ end
     @test tw.filepath == tw_path
     # No warning and no error when the file does not exist
     @test_logs TrajectoryWriter(10, tw_path; overwrite=true)
+
+    # Writing structures requires atoms_data, and no file is left behind without it
+    sys_no_data = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                         boundary=CubicBoundary(2.0u"nm"))
+    for ext in ("pdb", "dcd")
+        fp = tempname() * ".$ext"
+        @test_throws ArgumentError write_structure(fp, sys_no_data)
+        @test !isfile(fp)
+    end
+end
+
+@testset "Time correlation logger" begin
+    n_steps, n_corr = 501, 20
+    xs_a = randn(Xoshiro(1), n_steps)
+    xs_b = 0.5 .* xs_a .+ randn(Xoshiro(2), n_steps)
+    xs_a[1] = 20.0 # An outlying first sample should be weighted like the others
+    vs = [rand(Xoshiro(i), SVector{3, Float64}, 5) for i in 1:n_steps]
+    vs_store = zero(first(vs))
+    obs_a(sys, neighbors, step_n, buffers; kwargs...) = xs_a[step_n + 1]
+    obs_b(sys, neighbors, step_n, buffers; kwargs...) = xs_b[step_n + 1]
+    # Returns the same array each step, as an observable returning sys.velocities does
+    obs_v(sys, neighbors, step_n, buffers; kwargs...) = (vs_store .= vs[step_n + 1])
+    sys = System(atoms=[Atom(mass=1.0u"g/mol")], coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+                 boundary=CubicBoundary(2.0u"nm"))
+
+    for n_threads in n_threads_list
+        auto = AutoCorrelationLogger(obs_a, Float64, 1, n_corr)
+        cross = TimeCorrelationLogger(obs_a, obs_b, Float64, Float64, 1, n_corr)
+        auto_v = AutoCorrelationLogger(obs_v, SVector{3, Float64}, 5, n_corr)
+        for step_n in 0:(n_steps - 1), logger in (auto, cross, auto_v)
+            Molly.log_property!(logger, sys, nothing, step_n; n_threads=n_threads)
+        end
+        for (logger, as, bs) in ((auto, xs_a, xs_a), (cross, xs_a, xs_b), (auto_v, vs, vs))
+            # Each pair of samples less than n_corr steps apart is counted once
+            C_ref = [sum(dot.(as[(1 + k):end], bs[1:(end - k)])) / (n_steps - k)
+                     for k in 0:(n_corr - 1)]
+            C_ref .-= dot(mean(as), mean(bs))
+            C_ref ./= sqrt(sum(a -> dot(a, a), as) * sum(b -> dot(b, b), bs)) / n_steps
+            @test values(logger) ≈ C_ref
+        end
+    end
 end
 
 @testset "Structure file formats" begin
@@ -505,8 +593,8 @@ end
 
         @test sys_mol2.topology.bonded_atoms == sys_pdb_connect.topology.bonded_atoms
         @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
-        @test_throws MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"), ff;
-                                                        boundary=boundary)
+        @test_throws Molly.MissingResidueTemplateError System(joinpath(data_dir, "imatinib.pdb"),
+                                                              ff; boundary=boundary)
     end
 
     water_pdb  = System(joinpath(data_dir, "water_formats", "water.pdb" ), ff;
@@ -537,12 +625,12 @@ end
     # Scaling the box moves molecules rigidly, keeping the fractional coordinates of their
     #   centers, as barostats require
     μ = SMatrix{3, 3}([1.05 0.02 0.0; 0.0 0.97 0.0; 0.0 0.0 1.03])
-    frac_centers(s) = [ustrip.(Molly.boxmatrix(s.boundary)) \
+    frac_centers(s) = [ustrip.(Molly.box_matrix(s.boundary)) \
                        ustrip.(sum(Molly.unwrap_molecules(s)[i:(i + 2)]) / 3) for i in 1:3:9]
     for rotate in (true, false)
         sys_scale = deepcopy(sys)
         scale_coords!(sys_scale, μ; rotate=rotate)
-        @test Molly.boxmatrix(sys_scale.boundary) ≈ μ * Molly.boxmatrix(sys.boundary)
+        @test Molly.box_matrix(sys_scale.boundary) ≈ μ * Molly.box_matrix(sys.boundary)
         @test frac_centers(sys_scale) ≈ frac_centers(sys)
         @test all(((i, j),) -> norm(vector(sys_scale.coords[i], sys_scale.coords[j],
                     sys_scale.boundary)) ≈ norm(coords_whole[j] - coords_whole[i]), bonds)
@@ -597,7 +685,7 @@ end
 
         if struc_name == "sgpb_omtky3"
             # Catch if disulfide bonds are not added properly
-            @test_throws MissingResidueTemplateError System(
+            @test_throws Molly.MissingResidueTemplateError System(
                 pdb_file,
                 ff;
                 array_type=AT,
@@ -627,19 +715,30 @@ end
     @test ff_garnet.dispersion_correction == false
     @test ff_garnet.custom_nonbonded == true
     @test ff_garnet.global_params == [12.159626, 4.326311]
-    @test_throws ArgumentError System(
+    # The double exponential gets its own dispersion correction rather than the Lennard-Jones
+    #   one
+    sys_garnet_dc = System(
         joinpath(data_dir, "ethanol_garnet.pdb"),
-        ff_garnet;
+        MolecularForceField(
+            joinpath(ff_dir, "ethanol_garnet.xml");
+            custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"),
+            units=false,
+        );
         units=false,
         dispersion_correction=true,
         strictness=:nowarn,
     )
+    dc_garnet = only(gi for gi in sys_garnet_dc.general_inters
+                     if gi isa DExpDispersionCorrection)
+    @test (dc_garnet.α, dc_garnet.β) == (12.159626, 4.326311)
+    @test !any(gi -> gi isa LJDispersionCorrection, sys_garnet_dc.general_inters)
+    @test potential_energy(sys_garnet_dc; pairwise_inters=(), specific_inter_lists=()) < 0
 
     ff_tip3p = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=false)
     @test ff_tip3p.custom_nonbonded == false
 
     ff_fp = joinpath(ff_dir, "tip4pfb.xml")
-    @test_throws ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
 end
 
 @testset "Double exponential force field setup" begin
@@ -788,6 +887,36 @@ end
     end
     @test neighbors_dist == sort_nbs(neighbors.list)
 
+    # Boxes less than twice the cutoff, where CellListMap.jl can give a pair once for each
+    #   image within the cutoff, should still list each pair once
+    for boundary_small in (
+                CubicBoundary(1.5u"nm"),
+                TriclinicBoundary(
+                    SVector( 1.5,  0.0, 0.0)u"nm",
+                    SVector(-0.4,  1.5, 0.0)u"nm",
+                    SVector( 0.3, -0.5, 1.5)u"nm",
+                ),
+            )
+        n_atoms_small = 200
+        coords_small = place_atoms(n_atoms_small, boundary_small; min_dist=0.05u"nm")
+        dist_cutoff_small = 1.0u"nm"
+        nf_small = CellListMapNeighborFinder(n_atoms=n_atoms_small,
+                                             dist_cutoff=dist_cutoff_small,
+                                             boundary=boundary_small)
+        sys_small = System(atoms=fill(Atom(), n_atoms_small), coords=coords_small,
+                           boundary=boundary_small, neighbor_finder=nf_small)
+        neighbors_small_dist = Tuple{Int32, Int32, Bool}[]
+        for i in 1:n_atoms_small, j in (i + 1):n_atoms_small
+            if norm(vector(coords_small[i], coords_small[j], boundary_small)) <= dist_cutoff_small
+                push!(neighbors_small_dist, (Int32(i), Int32(j), false))
+            end
+        end
+        for n_threads in (1, Threads.nthreads())
+            neighbors_small = find_neighbors(sys_small; n_threads=n_threads)
+            @test sort_nbs(neighbors_small.list[1:neighbors_small.n]) == neighbors_small_dist
+        end
+    end
+
     # Test all neighbor finders agree for a larger system
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     dist_cutoff = 1.2u"nm"
@@ -803,6 +932,14 @@ end
     neighbors_ref = find_neighbors(sys)
     n_neighbors_ref = 4602420
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
+    # The pairs of any neighbor list are read the same way
+    @test length(neighbor_pairs(neighbors_ref)) == n_neighbors_ref
+    @test neighbor_pairs(neighbors_ref)[1] == neighbors_ref[1]
+    # Only some neighbor lists store neighbors per atom
+    @test !Molly.has_ragged_neighbors(neighbors_ref)
+    @test !Molly.has_ragged_neighbors(nothing)
+    @test_throws ArgumentError ragged_neighbors(neighbors_ref)
+    @test_throws ArgumentError Molly.ragged_counts(neighbors_ref)
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
     sorted_ref = sort_nbs(neighbors_ref.list)
@@ -913,6 +1050,904 @@ end
         dist_cutoff=1.0u"nm",
         boundary=CubicBoundary(SVector(Inf, 100.0, 100.0)),
     )
+
+    for AT in array_list_metal[2:end]
+        @testset "GPU cell-list neighbor finder $AT" begin
+            function gpu_cell_list_test_system(
+                coords_cpu;
+                output=:ragged,
+                cutoff=1.0f0,
+                max_neighbors=nothing,
+                boundary=CubicBoundary(10.0f0),
+                eligible=nothing,
+                special=nothing,
+            )
+                n_atoms = length(coords_cpu)
+                T = eltype(eltype(coords_cpu))
+
+                atoms = to_device([
+                    Molly.Atom(index=i, mass=one(T))
+                    for i in 1:n_atoms
+                ], AT)
+
+                # The lists are reused on the schedule of n_steps, which some of the tests
+                #   rely on
+                finder = GPUCellListNeighborFinder(
+                    dist_cutoff=cutoff,
+                    auto_update=false,
+                    n_steps=10,
+                    max_neighbors=max_neighbors,
+                    output=output,
+                    eligible=eligible,
+                    special=special,
+                )
+
+                sys = System(
+                    atoms=atoms,
+                    coords=to_device(coords_cpu, AT),
+                    boundary=boundary,
+                    neighbor_finder=finder,
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                return sys, finder
+            end
+
+            @testset "Ragged output" begin
+                coords = [
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(1.5, 2.0, 3.0),
+                    SVector{3,Float32}(4.0, 2.0, 3.0),
+                ]
+
+                sys, _ = gpu_cell_list_test_system(coords)
+                result = find_neighbors(sys)
+
+                counts = Array(Molly.ragged_counts(result))
+                matrix = Array(ragged_neighbors(result))
+
+                @test counts == Int32[1, 1, 0]
+                @test matrix[1:counts[1], 1] == Int32[2]
+                @test matrix[1:counts[2], 2] == Int32[1]
+                @test isempty(matrix[1:counts[3], 3])
+                @test result.list === nothing
+                @test result.state.max_neighbors == Int32(32)
+
+                # Ragged output has no pairs to iterate over
+                @test Molly.has_ragged_neighbors(result)
+                @test_throws ArgumentError neighbor_pairs(result)
+                @test_throws ArgumentError result[1]
+            end
+
+            if AT in array_list
+                @testset "Float64 ragged output" begin
+                    coords = [
+                        SVector{3,Float64}(1.0, 2.0, 3.0),
+                        SVector{3,Float64}(1.5, 2.0, 3.0),
+                        SVector{3,Float64}(4.0, 2.0, 3.0),
+                    ]
+
+                    sys, _ = gpu_cell_list_test_system(
+                        coords;
+                        cutoff=1.0,
+                        boundary=CubicBoundary(10.0),
+                    )
+
+                    result = find_neighbors(sys)
+
+                    counts = Array(Molly.ragged_counts(result))
+                    matrix = Array(ragged_neighbors(result))
+
+                    @test eltype(result.state.x) === Float64
+                    @test eltype(result.state.cell_x) === Float64
+                    @test counts == Int32[1, 1, 0]
+                    @test matrix[1:counts[1], 1] == Int32[2]
+                    @test matrix[1:counts[2], 2] == Int32[1]
+                    @test isempty(matrix[1:counts[3], 3])
+                end
+            end
+
+            @testset "Geometric pair output" begin
+                coords = [
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(1.5, 2.0, 3.0),
+                    SVector{3,Float32}(4.0, 2.0, 3.0),
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                )
+
+                result = find_neighbors(sys)
+
+                pairs = Array(neighbor_pairs(result))
+
+                @test result.n == 1
+                @test length(neighbor_pairs(result)) == length(result) == 1
+                @test pairs == [(Int32(2), Int32(1), false)]
+                # The ragged representation is there for every output mode
+                @test Molly.has_ragged_neighbors(result)
+                @test Array(Molly.ragged_counts(result)) == Int32[1, 1, 0]
+            end
+
+            @testset "Molly pair output" begin
+                coords = [
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(1.2, 2.0, 3.0),
+                    SVector{3,Float32}(1.4, 2.0, 3.0),
+                ]
+
+                eligible = trues(3, 3)
+
+                for atom_i in 1:3
+                    eligible[atom_i, atom_i] = false
+                end
+
+                # Exclude pair 1-2.
+                eligible[1, 2] = false
+                eligible[2, 1] = false
+
+                special = falses(3, 3)
+
+                # Mark pair 1-3 as special.
+                special[1, 3] = true
+                special[3, 1] = true
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:molly_pairs,
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
+                )
+
+                result = find_neighbors(sys)
+
+                pairs = sort(Array(result.list[1:result.n]))
+
+                @test Array(Molly.ragged_counts(result)) == Int32[2, 2, 2]
+                @test result.n == 2
+                @test pairs == [
+                    (Int32(3), Int32(1), true),
+                    (Int32(3), Int32(2), false),
+                ]
+            end
+
+            @testset "Periodic boundary" begin
+                coords = [
+                    SVector{3,Float32}(0.1, 2.0, 3.0),
+                    SVector{3,Float32}(9.7, 2.0, 3.0),
+                    SVector{3,Float32}(5.0, 2.0, 3.0),
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=0.5f0,
+                )
+
+                result = find_neighbors(sys)
+
+                @test Array(Molly.ragged_counts(result)) == Int32[1, 1, 0]
+                @test result.n == 1
+                @test Array(result.list[1:1]) ==
+                    [(Int32(2), Int32(1), false)]
+            end
+
+            @testset "Cell occupancy above warp size" begin
+                n_atoms = 40
+
+                coords = [
+                    SVector{3,Float32}(
+                        1.0f0 + Float32(i) * 0.001f0,
+                        2.0f0,
+                        3.0f0,
+                    )
+                    for i in 1:n_atoms
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=1.0f0,
+                    max_neighbors=64,
+                )
+
+                result = find_neighbors(sys)
+
+                @test Array(Molly.ragged_counts(result)) == fill(Int32(39), n_atoms)
+                @test result.n == n_atoms * (n_atoms - 1) ÷ 2
+
+                cell_counts = Array(result.state.cell_counts)
+                expected_host_tiles = sum(
+                    cld(Int(count), 32)
+                    for count in cell_counts
+                )
+
+                @test result.state.n_host_tiles == expected_host_tiles
+                @test result.state.n_host_tiles == 2
+
+                n_host_tiles = result.state.n_host_tiles
+
+                @test Array(
+                    result.state.host_tile_starts[1:n_host_tiles],
+                ) == Int32[0, 32]
+
+                scheduled_cells = Array(
+                    result.state.host_tile_cells[1:n_host_tiles],
+                )
+
+                @test length(unique(scheduled_cells)) == 1
+            end
+
+            @testset "State reuse" begin
+                coords = [
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(1.5, 2.0, 3.0),
+                    SVector{3,Float32}(4.0, 2.0, 3.0),
+                ]
+
+                sys, finder = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                )
+
+                first_result = find_neighbors(sys)
+
+                sys.coords .= to_device([
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(6.0, 2.0, 3.0),
+                    SVector{3,Float32}(4.0, 2.0, 3.0),
+                ], AT)
+
+                second_result = find_neighbors(
+                    sys,
+                    finder,
+                    first_result,
+                    1,
+                    true,
+                )
+
+                @test Array(Molly.ragged_counts(second_result)) == Int32[0, 0, 0]
+                @test second_result.n == 0
+                @test second_result.state.x === first_result.state.x
+                @test ragged_neighbors(second_result) === ragged_neighbors(first_result)
+                @test Molly.ragged_counts(second_result) === Molly.ragged_counts(first_result)
+                @test second_result.list === first_result.list
+
+                cached_result = find_neighbors(
+                    sys,
+                    finder,
+                    second_result,
+                    2,
+                    false,
+                )
+
+                @test cached_result === second_result
+            end
+
+            @testset "Neighbor capacity growth" begin
+                coords = [
+                    SVector{3,Float32}(1.0, 2.0, 3.0),
+                    SVector{3,Float32}(1.1, 2.0, 3.0),
+                    SVector{3,Float32}(1.2, 2.0, 3.0),
+                ]
+
+                # A capacity that is too small is grown rather than being an error
+                for output in (:ragged, :geometric_pairs)
+                    sys, _ = gpu_cell_list_test_system(
+                        coords;
+                        output=output,
+                        cutoff=1.0f0,
+                        max_neighbors=1,
+                    )
+
+                    result = find_neighbors(sys)
+
+                    @test Array(Molly.ragged_counts(result)) == Int32[2, 2, 2]
+                    @test result.state.max_neighbors >= 2
+                    @test size(ragged_neighbors(result), 1) == result.state.max_neighbors
+
+                    if output === :geometric_pairs
+                        @test result.n == 3
+                    end
+                end
+            end
+
+            @testset "Matches DistanceNeighborFinder" begin
+                Random.seed!(100)
+
+                function canonical_pairs(nl)
+                    pairs = Array(nl.list[1:nl.n])
+                    return Set(
+                        (min(i, j), max(i, j), special)
+                        for (i, j, special) in pairs
+                    )
+                end
+
+                # The third box has exactly three cells along an axis, where the
+                #   3x3x3 stencil wraps around to cover every cell exactly once, and
+                #   the last two are triclinic, the last one strongly skewed.
+                # DistanceNeighborFinder uses the approximate minimum image of a
+                #   TriclinicBoundary whereas the cell list finds the true one, so in
+                #   principle the cell list can return extra pairs for a skewed box,
+                #   which is the safe direction. The boxes here do not differ.
+                for (n_atoms, boundary) in (
+                            (300, CubicBoundary(4.0f0)),
+                            (400, CubicBoundary(SVector(4.5f0, 3.2f0, 6.1f0))),
+                            (200, CubicBoundary(3.0001f0)),
+                            (300, TriclinicBoundary(SVector(
+                                SVector{3,Float32}(4.0, 0.0, 0.0),
+                                SVector{3,Float32}(0.4, 4.2, 0.0),
+                                SVector{3,Float32}(0.3, 0.5, 4.4),
+                            ))),
+                            (300, TriclinicBoundary(SVector(
+                                SVector{3,Float32}(5.0, 0.0, 0.0),
+                                SVector{3,Float32}(2.0, 6.0, 0.0),
+                                SVector{3,Float32}(3.0, 4.0, 7.0),
+                            ))),
+                        )
+                    bv = (boundary isa TriclinicBoundary ? boundary.basis_vectors :
+                          SVector(SVector{3,Float32}(boundary[1], 0, 0),
+                                  SVector{3,Float32}(0, boundary[2], 0),
+                                  SVector{3,Float32}(0, 0, boundary[3])))
+                    coords = [
+                        bv[1] * rand(Float32) + bv[2] * rand(Float32) + bv[3] * rand(Float32)
+                        for _ in 1:n_atoms
+                    ]
+
+                    eligible = trues(n_atoms, n_atoms)
+                    special = falses(n_atoms, n_atoms)
+                    for i in 1:n_atoms
+                        eligible[i, i] = false
+                    end
+                    for _ in 1:n_atoms
+                        i, j = rand(1:n_atoms), rand(1:n_atoms)
+                        k, l = rand(1:n_atoms), rand(1:n_atoms)
+                        if i != j
+                            eligible[i, j] = false
+                            eligible[j, i] = false
+                        end
+                        if k != l
+                            special[k, l] = true
+                            special[l, k] = true
+                        end
+                    end
+
+                    nf_ref = DistanceNeighborFinder(
+                        eligible=to_device(eligible, AT),
+                        special=to_device(special, AT),
+                        dist_cutoff=nextfloat(1.0f0 +
+                                             16 * eps(Float32) * opnorm(hcat(bv...), Inf)),
+                    )
+
+                    # Coordinates outside the box should give the same neighbors,
+                    #   since they are wrapped during the search
+                    shifts = (zero(bv[1]), bv[1] + bv[3], -2 .* bv[2])
+                    for shift in shifts
+                        sys, finder = gpu_cell_list_test_system(
+                            [c .+ shift for c in coords];
+                            output=:molly_pairs,
+                            cutoff=1.0f0,
+                            boundary=boundary,
+                            eligible=to_device(eligible, AT),
+                            special=to_device(special, AT),
+                        )
+
+                        result = find_neighbors(sys)
+                        reference = find_neighbors(sys, nf_ref)
+
+                        @test result.n == reference.n
+                        @test canonical_pairs(result) == canonical_pairs(reference)
+                    end
+                end
+            end
+
+            @testset "Sparse exceptions" begin
+                Random.seed!(104)
+
+                # Dense masks are converted to sparse matrices and not kept
+                n_small = 4
+                eligible_small = trues(n_small, n_small)
+                special_small = falses(n_small, n_small)
+                for i in 1:n_small
+                    eligible_small[i, i] = false
+                end
+                eligible_small[1, 2] = false
+                eligible_small[2, 1] = false
+                special_small[1, 3] = true
+                special_small[3, 1] = true
+
+                finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    eligible=to_device(eligible_small, AT),
+                    special=to_device(special_small, AT),
+                )
+
+                @test finder.n_atoms == n_small
+                @test finder.eligible isa SparsePairMatrix
+                @test finder.special isa SparsePairMatrix
+                @test Molly.neighbor_matrix_on_gpu(finder.eligible)
+                @test Molly.n_listed_pairs(finder.eligible) == 1
+                @test Molly.n_listed_pairs(finder.special) == 1
+
+                eligible_rt, special_rt = Molly.neighbor_finder_masks(finder, n_small)
+
+                @test eligible_rt == eligible_small
+                @test special_rt == special_small
+
+                # Constraint setup adds excluded pairs to an existing finder
+                Molly.append_excluded_pairs!(finder, [(2, 4)])
+                eligible_app, special_app = Molly.neighbor_finder_masks(finder, n_small)
+
+                @test Molly.n_listed_pairs(finder.eligible) == 2
+                @test !eligible_app[2, 4] && !eligible_app[4, 2]
+                @test special_app == special_small
+
+                # Atoms with more exceptions than are cached in registers take a
+                #   different path in the kernels, so give some atoms many of both
+                n_atoms = 200
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                eligible = trues(n_atoms, n_atoms)
+                special = falses(n_atoms, n_atoms)
+                for i in 1:n_atoms
+                    eligible[i, i] = false
+                end
+                for i in 1:n_atoms, j in 1:min(i - 1, 8)
+                    eligible[i, j] = false
+                    eligible[j, i] = false
+                end
+                for i in 1:n_atoms, j in 9:min(i - 1, 20)
+                    special[i, j] = true
+                    special[j, i] = true
+                end
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:molly_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
+                )
+
+                nf_ref = DistanceNeighborFinder(
+                    eligible=to_device(eligible, AT),
+                    special=to_device(special, AT),
+                    dist_cutoff=1.0f0,
+                )
+
+                result = find_neighbors(sys)
+                reference = find_neighbors(sys, nf_ref)
+                canonical(nl) = Set((min(i, j), max(i, j), sp)
+                                    for (i, j, sp) in Array(nl.list[1:nl.n]))
+
+                # The kernels compare against the partners before an atom, so some atoms
+                #   need more of those than are cached
+                function max_earlier_partners(m)
+                    starts, partners = Array(m.starts), Array(m.partners)
+                    return maximum(count(<(i), partners[starts[i]:(starts[i + 1] - 1)])
+                                   for i in 1:(length(starts) - 1))
+                end
+                n_cached = Molly.N_CACHED_EXCEPTIONS
+                @test max_earlier_partners(sys.neighbor_finder.eligible) > n_cached
+                @test max_earlier_partners(sys.neighbor_finder.special) > n_cached
+                @test result.n == reference.n
+                @test canonical(result) == canonical(reference)
+
+                # Sparse matrices are used as they are, including an eligible matrix that
+                #   lists the pairs that can interact rather than the excluded ones
+                excluded_pairs = Molly.ineligible_pairs(eligible)
+                special_pairs = Molly.true_pairs(special)
+                allowed_pairs = [(i, j) for i in 1:n_atoms for j in (i + 1):n_atoms
+                                 if eligible[i, j] && rand() < 0.5]
+                eligible_allowed = falses(n_atoms, n_atoms)
+                for (i, j) in allowed_pairs
+                    eligible_allowed[i, j] = true
+                    eligible_allowed[j, i] = true
+                end
+                for (eligible_sparse, eligible_dense) in (
+                            (SparsePairMatrix(n_atoms, excluded_pairs; listed=false,
+                                              array_type=AT), eligible),
+                            (SparsePairMatrix(n_atoms, allowed_pairs; listed=true,
+                                              array_type=AT), eligible_allowed))
+                    special_sparse = SparsePairMatrix(n_atoms, special_pairs; listed=true,
+                                                      array_type=AT)
+                    sys_sparse, finder_sparse = gpu_cell_list_test_system(
+                        coords;
+                        output=:molly_pairs,
+                        cutoff=1.0f0,
+                        boundary=boundary,
+                        eligible=eligible_sparse,
+                        special=special_sparse,
+                    )
+                    @test finder_sparse.eligible.listed == eligible_sparse.listed
+                    nf_dense = DistanceNeighborFinder(
+                        eligible=to_device(eligible_dense, AT),
+                        special=to_device(special, AT),
+                        dist_cutoff=1.0f0,
+                    )
+                    result_sparse = find_neighbors(sys_sparse)
+                    reference_dense = find_neighbors(sys_sparse, nf_dense)
+                    @test result_sparse.n == reference_dense.n
+                    @test canonical(result_sparse) == canonical(reference_dense)
+                end
+
+                # The same pairs from the keyword arguments, with no special matrix
+                finder_kw = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    n_atoms=n_atoms,
+                    excluded_pairs=excluded_pairs,
+                    array_type=AT,
+                )
+                @test Molly.n_listed_pairs(finder_kw.special) == 0
+                result_kw = find_neighbors(sys, finder_kw)
+                @test result_kw.n == reference.n
+                @test all(!sp for (_, _, sp) in Array(result_kw.list[1:result_kw.n]))
+
+                # A large sparse matrix is not made dense on construction
+                n_big = 200_000
+                eligible_big = SparsePairMatrix(n_big, [(1, 2)]; listed=false, array_type=AT)
+                finder_big = GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                       eligible=eligible_big)
+                @test (@allocated GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                            eligible=eligible_big)) < 10^7
+                @test size(finder_big.special) == (n_big, n_big)
+            end
+
+            @testset "Pairs without the per-atom matrix" begin
+                Random.seed!(105)
+                n_atoms = 400
+                canonical_ragged(nl) = Set((min(i, j), max(i, j), sp)
+                                           for (i, j, sp) in Array(nl.list[1:nl.n]))
+                excluded = [(i, j) for i in 1:n_atoms for j in (i + 1):min(i + 6, n_atoms)]
+                specials = [(i, i + 7) for i in 1:(n_atoms - 7)]
+                eligible = SparsePairMatrix(n_atoms, excluded; listed=false, array_type=AT)
+                special = SparsePairMatrix(n_atoms, specials; listed=true, array_type=AT)
+                atoms = to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:n_atoms], AT)
+                for boundary in (CubicBoundary(4.0f0), TriclinicBoundary(SVector(
+                                    SVector{3,Float32}(4.0, 0.0, 0.0),
+                                    SVector{3,Float32}(0.4, 4.2, 0.0),
+                                    SVector{3,Float32}(0.3, 0.5, 4.4))))
+                    bv = (boundary isa TriclinicBoundary ? boundary.basis_vectors :
+                          SVector(SVector{3,Float32}(boundary[1], 0, 0),
+                                  SVector{3,Float32}(0, boundary[2], 0),
+                                  SVector{3,Float32}(0, 0, boundary[3])))
+                    coords = to_device([bv[1] * rand(Float32) + bv[2] * rand(Float32) +
+                                        bv[3] * rand(Float32) for _ in 1:n_atoms], AT)
+                    for output in (:molly_pairs, :geometric_pairs)
+                        lists = map((true, false)) do ragged
+                            nf = GPUCellListNeighborFinder(dist_cutoff=1.0f0, output=output,
+                                        ragged=ragged, eligible=eligible, special=special)
+                            sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                                         neighbor_finder=nf, force_units=NoUnits,
+                                         energy_units=NoUnits)
+                            nl = find_neighbors(sys)
+                            # A rebuild into the buffers of the previous list
+                            nl_reused = find_neighbors(sys, nf, nl, 0, true)
+                            return nl, nl_reused
+                        end
+                        (nl_ragged, _), (nl_pairs, nl_pairs_reused) = lists
+                        @test Molly.has_ragged_neighbors(nl_ragged)
+                        @test !Molly.has_ragged_neighbors(nl_pairs)
+                        @test_throws ArgumentError ragged_neighbors(nl_pairs)
+                        @test_throws ArgumentError Molly.ragged_counts(nl_pairs)
+                        @test nl_pairs.n == nl_ragged.n > 0
+                        @test canonical_ragged(nl_pairs) == canonical_ragged(nl_ragged)
+                        @test canonical_ragged(nl_pairs_reused) == canonical_ragged(nl_ragged)
+                        @test all(i > j for (i, j, _) in Array(nl_pairs.list[1:nl_pairs.n]))
+                        @test any(sp for (_, _, sp) in Array(nl_pairs.list[1:nl_pairs.n])) ==
+                                                            (output == :molly_pairs)
+                    end
+                end
+                @test_throws ArgumentError GPUCellListNeighborFinder(dist_cutoff=1.0f0,
+                                                        output=:ragged, ragged=false)
+                @test occursin("ragged = false", sprint(show, GPUCellListNeighborFinder(
+                                        dist_cutoff=1.0f0, output=:geometric_pairs,
+                                        ragged=false)))
+            end
+
+            @testset "Triclinic boundary" begin
+                Random.seed!(103)
+
+                # The true minimum image over every neighboring box image
+                function brute_force_pairs(coords, bv, cutoff)
+                    pairs = Set{Tuple{Int32, Int32}}()
+                    for i in eachindex(coords), j in 1:(i - 1)
+                        min_sqdist = typemax(Float32)
+                        for ox in -1:1, oy in -1:1, oz in -1:1
+                            dr = (coords[j] + ox * bv[1] + oy * bv[2] + oz * bv[3]) -
+                                 coords[i]
+                            min_sqdist = min(min_sqdist, sum(abs2, dr))
+                        end
+                        if min_sqdist <= cutoff^2
+                            push!(pairs, (Int32(j), Int32(i)))
+                        end
+                    end
+                    return pairs
+                end
+
+                boundaries = (
+                    TriclinicBoundary(SVector(
+                        SVector{3,Float32}(4.0, 0.0, 0.0),
+                        SVector{3,Float32}(0.4, 4.2, 0.0),
+                        SVector{3,Float32}(0.3, 0.5, 4.4),
+                    )),
+                    TriclinicBoundary(SVector(
+                        SVector{3,Float32}(5.0, 0.0, 0.0),
+                        SVector{3,Float32}(2.0, 6.0, 0.0),
+                        SVector{3,Float32}(3.0, 4.0, 7.0),
+                    )),
+                )
+
+                for boundary in boundaries
+                    bv = boundary.basis_vectors
+                    n_atoms = 300
+                    coords = [
+                        bv[1] * rand(Float32) + bv[2] * rand(Float32) + bv[3] * rand(Float32)
+                        for _ in 1:n_atoms
+                    ]
+
+                    # The cell grid is sized by the distance between opposite faces,
+                    #   which is smaller than the basis vector length when skewed
+                    widths = Molly.cell_list_box_widths(boundary)
+                    @test all(widths .<= Molly.box_sides(boundary))
+
+                    reference = brute_force_pairs(coords, bv, 1.0f0)
+
+                    # Coordinates inside and outside the box should agree with it
+                    for shift in (zero(bv[1]), 2 .* bv[1] - 3 .* bv[2] + bv[3])
+                        sys, _ = gpu_cell_list_test_system(
+                            [c .+ shift for c in coords];
+                            output=:geometric_pairs,
+                            cutoff=1.0f0,
+                            boundary=boundary,
+                        )
+
+                        result = find_neighbors(sys)
+                        pairs = Set(
+                            (min(i, j), max(i, j))
+                            for (i, j, _) in Array(result.list[1:result.n])
+                        )
+
+                        @test result.n == length(reference)
+                        @test pairs == reference
+                    end
+                end
+            end
+
+            @testset "Box change" begin
+                Random.seed!(101)
+                n_atoms = 300
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                sys, finder = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                )
+
+                result = find_neighbors(sys)
+
+                # A changed box only changes the cell grid, so the state and the
+                #   buffers behind it are reused
+                for scale in (1.05f0, 0.8f0, 1.3f0)
+                    sys.boundary = CubicBoundary(4.0f0 * scale)
+                    sys.coords .= to_device([c .* scale for c in coords], AT)
+
+                    scaled = find_neighbors(sys, finder, result, 0, true)
+
+                    @test scaled.state === result.state
+                    @test Molly.ragged_counts(scaled) === Molly.ragged_counts(result)
+
+                    reference_n = count(
+                        norm(vector(c1 .* scale, c2 .* scale, sys.boundary)) <= 1.0f0
+                        for (i, c1) in enumerate(coords)
+                        for (j, c2) in enumerate(coords) if j < i
+                    )
+
+                    @test scaled.n == reference_n
+                    result = scaled
+                end
+            end
+
+            @testset "Automatic capacity estimate" begin
+                Random.seed!(102)
+                n_atoms = 2000
+                boundary = CubicBoundary(4.0f0)
+                coords = [
+                    SVector{3,Float32}(rand(Float32, 3) .* 4.0f0)
+                    for _ in 1:n_atoms
+                ]
+
+                sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    output=:geometric_pairs,
+                    cutoff=1.0f0,
+                    boundary=boundary,
+                )
+
+                result = find_neighbors(sys)
+
+                counts = Array(Molly.ragged_counts(result))
+
+                @test maximum(counts) <= result.state.max_neighbors
+                @test result.state.max_neighbors % 32 == 0
+                @test result.n == sum(counts) ÷ 2
+            end
+
+            @testset "Boundary validation" begin
+                coords = [
+                    SVector{3,Float32}(0.5, 0.5, 0.5),
+                    SVector{3,Float32}(1.0, 0.5, 0.5),
+                ]
+
+                small_sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0f0,
+                    boundary=CubicBoundary(2.5f0),
+                )
+
+                @test_throws ArgumentError find_neighbors(small_sys)
+
+                infinite_sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0f0,
+                    boundary=CubicBoundary(Inf32),
+                )
+
+                @test_throws ArgumentError find_neighbors(infinite_sys)
+
+                triclinic_sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0f0,
+                    boundary=TriclinicBoundary(SVector(
+                        SVector{3,Float32}(10.0, 0.0, 0.0),
+                        SVector{3,Float32}(0.5, 10.0, 0.0),
+                        SVector{3,Float32}(0.0, 0.0, 10.0),
+                    )),
+                )
+
+                @test Array(Molly.ragged_counts(find_neighbors(triclinic_sys))) == Int32[1, 1]
+
+                # Skewing the box brings the faces closer together than three cells,
+                #   even though every basis vector is more than three cutoffs long
+                skewed_sys, _ = gpu_cell_list_test_system(
+                    coords;
+                    cutoff=1.0f0,
+                    boundary=TriclinicBoundary(SVector(
+                        SVector{3,Float32}(3.6, 0.0, 0.0),
+                        SVector{3,Float32}(3.5, 3.6, 0.0),
+                        SVector{3,Float32}(0.0, 0.0, 3.6),
+                    )),
+                )
+
+                @test_throws ArgumentError find_neighbors(skewed_sys)
+            end
+
+            @testset "Finder validation" begin
+                automatic_finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:ragged,
+                )
+
+                explicit_finder = GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    max_neighbors=96,
+                    output=:ragged,
+                )
+
+                @test automatic_finder.max_neighbors === nothing
+                @test explicit_finder.max_neighbors == 96
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=0.0f0,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=Inf32,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    n_steps=0,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    max_neighbors=0,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:invalid,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                )
+
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    eligible=trues(3, 3),
+                )
+
+                # The pairs have to end up on the device for the search kernels, so
+                #   matrices on the CPU need array_type
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    eligible=trues(3, 3),
+                    special=falses(3, 3),
+                )
+
+                asymmetric = trues(3, 3)
+                asymmetric[2, 1] = false
+                @test_throws ArgumentError GPUCellListNeighborFinder(
+                    dist_cutoff=1.0f0,
+                    output=:molly_pairs,
+                    eligible=to_device(asymmetric, AT),
+                    special=to_device(falses(3, 3), AT),
+                )
+
+                @test occursin("output = ragged", sprint(show, automatic_finder))
+
+                eligible_mask, special_mask = Molly.neighbor_finder_masks(
+                    automatic_finder,
+                    3,
+                )
+
+                @test !any(eligible_mask[i, i] for i in 1:3)
+                @test !any(special_mask)
+
+                # Ragged output has no pair list for the pairwise interactions
+                @test_throws ArgumentError System(
+                    atoms=to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:2], AT),
+                    coords=to_device([
+                        SVector{3,Float32}(1.0, 1.0, 1.0),
+                        SVector{3,Float32}(2.0, 1.0, 1.0),
+                    ], AT),
+                    boundary=CubicBoundary(10.0f0),
+                    pairwise_inters=(LennardJones(),),
+                    neighbor_finder=automatic_finder,
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                # A system that is not a 3D GPU system gets an explanation
+                cpu_sys = System(
+                    atoms=[Molly.Atom(index=i, mass=1.0f0) for i in 1:2],
+                    coords=[
+                        SVector{3,Float32}(1.0, 1.0, 1.0),
+                        SVector{3,Float32}(2.0, 1.0, 1.0),
+                    ],
+                    boundary=CubicBoundary(10.0f0),
+                    neighbor_finder=GPUCellListNeighborFinder(
+                        dist_cutoff=1.0f0,
+                        output=:geometric_pairs,
+                    ),
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                @test_throws ArgumentError find_neighbors(cpu_sys)
+            end
+        end
+    end
 end
 
 @testset "Ewald excluded pairs" begin
@@ -1123,7 +2158,7 @@ end
 
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    pairwise_inters = (LennardJones(use_neighbors=true),)
+    pairwise_inters = (LennardJones(),)
     n_replicas = 4
 
     eligible = trues(n_atoms, n_atoms)
@@ -1167,8 +2202,7 @@ end
         [copy(coords) for _ in 1:n_replicas]
     )
 
-    # Since ReplicaSystem no longer stores full `System` objects in a `replicas` tuple,
-    # we test that the core unperturbed components were correctly absorbed by the AlchemicalPartition
+    # Test that the core unperturbed components were correctly absorbed by the AlchemicalPartition
     # and the state interaction arrays.
     @test repsys.partition.master_sys.atoms == sys.atoms
     for i in 1:n_replicas
@@ -1315,19 +2349,19 @@ end
     nf_wrong_size = DistanceNeighborFinder(eligible=trues(n_atoms + 1, n_atoms + 1),
                                            dist_cutoff=1.0u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(use_neighbors=true),),
+                    pairwise_inters=(LennardJones(),),
                     neighbor_finder=nf_wrong_size)
 
     # A neighbor finder cutoff smaller than the interaction cutoff misses pairs
     nf_small = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.5u"nm")
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                                  use_neighbors=true),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                     neighbor_finder=nf_small, strictness=:error)
 
     # An interaction cutoff more than half the box breaks the minimum image convention
     @test_throws ErrorException System(atoms=atoms, coords=coords, boundary=boundary,
-                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm")),),
+                    pairwise_inters=(LennardJones(cutoff=DistanceCutoff(2.5u"nm"),
+                                                  use_neighbors=false),),
                     strictness=:error)
 
     # Specific interaction lists should refer to atoms in the system
@@ -1338,8 +2372,7 @@ end
 
     # A valid system with all of the above set correctly
     sys = System(atoms=atoms, coords=coords, boundary=boundary,
-                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"),
-                                               use_neighbors=true),),
+                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
                  neighbor_finder=DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),
                                                         dist_cutoff=1.2u"nm"),
                  specific_inter_lists=(InteractionList2Atoms([1], [2], [bond]),),
@@ -1387,14 +2420,14 @@ end
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar"/>
      </AtomTypes>""")
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Attribute that cannot be parsed
     fp = write_ff("bad_mass.xml", """
      <AtomTypes>
       <Type name="AR" class="Ar" element="Ar" mass="heavy"/>
      </AtomTypes>""")
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Residue template referring to an unknown atom type
     fp = write_ff("bad_type.xml", types_block * """
@@ -1403,7 +2436,7 @@ end
        <Atom name="AR" type="ARR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Atom types have to come before the residue templates that use them
     fp_types = write_ff("types_only.xml", types_block * nb_block)
@@ -1414,7 +2447,7 @@ end
       </Residue>
      </Residues>""")
     @test length(MolecularForceField(fp_types, fp_res).residues) == 1
-    @test_throws ForceFieldXMLError MolecularForceField(fp_res, fp_types)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp_res, fp_types)
 
     # Duplicate atom names in a residue template
     fp = write_ff("dup_atom.xml", types_block * """
@@ -1424,7 +2457,7 @@ end
        <Atom name="AR" type="AR" charge="0.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Duplicate residue templates
     fp = write_ff("dup_res.xml", types_block * """
@@ -1436,7 +2469,7 @@ end
        <Atom name="AR2" type="AR" charge="1.0"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Bond in a residue template referring to an unknown atom name
     fp = write_ff("bad_bond.xml", types_block * """
@@ -1446,18 +2479,33 @@ end
        <Bond atomName1="AR" atomName2="ZZ"/>
       </Residue>
      </Residues>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Both an atom type and an atom class given for the same atom
     fp = write_ff("type_class.xml", types_block * """
      <HarmonicBondForce>
       <Bond type1="AR" class1="Ar" type2="AR" k="100.0" length="0.1"/>
      </HarmonicBondForce>""" * nb_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
 
     # Atom type with no non-bonded parameters
     fp = write_ff("no_nb.xml", types_block)
-    @test_throws ForceFieldXMLError MolecularForceField(fp)
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp)
+
+    # 1-4 scaling factors given in different files have to agree to within a tolerance,
+    #   and the first one read is used
+    fp_scale_1 = write_ff("scale_1.xml", types_block * """
+     <NonbondedForce coulomb14scale="0.8333333333333334" lj14scale="0.5">
+      <Atom type="AR" charge="0.0" sigma="0.34" epsilon="0.996"/>
+     </NonbondedForce>""")
+    fp_scale_2 = write_ff("scale_2.xml", """
+     <NonbondedForce coulomb14scale="0.833333" lj14scale="0.5">
+     </NonbondedForce>""")
+    fp_scale_3 = write_ff("scale_3.xml", """
+     <NonbondedForce coulomb14scale="0.5" lj14scale="0.5">
+     </NonbondedForce>""")
+    @test MolecularForceField(fp_scale_1, fp_scale_2).weight_14_coulomb == 0.8333333333333334
+    @test_throws Molly.ForceFieldXMLError MolecularForceField(fp_scale_1, fp_scale_3)
 
     # A residue template with a higher override level replaces one with a lower level
     fp = write_ff("override.xml", """
@@ -1497,6 +2545,15 @@ end
     @test_throws MethodError   System(water_fp, ff; dist_cutoff=0.5u"nm",
                                       neighbor_finder_type=Int)
 
+    # Nothing, rather than the default nothing, gives a system with no neighbor finder
+    sys_nonf = System(water_fp, ff; dist_cutoff=0.5u"nm", neighbor_finder_type=Nothing,
+                      strictness=:nowarn)
+    @test isnothing(sys_nonf.neighbor_finder)
+    @test isnothing(find_neighbors(sys_nonf))
+    @test !any(use_neighbors, sys_nonf.pairwise_inters)
+    @test_throws ErrorException System(water_fp, ff; dist_cutoff=0.5u"nm",
+                                       neighbor_finder_type=Nothing, strictness=:error)
+
     # Residues that do not match a template give a diagnostic message
     missing_h_fp = joinpath(mktempdir(), "water_missing_h.pdb")
     open(missing_h_fp, "w") do out
@@ -1504,7 +2561,17 @@ end
             startswith(line, "HETATM  279") || println(out, line)
         end
     end
-    @test_throws MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+    @test_throws Molly.MissingResidueTemplateError System(missing_h_fp, ff; dist_cutoff=0.5u"nm")
+
+    # Constraint topologies that the constraint algorithms do not support
+    protein_fp = joinpath(data_dir, "6mrr_nowater.pdb")
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:hangles)
+    @test_throws ArgumentError System(protein_fp, ff; boundary=CubicBoundary(10.0u"nm"),
+                                      constraints=:allbonds,
+                                      constraint_algorithm=SetupSHAKE_RATTLE())
+    sys = System(water_fp, ff; dist_cutoff=0.5u"nm", constraints=:hangles)
+    @test length(sys.constraints) == 1
 end
 
 @testset "AtomsBase conversion" begin
@@ -1530,7 +2597,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", use_neighbors=false)
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     # Suppress origin warning
@@ -1545,6 +2612,23 @@ end
 
         AtomsCalculators.Testing.test_potential_energy(ab_sys, calc)
         AtomsCalculators.Testing.test_forces(ab_sys, calc)
+    end
+
+    # The allocating methods generated for a general interaction give forces like those of
+    #   the system, since the interaction has no units of its own
+    mb_sys = System(
+        atoms=[Atom(mass=1.0u"g/mol") for _ in 1:2],
+        coords=[SVector(-0.5, 1.5)u"nm", SVector(0.6, 0.0)u"nm"],
+        boundary=RectangularBoundary(Inf*u"nm"),
+        general_inters=(MullerBrown(),),
+    )
+    mb = only(mb_sys.general_inters)
+    fs_mb = forces(mb_sys)
+    for fs_ac in (AtomsCalculators.forces(mb_sys, mb),
+                  AtomsCalculators.calculate(AtomsCalculators.Forces(), mb_sys, mb).forces,
+                  AtomsCalculators.energy_forces(mb_sys, mb).forces)
+        @test typeof(fs_ac) == typeof(fs_mb)
+        @test all(isapprox.(fs_ac, fs_mb))
     end
 end
 
@@ -1588,7 +2672,7 @@ end
                 TwoParticleAverageSite(12, 10, 9, 0.7, 0.3, 0.0 / LU),
                 OneParticleSite(13, 1, 0.0 / LU),
             ], AT)
-            pis = (LennardJones(use_neighbors=true),)
+            pis = (LennardJones(),)
             eligible = trues(length(atoms), length(atoms))
             eligible[1, 13] = false # Exclude OneParticleSite interaction
             eligible[13, 1] = false
@@ -1712,9 +2796,8 @@ end
                               SVector(1.21, 1.34, 1.16), SVector(0.0, 0.0, 0.0),
                               SVector(1.8, 1.5, 1.35)] * LU, AT),
             boundary=CubicBoundary(5.0 * LU),
-            pairwise_inters=(LennardJones(use_neighbors=true),
-                             Coulomb(use_neighbors=true,
-                                     coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
+            pairwise_inters=(LennardJones(),
+                             Coulomb(coulomb_const=(138.93545764498467 * EU * LU / CU^2))),
             virtual_sites=to_device(
                 [LocalCoordinatesSite(4, 1, 2, 3, wo_s, wx_s, wy_s, p * LU)], AT),
             neighbor_finder=DistanceNeighborFinder(eligible=to_device(eligible, AT),
@@ -1784,5 +2867,24 @@ end
 
         accels = Molly.calc_accels.(fs, atom_masses)
         @test maximum(norm, from_device(accels) .- from_device(accels_true)) < (1e-10 * AU)
+    end
+end
+
+@testset "Virtual site 1-4 pairs" begin
+    # A virtual site shares the exclusions and the 1-4 pairs of its first atom
+    ff = MolecularForceField(joinpath(ff_dir, "gaff.xml"), joinpath(ff_dir, "ethanol_vsite.xml"))
+    for AT in array_list
+        sys = System(joinpath(data_dir, "ethanol_vsite.pdb"), ff; array_type=AT,
+                     float_type=Float64, nonbonded_method=NoCutoff(), strictness=:nowarn)
+        if AT == Array
+            special, eligible = sys.neighbor_finder.special, sys.neighbor_finder.eligible
+            @test [j for j in 1:9 if special[10, j]] == [4, 5, 6]
+            @test [j for j in 1:9 if eligible[10, j]] == [4, 5, 6]
+        end
+        # Match to OpenMM
+        @test isapprox(potential_energy(sys), -1.198394851713553u"kJ * mol^-1";
+                       atol=1e-8u"kJ * mol^-1")
+        @test isapprox(potential_energy(sys; specific_inter_lists=()),
+                       -9.680706225998881u"kJ * mol^-1"; atol=1e-8u"kJ * mol^-1")
     end
 end

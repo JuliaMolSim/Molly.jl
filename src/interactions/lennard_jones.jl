@@ -1,19 +1,21 @@
 export
     LennardJones,
     LJDispersionCorrection,
-    LJDispersionCorrectionλ,
-    LennardJonesScaled,
     LennardJonesSoftCoreBeutler,
     LennardJonesSoftCoreGapsys,
     AshbaughHatch,
     LennardJones14,
     LennardJones14SoftCoreBeutler,
-    LennardJones14SoftCoreGapsys,
-    LennardJones14Scaled,
-    LennardJonesScaled
+    LennardJones14SoftCoreGapsys
+
+@public LJDispersionCorrectionλ,
+    LennardJonesScaled,
+    LennardJones14Scaled
 
 @doc raw"""
-    LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
+    LennardJones(; cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+                 σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.GeometricMixing(),
+                 weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms.
 
@@ -34,7 +36,7 @@ when the long-range correction to the potential energy is required.
 """
 @kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -78,6 +80,10 @@ parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
+    # Before the shortcut so that the compiler can share these with other interactions
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     if shortcut_pair(inter.shortcut, atom_i, atom_j, special)
         return zero_pairwise_force(dr, force_units)
     end
@@ -85,22 +91,21 @@ parameter_fields(::Type{<:LennardJones}) = ((:weight_special, "weight_14"),)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
     σ2 = σ^2
     params = (σ2, ϵ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
     if special
-        return fdr * inter.weight_special
+        return (f * inv_r * inter.weight_special) * dr
     else
-        return fdr
+        return (f * inv_r) * dr
     end
 end
 
 function pairwise_force(::LennardJones, r, (σ2, ϵ))
-    six_term = (σ2 / r^2) ^ 3
-    return (24ϵ / r) * (2 * six_term ^ 2 - six_term)
+    inv_r = inv(r)
+    six_term = (σ2 * inv_r^2) ^ 3
+    return (24ϵ * inv_r) * (2 * six_term ^ 2 - six_term)
 end
 
 @inline function potential_energy(inter::LennardJones,
@@ -135,104 +140,225 @@ function pairwise_pe(::LennardJones, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LJDispersionCorrection(atoms, dist_cutoff, σ_mixing=LorentzMixing(),
-                           ϵ_mixing=GeometricMixing())
+    LJDispersionCorrection(atoms, cutoff, σ_mixing=Molly.LorentzMixing(),
+                           ϵ_mixing=Molly.GeometricMixing())
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction.
 
-Approximately represents contributions from beyond the cutoff distance.
+See [Shirts et al. 2007](https://doi.org/10.1021/jp0735987).
+Approximately represents the part of the potential that the cutoff leaves out, assuming a
+uniform density.
 Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
 correction to the potential energy is required.
-The potential energy is defined as
+`cutoff` is the cutoff of the [`LennardJones`](@ref) interaction, which can be a
+[`DistanceCutoff`](@ref), a [`ShiftedPotentialCutoff`](@ref), a [`PolynomialCutoff`](@ref) or
+a distance, which is treated as a [`DistanceCutoff`](@ref).
+For a [`DistanceCutoff`](@ref) the potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-The forces are zero, with an isotropic virial contribution from the explicit
-volume dependence.
+where the averages run over all pairs of the ``N`` atoms, including excluded pairs and the
+pair of each atom with itself, ``V`` is the volume and ``r_c`` is the cutoff distance.
+This is the correction of OpenMM.
+For a [`PolynomialCutoff`](@ref) the part of the potential removed by the switching function
+is also included, as in OpenMM.
+For a [`ShiftedPotentialCutoff`](@ref) the shift of the pairs within the cutoff is also
+included, as in GROMACS.
+GROMACS leaves excluded pairs out of the averages and only corrects the ``r^{-6}`` term, so
+its correction differs slightly.
+The forces are zero, with an isotropic virial contribution.
 
-The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
-volume can change).
+The number of atoms is assumed not to change after setup, and changing the σ and ϵ of the
+atoms directly has no effect; [`inject_gradients`](@ref) recomputes the correction from
+injected values, including its gradients.
 Only compatible with 3D systems.
-Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrection{F6, F12, D, S, E}
+mutable struct LJDispersionCorrection{F6, F12, EC, C, S, E, P}
+    # Mutable so that a tuple of general interactions holds it by reference: stored inline
+    #   after a PME, Enzyme lost the gradients of the factors injection recomputes
     factor_6::F6
     factor_12::F12
-    dist_cutoff::D
+    energy_const::EC
+    cutoff::C
     σ_mix::S
     ϵ_mix::E
+    # The pairs of groups of atoms with the same parameters, as the index of one atom of each
+    #   group and the number of atom pairs, so that injected parameters can be taken up
+    group_pairs::P
 end
 
-function LJDispersionCorrection(atoms::AbstractArray,
-                                dist_cutoff,
-                                σ_mix=LorentzMixing(),
-                                ϵ_mix=GeometricMixing())
-    T = typeof(ustrip(dist_cutoff))
-    n_atoms = length(atoms)
-    atoms_cpu = from_device(atoms)
-    at = atoms_cpu[1]
+# The cutoffs that the dispersion correction supports, a distance meaning a DistanceCutoff
+disp_corr_cutoff(cutoff::Union{DistanceCutoff, ShiftedPotentialCutoff, PolynomialCutoff}) = cutoff
+disp_corr_cutoff(dist_cutoff) = DistanceCutoff(dist_cutoff)
 
-    # Representative terms for units and final factor types.
-    term_6_example  = at.ϵ * at.σ^6
-    term_12_example = at.ϵ * at.σ^12
+function disp_corr_cutoff(cutoff::AbstractCutoff)
+    throw(ArgumentError("the dispersion correction supports DistanceCutoff, " *
+                        "ShiftedPotentialCutoff and PolynomialCutoff, found $cutoff"))
+end
 
-    # Accumulate pair sums in Float64 for precision.
-    Tacc = Float64
+# Nodes and weights of n point Gauss-Legendre quadrature on [-1, 1]
+function gauss_legendre(n::Integer)
+    xs, ws = zeros(n), zeros(n)
+    for i in 1:n
+        x = cos(π * (i - 0.25) / (n + 0.5))
+        dp = 1.0
+        for _ in 1:100
+            # Legendre polynomials P_(n-1) and P_n at x by recurrence
+            p0, p1 = 1.0, x
+            for k in 2:n
+                p0, p1 = p1, ((2k - 1) * x * p1 - (k - 1) * p0) / k
+            end
+            dp = n * (x * p1 - p0) / (x^2 - 1)
+            dx = p1 / dp
+            x -= dx
+            abs(dx) < 1e-15 && break
+        end
+        xs[i], ws[i] = x, 2 / ((1 - x^2) * dp^2)
+    end
+    return xs, ws
+end
 
-    ϵσ6_unit  = unit(term_6_example)
-    ϵσ12_unit = unit(term_12_example)
+#=
+For n = 6 and 12, the integral of (1 - S) x^(2 - n) from a to 1, where S is the switching
+    function of PolynomialCutoff as a function of x = r / r_c and a = r_a / r_c.
+Composite Gauss-Legendre quadrature is used, which is accurate to near machine precision for
+    the smooth integrands found for any reasonable a.
+=#
+const gauss_legendre_20 = gauss_legendre(20)
 
-    # Accumulate with units, but keep the numerical values in Float64.
-    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
-    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
-
-    # The sum runs over each unordered atom pair once, including the pairs of an atom
-    #   with itself
-    # Atoms that only differ in their index give the same terms, so the sum is taken over
-    #   pairs of groups of such atoms weighted by the number of atom pairs, which avoids
-    #   a loop over all n_atoms^2 pairs
-    group_atoms, group_counts = identical_atom_groups(atoms_cpu)
-    for gi in eachindex(group_atoms)
-        atom_i = group_atoms[gi]
-        n_i = group_counts[gi]
-        for gj in 1:gi
-            atom_j = group_atoms[gj]
-            n_j = group_counts[gj]
-            n_pairs_group = (gi == gj ? (n_i * (n_i + 1)) ÷ 2 : n_i * n_j)
-            σ = σ_mixing(σ_mix, atom_i, atom_j)
-            ϵ = ϵ_mixing(ϵ_mix, atom_i, atom_j)
-            ϵσ6_sum  += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ6_unit, ϵ * σ^6)) * ϵσ6_unit
-            ϵσ12_sum += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ12_unit, ϵ * σ^12)) * ϵσ12_unit
+function switched_out_integrals(a)
+    xs, ws = gauss_legendre_20
+    n_intervals = 16
+    j6, j12 = 0.0, 0.0
+    h = (1 - a) / n_intervals
+    for m in 1:n_intervals
+        lo = a + (m - 1) * h
+        for (xg, wg) in zip(xs, ws)
+            x = lo + (xg + 1) * h / 2
+            t = (x - a) / (1 - a)
+            frac_out = t^3 * (10 - 15t + 6t^2)
+            j6  += wg * h / 2 * frac_out * x^-4
+            j12 += wg * h / 2 * frac_out * x^-10
         end
     end
+    return j6, j12
+end
 
-    n_pairs_acc = Tacc((n_atoms * (n_atoms + 1)) ÷ 2)
+#=
+For n = 6 and 12, the integral over r from 0 to ∞ of r^(2 - n) times the fraction of the
+    r^-n term of the Lennard-Jones potential that the cutoff leaves out.
+The shifted potential leaves out the shift V(r_c) within the cutoff as well as the
+    potential beyond it.
+=#
+disp_corr_integrals(c::DistanceCutoff) = (inv(3 * c.dist_cutoff^3), inv(9 * c.dist_cutoff^9))
 
-    ϵσ6_mean = ϵσ6_sum / n_pairs_acc
-    ϵσ12_mean = ϵσ12_sum / n_pairs_acc
+function disp_corr_integrals(c::ShiftedPotentialCutoff)
+    return (2 / (3 * c.dist_cutoff^3), 4 / (9 * c.dist_cutoff^9))
+end
 
-    # Factors are divided by volume when evaluating the correction.
-    n_atoms_acc = Tacc(n_atoms)
-    π_acc = Tacc(π)
+function disp_corr_integrals(c::PolynomialCutoff)
+    rc = c.dist_cutoff
+    j6, j12 = switched_out_integrals(Float64(uconvert(NoUnits, c.dist_activation / rc)))
+    return (inv(3 * rc^3) + j6 / rc^3, inv(9 * rc^9) + j12 / rc^9)
+end
 
-    factor_6_acc =
-        8 * π_acc * n_atoms_acc^2 *
-        (-ϵσ6_mean / (Tacc(3) * dist_cutoff^3))
+#=
+The weights of the r^-6 and r^-12 terms of the correction energy in each diagonal component
+    of the virial, the "mechanical" virial of the pairs that the cutoff leaves out.
+For a term u(r) ∝ r^-n beyond the cutoff r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r, so each
+    component is (n / 3)U_n, 2U6 and 4U12 for the r^-6 and r^-12 terms.
+When the potential is continuous at the cutoff, as for the shifted and switched potentials,
+    integrating by parts shows that each component is U6 + U12.
+=#
+disp_corr_virial_weights(::DistanceCutoff) = (2, 4)
+disp_corr_virial_weights(::Union{ShiftedPotentialCutoff, PolynomialCutoff}) = (1, 1)
 
-    factor_12_acc =
-        8 * π_acc * n_atoms_acc^2 *
-        (ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
+#=
+The part of the correction that does not depend on the volume. The shifted potential
+    subtracts V(r_c) from each pair within the cutoff, and as in GROMACS each atom is taken
+    to have one fewer partner within the cutoff than the uniform density gives.
+`ϵσ6_mean` and `ϵσ12_mean` are the pair averages and `n` is the number of atoms.
+=#
+function disp_corr_energy_const(c::ShiftedPotentialCutoff, ϵσ6_mean, ϵσ12_mean, n)
+    rc = c.dist_cutoff
+    return -2 * n * (ϵσ12_mean / rc^12 - ϵσ6_mean / rc^6)
+end
 
-    F6 = typeof(-(term_6_example / dist_cutoff^3))
-    F12 = typeof(term_12_example / dist_cutoff^9)
+disp_corr_energy_const(c, ϵσ6_mean, ϵσ12_mean, n) = zero(ϵσ6_mean / c.dist_cutoff^6)
 
-    return LJDispersionCorrection(
-        convert(F6, factor_6_acc),
-        convert(F12, factor_12_acc),
-        dist_cutoff,
-        σ_mix,
-        ϵ_mix,
-    )
+ustrip_cutoff(c::DistanceCutoff) = DistanceCutoff(ustrip(c.dist_cutoff))
+ustrip_cutoff(c::ShiftedPotentialCutoff) = ShiftedPotentialCutoff(ustrip(c.dist_cutoff))
+ustrip_cutoff(c::PolynomialCutoff) = PolynomialCutoff(ustrip(c.dist_activation),
+                                                      ustrip(c.dist_cutoff))
+
+# The correction from the pair averages of ϵσ^6 and ϵσ^12, as factors to be divided by the
+#   volume and a part independent of the volume, in the given types
+function disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, F6, F12, EC)
+    Tacc = Float64
+    i6, i12 = disp_corr_integrals(cutoff)
+    factor_6_acc  = 8 * Tacc(π) * n^2 * (-ϵσ6_mean  * i6 )
+    factor_12_acc = 8 * Tacc(π) * n^2 * ( ϵσ12_mean * i12)
+    energy_const_acc = disp_corr_energy_const(cutoff, ϵσ6_mean, ϵσ12_mean, n)
+    return convert(F6, factor_6_acc), convert(F12, factor_12_acc), convert(EC, energy_const_acc)
+end
+
+#=
+The factors of a Lennard-Jones dispersion correction from the atoms, summing over the pairs of
+    groups of atoms in `group_pairs`, with `n` atoms. `pair_params(atom_i, atom_j)` gives the
+    coupling, σ and ϵ of a pair.
+The sums are accumulated in Float64, and this is also how injected parameters are taken up, so
+    it has to stay differentiable.
+=#
+function lj_disp_corr_factors(cutoff, group_pairs, atoms, n, pair_params, F6, F12, EC)
+    Tacc = Float64
+    at = first(atoms)
+    ϵσ6_unit  = unit(first(at.ϵ) * first(at.σ)^6)
+    ϵσ12_unit = unit(first(at.ϵ) * first(at.σ)^12)
+    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
+    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
+    for (i, j, n_pairs_group) in group_pairs
+        λ, σ, ϵ = pair_params(atoms[i], atoms[j])
+        ϵσ6_sum  += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ6_unit,  λ * ϵ * σ^6 )) * ϵσ6_unit
+        ϵσ12_sum += Tacc(n_pairs_group) * Tacc(ustrip(ϵσ12_unit, λ * ϵ * σ^12)) * ϵσ12_unit
+    end
+    n_pairs = n * (n + 1) / 2
+    # Every atom decoupled leaves no pairs, where the correction is zero rather than 0/0
+    ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
+    ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
+    return disp_corr_factors(cutoff, ϵσ6_mean, ϵσ12_mean, n, F6, F12, EC)
+end
+
+# The types of the factors of a Lennard-Jones dispersion correction for an atom
+function lj_disp_corr_types(cutoff, at)
+    rc = cutoff.dist_cutoff
+    term_6_example  = first(at.ϵ) * first(at.σ)^6
+    term_12_example = first(at.ϵ) * first(at.σ)^12
+    return typeof(-(term_6_example / rc^3)), typeof(term_12_example / rc^9),
+           typeof(term_6_example / rc^6)
+end
+
+lj_pair_params(dc) = (atom_i, atom_j) -> (1, σ_mixing(dc.σ_mix, atom_i, atom_j),
+                                          ϵ_mixing(dc.ϵ_mix, atom_i, atom_j))
+
+function LJDispersionCorrection(atoms::AbstractArray,
+                                cutoff,
+                                σ_mix=LorentzMixing(),
+                                ϵ_mix=GeometricMixing())
+    cutoff_used = disp_corr_cutoff(cutoff)
+    atoms_cpu = from_device(atoms)
+    F6, F12, EC = lj_disp_corr_types(cutoff_used, first(atoms_cpu))
+    dc = LJDispersionCorrection(zero(F6), zero(F12), zero(EC), cutoff_used, σ_mix, ϵ_mix,
+                                identical_group_pairs(atoms_cpu))
+    return update_cached_parameters(dc, atoms_cpu)
+end
+
+# Recompute the factors from the atoms, which may have injected parameters
+function update_cached_parameters(dc::LJDispersionCorrection, atoms)
+    factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
+            from_device(dc.group_pairs), atoms, Float64(length(atoms)), lj_pair_params(dc),
+            typeof(dc.factor_6), typeof(dc.factor_12), typeof(dc.energy_const))
+    return LJDispersionCorrection(factor_6, factor_12, energy_const, dc.cutoff, dc.σ_mix,
+                                  dc.ϵ_mix, dc.group_pairs)
 end
 
 # The fields of an atom other than its index, as a tuple
@@ -241,240 +367,240 @@ end
     return Expr(:tuple, (:(getfield(atom, $(QuoteNode(fn)))) for fn in fields)...)
 end
 
-# Group atoms that are identical apart from their index, returning one atom from each
-#   group and the number of atoms in each group, in order of first appearance
-function identical_atom_groups(atoms)
-    group_atoms = eltype(atoms)[]
+#=
+The pairs of groups of atoms that are identical apart from their index, as the index of the
+    first atom of each group and the number of atom pairs, including the pair of each atom
+    with itself, in order of first appearance.
+The sum over atom pairs is taken over these, which avoids a loop over all n_atoms^2 pairs.
+Atoms of the same type are given the same injected parameters, so a group stays identical.
+=#
+function identical_group_pairs(atoms)
+    group_firsts = Int32[]
     group_counts = Int[]
-    isempty(atoms) && return group_atoms, group_counts
     K = (isconcretetype(eltype(atoms)) ? typeof(atom_group_key(first(atoms))) : Any)
     group_inds = Dict{K, Int}()
-    for atom in atoms
+    for (i, atom) in enumerate(atoms)
         gi = get!(group_inds, atom_group_key(atom)) do
-            push!(group_atoms, atom)
+            push!(group_firsts, i)
             push!(group_counts, 0)
-            length(group_atoms)
+            length(group_firsts)
         end
         group_counts[gi] += 1
     end
-    return group_atoms, group_counts
+    return [(group_firsts[gi], group_firsts[gj],
+             gi == gj ? (group_counts[gi] * (group_counts[gi] + 1)) ÷ 2 :
+                        group_counts[gi] * group_counts[gj])
+            for gi in eachindex(group_firsts) for gj in 1:gi]
 end
 
-Base.zero(::Type{LJDispersionCorrection{F6, F12, D, S, E}}) where {F6, F12, D, S, E} =
-    LJDispersionCorrection(zero(F6), zero(F12), zero(D), S(), E())
-Base.zero(dc::LJDispersionCorrection) = zero(typeof(dc))
+function Base.zero(dc::LJDispersionCorrection)
+    return LJDispersionCorrection(zero(dc.factor_6), zero(dc.factor_12), zero(dc.energy_const),
+                                  dc.cutoff, dc.σ_mix, dc.ϵ_mix, dc.group_pairs)
+end
 
 function Base.:+(dc1::LJDispersionCorrection, dc2::LJDispersionCorrection)
     return LJDispersionCorrection(
         dc1.factor_6  + dc2.factor_6,
         dc1.factor_12 + dc2.factor_12,
-        dc1.dist_cutoff,
+        dc1.energy_const + dc2.energy_const,
+        dc1.cutoff,
         dc1.σ_mix,
         dc1.ϵ_mix,
+        dc1.group_pairs,
     )
 end
 
-Unitful.ustrip(dc::LJDispersionCorrection) =
-    LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12), ustrip(dc.dist_cutoff), dc.σ_mix, dc.ϵ_mix)
+function Unitful.ustrip(dc::LJDispersionCorrection)
+    return LJDispersionCorrection(ustrip(dc.factor_6), ustrip(dc.factor_12),
+                                  ustrip(dc.energy_const), ustrip_cutoff(dc.cutoff), dc.σ_mix,
+                                  dc.ϵ_mix, dc.group_pairs)
+end
 
-
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
-                                                        inter::LJDispersionCorrection; kwargs...)
-    return (inter.factor_6 + inter.factor_12) / volume(sys)
+function disp_corr_pe(inter, sys)
+    return (inter.factor_6 + inter.factor_12) / volume(sys) + inter.energy_const
 end
 
 # The omitted LJ pairs have nonzero forces, but their isotropic average gives
-# no net force on any atom. Their virial contributions, however, do not cancel.
-#
-# For a term u(r) ∝ r^-n, r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r so each
-# diagonal component of the isotropic tail virial is (n / 3)U_n. The r^-6 and 
-# r^-12 terms therefore contribute 2U6 and 4U12, respectively.
-#
-# This is the "mechanical" tail virial.
+#   no net force on any atom. Their virial contributions, however, do not cancel,
+#   see `disp_corr_virial_weights`.
+function disp_corr_virial!(buffers, sys, inter)
+    vol = volume(sys)
+    w6, w12 = disp_corr_virial_weights(inter.cutoff)
+    w = w6 * inter.factor_6 / vol + w12 * inter.factor_12 / vol
+    for d in axes(buffers.virial, 1)
+        buffers.virial[d, d] += w
+    end
+    return buffers
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                        inter::LJDispersionCorrection; kwargs...)
+    return disp_corr_pe(inter, sys)
+end
+
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
         fs, sys, inter::LJDispersionCorrection;
         buffers=nothing,
         needs_vir=false,
         kwargs...)
-
     if needs_vir
-        vol = volume(sys)
-        U6  = inter.factor_6  / vol
-        U12 = inter.factor_12 / vol
-
-        w = 2 * U6 + 4 * U12
-
-        for d in axes(buffers.virial, 1)
-            buffers.virial[d, d] += w
-        end
+        disp_corr_virial!(buffers, sys, inter)
     end
-
     return fs
 end
 
+AtomsCalculators.zero_forces(sys::System, ::LJDispersionCorrection) = zero_forces(sys)
+
+concurrent_with_pairwise(::LJDispersionCorrection) = true
+
 @doc raw"""
-    LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
+    LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
 
 The long-range dispersion correction for the [`LennardJones`](@ref) interaction, scaled by λ for
-alchemical transformations.
+alchemical transformations, the λ version of [`LJDispersionCorrection`](@ref).
 
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LJDispersionCorrection`](@ref) to this type.
 Approximately represents contributions from beyond the cutoff distance.
-Should be used alongside the [`LennardJones`](@ref) pairwise interaction when the long-range
-correction to the potential energy is required.
-The potential energy is defined as
+For a [`DistanceCutoff`](@ref) the potential energy is defined as
 ```math
 E = \frac{8 \pi N^2}{V} \left( \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{12} \right>}{9 r_c^9} - \frac{\left< \lambda_{ij} \epsilon_{ij} \sigma_{ij}^{6} \right>}{3 r_c^3} \right)
 ```
-where the averages run over all pairs and `N` is the *effective* particle count — dual topology
-duplicates a site as a real atom plus a virtual one, whose couplings sum to 1.
+and the other cutoffs are treated as in [`LJDispersionCorrection`](@ref).
+The averages run over all pairs, ``\lambda_{ij}`` is the steric coupling of the pair
+that `scheduler` gives from the `λ` of the atoms mixed with `λ_mix` and their alchemical
+roles, and ``N`` is the effective number of atoms, since dual topology duplicates an atom as
+a real atom and a virtual one whose couplings sum to 1.
 
-`λ_ij` is applied exactly once per pair, so the tail is as linear in the coupling as the explicit
-pairwise term. Beyond the
-cutoff a soft core has converged to plain LJ, so no soft-core factor enters here.
+``\lambda_{ij}`` is applied exactly once per pair, so the correction is as linear in the
+coupling as the explicit pairwise term. Beyond the cutoff a soft core has converged to the
+plain Lennard-Jones potential, so no soft-core factor enters here.
 
-The factors are computed once from the λ carried by `atoms` and **frozen**: changing `atom.λ`
-afterwards has no effect, so rebuild the interaction instead.
-The number of atoms and atom σ and ϵ values are assumed not to change after setup (the box
-volume can change).
+The factors are computed once from the `λ` of `atoms`, so changing the `λ` of the atoms
+directly has no effect; [`Molly.set_lambda!`](@ref) recomputes them.
+The number of atoms is assumed not to change after setup, and [`inject_gradients`](@ref)
+recomputes the correction from injected σ and ϵ values, including its gradients.
 Only compatible with 3D systems.
-Not compatible with cutoffs other than [`DistanceCutoff`](@ref).
 """
-struct LJDispersionCorrectionλ{F6,F12, D,S,E,SCH}
+mutable struct LJDispersionCorrectionλ{F6, F12, EC, C, L, S, E, SCH, P}
+    # Mutable for the reason given in `LJDispersionCorrection`
     factor_6::F6
     factor_12::F12
-    dist_cutoff::D
+    energy_const::EC
+    cutoff::C
+    λ_mix::L
     σ_mix::S
     ϵ_mix::E
     # Kept so that `set_lambda!` can rebuild the factors, which are precomputed from the coupling
     scheduler::SCH
+    # The interacting pairs of classes of atoms, as in `lambda_class_pairs`, and the effective
+    #   number of atoms, so that injected parameters can be taken up
+    class_pairs::P
+    n_eff::Float64
 end
 
-# The scheduler is a keyword so that this does not clash with the type's own 6 field constructor
-function LJDispersionCorrectionλ(atoms, dist_cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
-    T = typeof(ustrip(dist_cutoff))
-    n_atoms = length(atoms)
-    atoms_cpu = from_device(atoms)
-    at = atoms_cpu[1]
-
-    # Representative terms for units and final factor types.
-    if scheduler.dual
-        term_6_example  = at.ϵ * at.σ^6
-        term_12_example = at.ϵ * at.σ^12
-    else
-        term_6_example  = at.ϵ[1] * at.σ[1]^6
-        term_12_example = at.ϵ[1] * at.σ[1]^12
-    end
-
-    # Accumulate pair sums in Float64 for precision.
-    Tacc = Float64
-
-    ϵσ6_unit  = unit(term_6_example)
-    ϵσ12_unit = unit(term_12_example)
-
-    ϵσ6_sum  = zero(Tacc) * ϵσ6_unit
-    ϵσ12_sum = zero(Tacc) * ϵσ12_unit
-
-    # Class the atoms by (σ, ϵ, λ, role) and count them. The counts are plain integer particle
-    # counts: the coupling is applied once per class *pair* below. Folding it into the counts as
-    # well would make a pair pick up s_i·s_j, i.e. λ² for alchemical–alchemical pairs.
-    #
-    # Every atom is classed on its own σ/ϵ. OpenFE zeroes ϵ for the alchemical roles here, but
-    # only because it moves those atoms into a `CustomNonbondedForce` carrying a second
-    # correction of its own; Molly has one correction covering every pair, so zeroing would
-    # simply lose them.
-    S = typeof(at.σ)
-    E = typeof(at.ϵ)
-    E0 = zero.(at.ϵ)
-    classCounts = Dict{Tuple{S, E, T, Int32}, Int}()
-    for i in 1:n_atoms
-        atom_i = atoms_cpu[i]
-        if scheduler isa OpenFEScheduler && atom_i.alch_role != EnvRole
-            key = (atom_i.σ, E0, atom_i.λ, atom_i.alch_role)
-        else
-            key = (atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+#=
+The pairs of classes of atoms with the same type, σ, ϵ, λ and alchemical role that interact, as
+    the index of the first atom of each class and the number of atom pairs, and the effective
+    number of atoms, for the λ dispersion corrections.
+The type is part of the class since atoms of the same type are given the same injected
+    parameters, so a class stays uniform.
+=#
+function lambda_class_pairs(atoms_cpu, scheduler)
+    # Class the atoms and count them. The counts are plain integer particle counts: the coupling
+    # is applied once per class *pair*. Folding it into the counts as well would make a pair pick
+    # up s_i·s_j, i.e. λ² for alchemical–alchemical pairs.
+    class_inds = Dict{Any, Int}()
+    class_firsts, class_counts = Int32[], Int[]
+    for (i, atom_i) in enumerate(atoms_cpu)
+        key = (atom_i.atom_type, atom_i.σ, atom_i.ϵ, atom_i.λ, atom_i.alch_role)
+        ci = get!(class_inds, key) do
+            push!(class_firsts, i)
+            push!(class_counts, 0)
+            length(class_firsts)
         end
-        classCounts[key] = get(classCounts, key, 0) + 1
+        class_counts[ci] += 1
     end
-    rep(key) = Atom(σ=key[1], ϵ=key[2], λ=key[3], alch_role=key[4])
 
     # A dual topology hybrid excludes every pair of an A side atom with a B side atom, so those
     #   class pairs carry no interaction and must not be counted
     a_side, b_side = (DeleteRole, CoreDRole), (InsertRole, CoreIRole)
     excluded_pair(r1, r2) = (r1 in a_side && r2 in b_side) || (r1 in b_side && r2 in a_side)
-    ks = collect(keys(classCounts))
-    for a in eachindex(ks), b in 1:a
-        k1, k2 = ks[a], ks[b]
-        excluded_pair(k1[4], k2[4]) && continue
-        n1, n2 = classCounts[k1], classCounts[k2]
-        npair = Tacc(a == b ? (n1 * (n1 + 1)) / 2 : n1 * n2)
-        λ, _, _, σ, ϵ = λ_params_function(scheduler, λ_mix, σ_mix, ϵ_mix, rep(k1), rep(k2), false)
-        ϵσ6_sum  += Tacc(ustrip(ϵσ6_unit,  λ * ϵ * σ^6 )) * npair * ϵσ6_unit
-        ϵσ12_sum += Tacc(ustrip(ϵσ12_unit, λ * ϵ * σ^12)) * npair * ϵσ12_unit
-    end
+    role(ci) = atoms_cpu[class_firsts[ci]].alch_role
+    class_pairs = [(class_firsts[a], class_firsts[b],
+                    a == b ? (class_counts[a] * (class_counts[a] + 1)) ÷ 2 :
+                             class_counts[a] * class_counts[b])
+                   for a in eachindex(class_firsts) for b in 1:a
+                   if !excluded_pair(role(a), role(b))]
 
     # Dual topology duplicates every core site (a real atom plus a massless virtual site) and
     # carries both ligands' unique atoms, so `length(atoms)` is not the physical particle count.
     # Weighting by the steric coupling recovers it: (1-λ)·real + λ·virtual = 1 per site. Single
     # topology returns one(λ) throughout, so this is just the atom count there.
-    n_eff = Tacc(sum(n * first(scale_sterics(scheduler, key[3], key[4], Val(scheduler.dual)))
-                     for (key, n) in classCounts))
-    n_pairs = n_eff * (n_eff + 1) / 2
+    n_eff = Float64(sum(n * first(scale_sterics(scheduler, atoms_cpu[i].λ, atoms_cpu[i].alch_role,
+                                                Val(scheduler.dual)))
+                        for (i, n) in zip(class_firsts, class_counts)))
+    return class_pairs, n_eff
+end
 
-    # Every atom decoupled leaves no pairs, where the correction is zero rather than 0/0
-    ϵσ6_mean  = iszero(n_pairs) ? zero(ϵσ6_sum)  : ϵσ6_sum  / n_pairs
-    ϵσ12_mean = iszero(n_pairs) ? zero(ϵσ12_sum) : ϵσ12_sum / n_pairs
+# An atom as it enters the λ dispersion corrections. OpenFE zeroes ϵ for the alchemical roles,
+#   since it moves those atoms into a `CustomNonbondedForce` with a correction of its own.
+function lambda_disp_corr_atom(scheduler, atom)
+    if scheduler isa OpenFEScheduler && atom.alch_role != EnvRole
+        return Atom(atom.index, atom.atom_type, atom.mass, atom.charge, atom.σ, zero.(atom.ϵ),
+                    atom.λ, atom.alch_role)
+    else
+        return atom
+    end
+end
 
-    π_acc = Tacc(π)
+function lj_lambda_pair_params(dc)
+    return function (atom_i, atom_j)
+        λ, _, _, σ, ϵ = λ_params_function(dc.scheduler, dc.λ_mix, dc.σ_mix, dc.ϵ_mix,
+                                          lambda_disp_corr_atom(dc.scheduler, atom_i),
+                                          lambda_disp_corr_atom(dc.scheduler, atom_j), false)
+        return λ, σ, ϵ
+    end
+end
 
-    factor_6_acc  = 8 * π_acc * n_eff^2 * (-ϵσ6_mean  / (Tacc(3) * dist_cutoff^3))
-    factor_12_acc = 8 * π_acc * n_eff^2 * ( ϵσ12_mean / (Tacc(9) * dist_cutoff^9))
+# The scheduler is a keyword so that this does not clash with the type's own field constructor
+function LJDispersionCorrectionλ(atoms, cutoff, λ_mix, σ_mix, ϵ_mix; scheduler)
+    cutoff_used = disp_corr_cutoff(cutoff)
+    atoms_cpu = from_device(atoms)
+    F6, F12, EC = lj_disp_corr_types(cutoff_used, first(atoms_cpu))
+    class_pairs, n_eff = lambda_class_pairs(atoms_cpu, scheduler)
+    dc = LJDispersionCorrectionλ(zero(F6), zero(F12), zero(EC), cutoff_used, λ_mix, σ_mix,
+                                 ϵ_mix, scheduler, class_pairs, n_eff)
+    return update_cached_parameters(dc, atoms_cpu)
+end
 
-    F6 = typeof(-(term_6_example / dist_cutoff^3))
-    F12 = typeof(term_12_example / dist_cutoff^9)
-
-    return LJDispersionCorrectionλ(
-        convert(F6, factor_6_acc),
-        convert(F12, factor_12_acc),
-        dist_cutoff,
-        σ_mix,
-        ϵ_mix,
-        scheduler,
-    )
+function update_cached_parameters(dc::LJDispersionCorrectionλ, atoms)
+    factor_6, factor_12, energy_const = lj_disp_corr_factors(dc.cutoff,
+            from_device(dc.class_pairs), atoms, dc.n_eff, lj_lambda_pair_params(dc),
+            typeof(dc.factor_6), typeof(dc.factor_12), typeof(dc.energy_const))
+    return LJDispersionCorrectionλ(factor_6, factor_12, energy_const, dc.cutoff, dc.λ_mix,
+                                   dc.σ_mix, dc.ϵ_mix, dc.scheduler, dc.class_pairs, dc.n_eff)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                         inter::LJDispersionCorrectionλ; kwargs...)
-    return (inter.factor_6 + inter.factor_12) / volume(sys)
+    return disp_corr_pe(inter, sys)
 end
 
-# The omitted LJ pairs have nonzero forces, but their isotropic average gives
-# no net force on any atom. Their virial contributions, however, do not cancel.
-#
-# For a term u(r) ∝ r^-n, r ⋅ f(r) = n ⋅ u(r), where f(r) = ∂u(r)/∂r so each
-# diagonal component of the isotropic tail virial is (n / 3)U_n. The r^-6 and 
-# r^-12 terms therefore contribute 2U6 and 4U12, respectively.
-#
-# This is the "mechanical" tail virial.
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
         fs, sys, inter::LJDispersionCorrectionλ;
         buffers=nothing,
         needs_vir=false,
         kwargs...)
-
     if needs_vir
-        vol = volume(sys)
-        U6  = inter.factor_6  / vol
-        U12 = inter.factor_12 / vol
-
-        w = 2 * U6 + 4 * U12
-
-        for d in axes(buffers.virial, 1)
-            buffers.virial[d, d] += w
-        end
+        disp_corr_virial!(buffers, sys, inter)
     end
-
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::LJDispersionCorrectionλ) = zero_forces(sys)
+
+concurrent_with_pairwise(::LJDispersionCorrectionλ) = true
 
 @inline function overlap_pe_lj_softcore_beutler(dr, energy_units, C12, C6, λ, σ6_shift)
     if iszero_value(σ6_shift)
@@ -529,12 +655,16 @@ end
 end
 
 @doc raw"""
-    LennardJonesScaled(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, λ_mixing,
-                       scheduler, weight_special)
+    LennardJonesScaled(; cutoff=NoCutoff(), use_neighbors=true,
+                       shortcut=Molly.LJZeroShortcut(), σ_mixing=Molly.LorentzMixing(),
+                       ϵ_mixing=Molly.GeometricMixing(), λ_mixing=Molly.MinimumMixing(),
+                       scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
-The Lennard-Jones 6-12 interaction between two atoms scaled by an alchemical steric scheduler,
-without a soft core.
+The Lennard-Jones 6-12 interaction between two atoms scaled by λ without a soft core, the λ
+version of [`LennardJones`](@ref).
 
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `lj_softcore=:scaled`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = 4\lambda\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
@@ -543,12 +673,12 @@ and the force on each atom by
 ```math
 \vec{F}_i = \frac{24\lambda\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
 ```
-where ``\lambda`` is the steric coupling of the pair, which the scheduler takes from the
-``\lambda`` of the atoms and their alchemical roles.
+where ``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
 
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means the
-atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 As there is no soft core the energy diverges when an atom that is being inserted or deleted
 overlaps another one, so this is for a transformation where that does not happen, for example
 one where only parameters change.
@@ -557,7 +687,7 @@ between the end states instead.
 """
 @kwdef struct LennardJonesScaled{C, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -627,14 +757,16 @@ end
         return zero_pairwise_force(dr, force_units)
     end
 
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
     if iszero_value(r)
         return zero_pairwise_force(dr, force_units)
     end
+    inv_r = inv(r)
 
     params = (σ^2, ϵ)
     f = force_cutoff(inter.cutoff, inter, r, params)
-    fdr = λ * (f / r) * dr
+    fdr = (λ * f * inv_r) * dr
     return special ? fdr * inter.weight_special : fdr
 end
 
@@ -677,40 +809,45 @@ function pairwise_pe(::LennardJonesScaled, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCoreBeutler(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
-                                ϵ_mixing, weight_special)
+    LennardJonesSoftCoreBeutler(; cutoff=NoCutoff(), α=0.3, use_neighbors=true,
+                                shortcut=Molly.LJZeroShortcut(),
+                                σ_mixing=Molly.LorentzMixing(),
+                                ϵ_mixing=Molly.GeometricMixing(),
+                                λ_mixing=Molly.MinimumMixing(),
+                                scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core, used for
 the appearing and disappearing of atoms.
 
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `lj_softcore=:beutler`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \lambda \left(\frac{C^{(12)}}{r_{LJ}^{12}} - \frac{C^{(6)}}{r_{LJ}^{6}}\right)
 ```
 and the force on each atom by
 ```math
-\vec{F}_i = \lambda \left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r_{ij}}}{r_{ij}}
+\vec{F}_i = \lambda \left(\left(\frac{12C^{(12)}}{r_{LJ}^{13}} - \frac{6C^{(6)}}{r_{LJ}^7}\right)\left(\frac{r_{ij}}{r_{LJ}}\right)^5\right) \frac{\vec{r}_{ij}}{r_{ij}}
 ```
 where
 ```math
-r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6\right)^{1/6}
+r_{LJ} = \left(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r_{ij}^6\right)^{1/6}, \quad
+C^{(12)} = 4\varepsilon_{ij}\sigma_{ij}^{12}, \quad
+C^{(6)} = 4\varepsilon_{ij}\sigma_{ij}^{6}
 ```
-and
-```math
-C^{(12)} = 4\epsilon\sigma^{12}
-C^{(6)} = 4\epsilon\sigma^{6}
-```
-
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means
-the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct LennardJonesSoftCoreBeutler{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.3
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -909,46 +1046,51 @@ function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_shift, λ):
 end
 
 @doc raw"""
-    LennardJonesSoftCoreGapsys(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
-                               ϵ_mixing, weight_special)
+    LennardJonesSoftCoreGapsys(; cutoff=NoCutoff(), α=0.85, use_neighbors=true,
+                               shortcut=Molly.LJZeroShortcut(),
+                               σ_mixing=Molly.LorentzMixing(),
+                               ϵ_mixing=Molly.GeometricMixing(),
+                               λ_mixing=Molly.MinimumMixing(),
+                               scheduler=Molly.DefaultLambdaScheduler(), weight_special=1)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core potential, used for
 the appearing and disappearing of atoms.
 
 See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
+[`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) convert each
+[`LennardJones`](@ref) to this type with `lj_softcore=:gapsys`.
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
-\lambda \left( \frac{C^{(12)}}{r_{ij}^{12}} - \frac{C^{(6)}}{r_{ij}^{6}} \right), & \text{if} & r \ge r_{LJ} \\
-\lambda \left( (\frac{78C^{(12)}}{r_{LJ}^{14}}-\frac{21C^{(6)}}{r_{LJ}^{8}})r_{ij}^2 - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}})r_{ij} + \frac{91C^{(12)}}{r_{LJ}^{12}}-\frac{28C^{(6)}}{r_{LJ}^{6}} \right), & \text{if} & r \lt r_{LJ} \\
+\lambda \left( \frac{C^{(12)}}{r_{ij}^{12}} - \frac{C^{(6)}}{r_{ij}^{6}} \right), & \text{if} & r_{ij} \ge r_{LJ} \\
+\lambda \left( (\frac{78C^{(12)}}{r_{LJ}^{14}}-\frac{21C^{(6)}}{r_{LJ}^{8}})r_{ij}^2 - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}})r_{ij} + \frac{91C^{(12)}}{r_{LJ}^{12}}-\frac{28C^{(6)}}{r_{LJ}^{6}} \right), & \text{if} & r_{ij} \lt r_{LJ} \\
 \end{array} \right.
 ```
 and the force on each atom by
 ```math
 \vec{F}_i = \left\{ \begin{array}{cl}
-\lambda \left( \frac{12C^{(12)}}{r_{ij}^{13}} - \frac{6C^{(6)}}{r_{ij}^{7}} \right)\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \ge r_{LJ} \\
-\lambda \left( (\frac{-156C^{(12)}}{r_{LJ}^{14}}+\frac{42C^{(6)}}{r_{LJ}^{8}})r_{ij} - (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}}) \right)\frac{\vec{r_{ij}}}{r_{ij}}, & \text{if} & r \lt r_{LJ} \\
+\lambda \left( \frac{12C^{(12)}}{r_{ij}^{13}} - \frac{6C^{(6)}}{r_{ij}^{7}} \right)\frac{\vec{r}_{ij}}{r_{ij}}, & \text{if} & r_{ij} \ge r_{LJ} \\
+\lambda \left( (\frac{-156C^{(12)}}{r_{LJ}^{14}}+\frac{42C^{(6)}}{r_{LJ}^{8}})r_{ij} + (\frac{168C^{(12)}}{r_{LJ}^{13}}-\frac{48C^{(6)}}{r_{LJ}^{7}}) \right)\frac{\vec{r}_{ij}}{r_{ij}}, & \text{if} & r_{ij} \lt r_{LJ} \\
 \end{array} \right.
 ```
 where
 ```math
-r_{LJ} = \alpha \left( \frac{26C^{(12)}(1-\lambda)}{7C^{(6)}} \right)^{\frac{1}{6}}
+r_{LJ} = \alpha \left( \frac{26C^{(12)}(1-\lambda)}{7C^{(6)}} \right)^{\frac{1}{6}}, \quad
+C^{(12)} = 4\varepsilon_{ij}\sigma_{ij}^{12}, \quad
+C^{(6)} = 4\varepsilon_{ij}\sigma_{ij}^{6}
 ```
-and
-```math
-C^{(12)} = 4\epsilon\sigma^{12}
-C^{(6)} = 4\epsilon\sigma^{6}
-```
-
-If ``\lambda`` is 1.0, this gives the standard [`LennardJones`](@ref) potential and means
-the atom is fully turned on.
-If ``\lambda`` is zero the interaction is turned off.
+and ``\sigma_{ij}`` and ``\varepsilon_{ij}`` are mixed with `σ_mixing` and `ϵ_mixing`.
+``\lambda`` is the steric coupling of the pair, which `scheduler`, a
+[`Molly.LambdaScheduler`](@ref), gives from the `λ` of the atoms mixed with `λ_mixing` and
+their alchemical roles.
+If ``\lambda`` is 1 this gives the standard [`LennardJones`](@ref) potential, and if it is 0
+the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct LennardJonesSoftCoreGapsys{C, A, H, S, E, LM, SCH, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 0.85
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = GeometricMixing()
@@ -1049,7 +1191,6 @@ end
     val = (26 * σ6 * (1 - (λ*λR))) / 7
     R = inter.α * sqrt(cbrt(val))
 
-    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f * inv(r)) * dr
@@ -1123,7 +1264,6 @@ end
         return special ? pe * inter.weight_special : pe
     end
 
-    # Pass SoftCore params tuple (Length 4)
     params = (C12, C6, λ, R)
     pe = pe_cutoff(cutoff, inter, r, params)
     return special ? pe * inter.weight_special : pe
@@ -1154,44 +1294,45 @@ end
 end
 
 @doc raw"""
-    AshbaughHatch(; cutoff, use_neighbors, shortcut, ϵ_mixing, σ_mixing,
-                  λ_mixing, weight_special)
+    AshbaughHatch(; cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+                  σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.LorentzMixing(),
+                  λ_mixing=Molly.LorentzMixing(), weight_special=1)
 
-The Ashbaugh-Hatch potential ($V_{\text{AH}}$) is a modified Lennard-Jones ($V_{\text{LJ}}$)
-6-12 interaction between two atoms.
+The Ashbaugh-Hatch potential (``V_{\text{AH}}``) is a modified Lennard-Jones
+(``V_{\text{LJ}}``) 6-12 interaction between two atoms.
 
+See [Ashbaugh and Hatch 2008](https://doi.org/10.1021/ja802124e).
 The potential energy is defined as
 ```math
-V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \\
+V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
 ```
 ```math
 V_{\text{AH}}(r_{ij}) =
     \begin{cases}
-      V_{\text{LJ}}(r_{ij}) +\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
-       λ_{ij}V_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+      V_{\text{LJ}}(r_{ij}) + \varepsilon_{ij}(1-\lambda_{ij}), & r_{ij} \leq 2^{1/6}\sigma_{ij} \\
+      \lambda_{ij} V_{\text{LJ}}(r_{ij}), & r_{ij} > 2^{1/6}\sigma_{ij}
     \end{cases}
 ```
 and the force on each atom by
 ```math
 \vec{F}_{\text{AH}} =
     \begin{cases}
-      F_{\text{LJ}}(r_{ij})  &,  r_{ij} \leq  2^{1/6}σ  \\
-       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+      \vec{F}_{\text{LJ}}(r_{ij}), & r_{ij} \leq 2^{1/6}\sigma_{ij} \\
+      \lambda_{ij} \vec{F}_{\text{LJ}}(r_{ij}), & r_{ij} > 2^{1/6}\sigma_{ij}
     \end{cases}
 ```
 where
 ```math
-\begin{aligned}
-\vec{F}_{\text{LJ}}\
-&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]  \vec{r_{ij}}
-\end{aligned}
+\vec{F}_{\text{LJ}}(r_{ij}) = \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
 ```
 
-If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
+``\lambda_{ij}`` is the `λ` of the atoms mixed with `λ_mixing`, which here is a
+per-atom hydropathy parameter rather than an alchemical coupling.
+If ``\lambda_{ij}`` is 1 this gives the standard [`LennardJones`](@ref) potential.
 """
 @kwdef struct AshbaughHatch{C, H, S, E, L, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
-    use_neighbors::Bool = false
+    use_neighbors::Bool = true
     shortcut::H = LJZeroShortcut()
     σ_mixing::S = LorentzMixing()
     ϵ_mixing::E = LorentzMixing()
@@ -1250,12 +1391,14 @@ parameter_fields(::Type{<:AshbaughHatch}) = ((:weight_special, "weight_14"),)
     λ = λ_mixing(inter.λ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -1331,7 +1474,7 @@ V(r_{ij}) = 4 w_{14} \varepsilon^{14}_{ij} \left[\left(\frac{\sigma^{14}_{ij}}{r
 ```
 with ``w_{14}`` the 1-4 weight.
 
-The λ versions for alchemical systems are [`LennardJones14Scaled`](@ref),
+The λ versions for alchemical systems are [`Molly.LennardJones14Scaled`](@ref),
 [`LennardJones14SoftCoreBeutler`](@ref) and [`LennardJones14SoftCoreGapsys`](@ref).
 """
 struct LennardJones14{S, E, W}
@@ -1377,14 +1520,16 @@ end
 end
 
 @doc raw"""
-    LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing, scheduler)
+    LennardJones14Scaled(; σ14_mixed, ϵ14_mixed, weight_14, λ_mixing=Molly.MinimumMixing(),
+                         scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms scaled by λ without a soft core, the λ
-version of [`LennardJones14`](@ref) built by `to_lambda_function(inter, ScaledSoftCore())`.
+version of [`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and
+[`RelativeFESystem`](@ref) convert to this type with `lj_softcore=:scaled`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
-are those of [`LennardJonesScaled`](@ref) with the σ and ϵ of the pair, weighted by `weight_14`,
+are those of [`Molly.LennardJonesScaled`](@ref) with the σ and ϵ of the pair, weighted by `weight_14`,
 and the pair is coupled like any other Lennard-Jones pair of the alchemical system.
 """
 @kwdef struct LennardJones14Scaled{S, E, W, LM, SCH}
@@ -1394,6 +1539,9 @@ and the pair is coupled like any other Lennard-Jones pair of the alchemical syst
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+parameter_prefix(::LennardJones14Scaled, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14Scaled}) = parameter_fields(LennardJones14)
 
 function Base.zero(lj::LennardJones14Scaled)
     return LennardJones14Scaled(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed), zero(lj.weight_14),
@@ -1467,10 +1615,13 @@ end
 end
 
 @doc raw"""
-    LennardJones14SoftCoreBeutler(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
+    LennardJones14SoftCoreBeutler(; σ14_mixed, ϵ14_mixed, weight_14, α=0.5,
+                                  λ_mixing=Molly.MinimumMixing(),
+                                  scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Beutler soft core, the λ version of
-[`LennardJones14`](@ref) built by `to_lambda_function(inter, BeutlerSoftCore())`.
+[`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
+convert to this type with `lj_softcore=:beutler`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
@@ -1485,6 +1636,9 @@ are those of [`LennardJonesSoftCoreBeutler`](@ref) with the σ and ϵ of the pai
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+parameter_prefix(::LennardJones14SoftCoreBeutler, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14SoftCoreBeutler}) = parameter_fields(LennardJones14)
 
 function Base.zero(lj::LennardJones14SoftCoreBeutler)
     return LennardJones14SoftCoreBeutler(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
@@ -1586,10 +1740,13 @@ end
 end
 
 @doc raw"""
-    LennardJones14SoftCoreGapsys(; σ14_mixed, ϵ14_mixed, weight_14, α, λ_mixing, scheduler)
+    LennardJones14SoftCoreGapsys(; σ14_mixed, ϵ14_mixed, weight_14, α=0.85,
+                                 λ_mixing=Molly.MinimumMixing(),
+                                 scheduler=Molly.DefaultLambdaScheduler())
 
 The 1-4 Lennard-Jones interaction of a pair of atoms with a Gapsys soft core, the λ version of
-[`LennardJones14`](@ref) built by `to_lambda_function(inter, GapsysSoftCore())`.
+[`LennardJones14`](@ref), which [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref)
+convert to this type with `lj_softcore=:gapsys`.
 
 Force fields that give the 1-4 pairs their own σ and ϵ, such as CHARMM, keep them in a
 [`LennardJones14`](@ref) list rather than in the pairwise Lennard-Jones. The energy and the force
@@ -1604,6 +1761,9 @@ are those of [`LennardJonesSoftCoreGapsys`](@ref) with the σ and ϵ of the pair
     λ_mixing::LM = MinimumMixing()
     scheduler::SCH = DefaultLambdaScheduler()
 end
+
+parameter_prefix(::LennardJones14SoftCoreGapsys, inter_type) = "inter_LJ14_$(inter_type)_"
+parameter_fields(::Type{<:LennardJones14SoftCoreGapsys}) = parameter_fields(LennardJones14)
 
 function Base.zero(lj::LennardJones14SoftCoreGapsys)
     return LennardJones14SoftCoreGapsys(zero.(lj.σ14_mixed), zero.(lj.ϵ14_mixed),
@@ -1727,6 +1887,8 @@ end
 #   interpolates the end states, as for the pairwise soft cores
 const LennardJones14λ = Union{LennardJones14SoftCoreBeutler, LennardJones14SoftCoreGapsys,
                               LennardJones14Scaled}
+
+single_topology(inter::LennardJones14λ) = !inter.scheduler.dual
 
 @inline function lj14_lambda_params(inter::LennardJones14λ, atom_i, atom_l)
     λ_glob = λ_mixing(inter.λ_mixing, (atom_i, atom_l))

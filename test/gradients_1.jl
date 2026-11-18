@@ -76,7 +76,7 @@ end
     # The analytic force should be the negative gradient of the potential energy
     function test_force_is_energy_grad(name, coords, atoms, boundary; pairwise_inters=(),
                                        specific_inter_lists=(), general_inters=(),
-                                       neighbor_finder=NoNeighborFinder(), tol=1e-10)
+                                       neighbor_finder=nothing, tol=1e-10)
         sys = System(
             atoms=atoms,
             coords=coords,
@@ -112,42 +112,30 @@ end
     end
 
     pairwise_inters = [
-        ("LennardJones NoCutoff"    , LennardJones(use_neighbors=true)),
-        ("LennardJones Distance"    , LennardJones(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones ShiftedPot"  , LennardJones(cutoff=ShiftedPotentialCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones ShiftedForce", LennardJones(cutoff=ShiftedForceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones CubicSpline" , LennardJones(cutoff=CubicSplineCutoff(T(0.8), nb_cutoff),
-                                                    use_neighbors=true)),
-        ("LennardJones Polynomial"  , LennardJones(cutoff=PolynomialCutoff(T(0.8), nb_cutoff),
-                                                    use_neighbors=true)),
-        ("SoftSphere"               , SoftSphere(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
-        ("Mie"                      , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+        ("LennardJones NoCutoff"    , LennardJones()),
+        ("LennardJones Distance"    , LennardJones(cutoff=DistanceCutoff(nb_cutoff))),
+        ("LennardJones ShiftedPot"  , LennardJones(cutoff=ShiftedPotentialCutoff(nb_cutoff))),
+        ("LennardJones ShiftedForce", LennardJones(cutoff=ShiftedForceCutoff(nb_cutoff))),
+        ("LennardJones CubicSpline" , LennardJones(cutoff=CubicSplineCutoff(T(0.8), nb_cutoff))),
+        ("LennardJones Polynomial"  , LennardJones(cutoff=PolynomialCutoff(T(0.8), nb_cutoff))),
+        ("SoftSphere"               , SoftSphere(cutoff=DistanceCutoff(nb_cutoff))),
+        ("Mie"                      , Mie(m=T(6), n=T(12), cutoff=DistanceCutoff(nb_cutoff))),
         ("DoubleExponential"        , DoubleExponential(α=T(16.766), β=T(4.427),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
-        ("AshbaughHatch"            , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff),
-                                                    use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
+        ("AshbaughHatch"            , AshbaughHatch(cutoff=DistanceCutoff(nb_cutoff))),
         ("LennardJonesSCBeutler"    , LennardJonesSoftCoreBeutler(α=T(0.5),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
         ("LennardJonesSCGapsys"     , LennardJonesSoftCoreGapsys(α=T(0.85),
-                                            cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true)),
+                                            cutoff=DistanceCutoff(nb_cutoff))),
         ("Coulomb"                  , Coulomb(cutoff=DistanceCutoff(nb_cutoff),
-                                                use_neighbors=true, coulomb_const=cc)),
+                                                coulomb_const=cc)),
         ("CoulombReactionField"     , CoulombReactionField(dist_cutoff=nb_cutoff,
-                                            use_neighbors=true, coulomb_const=cc)),
-        ("CoulombSCBeutler"         , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
-                                            use_neighbors=true, coulomb_const=cc)),
-        ("CoulombSCGapsys"          , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
-                                            σQ=T(1.0), use_neighbors=true,
                                             coulomb_const=cc)),
-        ("Gravity"                  , Gravity(G=T(1.0), use_neighbors=true)),
+        ("CoulombSCBeutler"         , CoulombSoftCoreBeutler(cutoff=DistanceCutoff(nb_cutoff),
+                                            coulomb_const=cc)),
+        ("CoulombSCGapsys"          , CoulombSoftCoreGapsys(cutoff=DistanceCutoff(nb_cutoff),
+                                            σQ=T(1.0), coulomb_const=cc)),
+        ("Gravity"                  , Gravity(G=T(1.0))),
     ]
     for (name, inter) in pairwise_inters
         test_force_is_energy_grad(name, coords, atoms, boundary; pairwise_inters=(inter,),
@@ -155,7 +143,7 @@ end
     end
 
     # Interactions that do not use the neighbor list take a different code path
-    lj_nonl = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
+    lj_nonl = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=false)
     test_force_is_energy_grad("LennardJones no neighbors", coords, atoms, boundary;
                                 pairwise_inters=(lj_nonl,))
 
@@ -191,7 +179,7 @@ end
                                     specific_inter_lists=(inter_list,))
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
     test_force_is_energy_grad("LJDispersionCorrection", coords, atoms, boundary;
                                 pairwise_inters=(lj,), neighbor_finder=nf,
                                 general_inters=(LJDispersionCorrection(atoms, nb_cutoff),))
@@ -215,7 +203,7 @@ end
     atoms_bd = atoms[1:n_bd]
     nf_bd = DistanceNeighborFinder(eligible=trues(n_bd, n_bd), n_steps=1,
                                     dist_cutoff=T(1.5))
-    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
 
     boundary_trc = TriclinicBoundary(
         SVector(T(4.0), T(0.0), T(0.0)),
@@ -235,8 +223,8 @@ end
                                     pairwise_inters=(lj,), neighbor_finder=nf_bd)
     end
 
-    crf = CoulombReactionField(dist_cutoff=nb_cutoff, use_neighbors=true, coulomb_const=cc)
-    lj  = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
+    crf = CoulombReactionField(dist_cutoff=nb_cutoff, coulomb_const=cc)
+    lj  = LennardJones(cutoff=DistanceCutoff(nb_cutoff))
 
     function pe_atoms(atoms, coords, boundary, pairwise_inters, neighbor_finder, neighbors)
         sys = System(
@@ -293,6 +281,106 @@ end
         @test abs(grad_fd) > eps(T) # Guard against a trivially zero gradient
         @test frac_diff < 1e-8
     end
+end
+
+@testset "Reaction field exclusion gradients" begin
+    T = Float64
+    cc = T(ustrip(Molly.coulomb_const))
+    boundary = CubicBoundary(T(3.0))
+    coords = [SVector(T(1.0), T(1.0), T(1.0)), SVector(T(1.3), T(1.2), T(1.1)),
+              SVector(T(1.6), T(1.0), T(0.8)), SVector(T(2.9), T(2.8), T(2.9)),
+              SVector(T(0.1), T(0.2), T(0.15))]
+    charges = T[0.8, -0.8, 0.5, -0.7, 0.4]
+    n_atoms = length(coords)
+    eligible = trues(n_atoms, n_atoms)
+    for (i, j) in ((1, 2), (2, 3), (1, 3), (4, 5))
+        eligible[i, j] = eligible[j, i] = false
+    end
+    nf = DistanceNeighborFinder(eligible=eligible, n_steps=1, dist_cutoff=T(1.5))
+    crf = CoulombReactionField(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
+                               solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc)
+    excl = Molly.reaction_field_exclusions(crf, eligible)
+
+    function pe_rf(coords, atoms, boundary, pairwise_inters, specific_inter_lists,
+                   neighbor_finder, neighbors)
+        sys = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            pairwise_inters=pairwise_inters,
+            specific_inter_lists=specific_inter_lists,
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+        return potential_energy(sys, neighbors; n_threads=1)
+    end
+
+    atoms = [Atom(index=i, mass=T(10.0), charge=charges[i], σ=T(0.0), ϵ=T(0.0))
+             for i in 1:n_atoms]
+    sys = System(atoms=atoms, coords=coords, boundary=boundary, pairwise_inters=(crf,),
+                 specific_inter_lists=(excl,), neighbor_finder=nf, force_units=NoUnits,
+                 energy_units=NoUnits)
+    neighbors = find_neighbors(sys; n_threads=1)
+    fs = forces(sys, neighbors; n_threads=1)
+
+    d_coords = zero(coords)
+    d_atoms = zero.(atoms)
+    autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_rf),
+        Active,
+        Duplicated(copy(coords), d_coords),
+        Duplicated(copy(atoms), d_atoms),
+        Const(boundary),
+        Const((crf,)),
+        Const((excl,)),
+        Const(nf),
+        Const(neighbors),
+    )
+    @test maximum(maximum(abs, d + f) for (d, f) in zip(d_coords, fs)) /
+            maximum(maximum(abs, f) for f in fs) < 1e-10
+
+    for atom_i in 1:n_atoms
+        grad_fd = central_fdm(6, 1)(charges[atom_i]) do q
+            atoms_mod = copy(atoms)
+            atoms_mod[atom_i] = Atom(index=atom_i, mass=T(10.0), charge=q, σ=T(0.0), ϵ=T(0.0))
+            pe_rf(coords, atoms_mod, boundary, (crf,), (excl,), nf, neighbors)
+        end
+        @test abs(grad_fd) > eps(T) # Guard against a trivially zero gradient
+        @test abs(charge(d_atoms[atom_i]) - grad_fd) / abs(grad_fd) < 1e-8
+    end
+
+    # dU/dλ with the bonded pair 1-2 inserted, as needed for thermodynamic integration
+    crf_scaled = Molly.CoulombReactionFieldScaled(dist_cutoff=T(1.1), solvent_dielectric=T(30.0),
+                                    solute_dielectric=T(2.5), use_neighbors=true, coulomb_const=cc,
+                                    scheduler=Molly.LinearLambdaScheduler())
+    excl_scaled = Molly.reaction_field_exclusions(crf_scaled, eligible)
+
+    function pe_λ(λ, coords, boundary, pairwise_inters, specific_inter_lists, neighbor_finder,
+                  neighbors, charges)
+        atoms = [Atom(i, 1, T(10.0), charges[i], T(0.0), T(0.0), (i <= 2 ? λ : one(λ)),
+                      (i <= 2 ? Molly.InsertRole : Molly.EnvRole)) for i in eachindex(charges)]
+        return pe_rf(coords, atoms, boundary, pairwise_inters, specific_inter_lists,
+                     neighbor_finder, neighbors)
+    end
+
+    # The inserted atoms only have excluded atoms within the cutoff, so dU/dλ comes from the
+    #   exclusion and self terms
+    λ0 = T(0.6)
+    grad_enzyme = autodiff(
+        set_runtime_activity(Reverse),
+        Const(pe_λ),
+        Active,
+        Active(λ0),
+        Const(coords), Const(boundary), Const((crf_scaled,)), Const((excl_scaled,)),
+        Const(nf), Const(neighbors), Const(charges),
+    )[1][1]
+    grad_fd = central_fdm(6, 1)(λ0) do λ
+        pe_λ(λ, coords, boundary, (crf_scaled,), (excl_scaled,), nf, neighbors, charges)
+    end
+    @test abs(grad_fd) > eps(T)
+    @test abs(grad_enzyme - grad_fd) / abs(grad_fd) < 1e-8
 end
 
 @testset "Differentiable PME" begin
@@ -429,8 +517,8 @@ end
     #   force, so the energy gradient and the force only agree to the accuracy of the fit
     for (name, approximate_erfc, tol) in (("approximate erfc", true , 1e-5),
                                           ("exact erfc"      , false, 1e-10))
-        coul_ewald = CoulombEwald(dist_cutoff=dist_cutoff, use_neighbors=true,
-                                  coulomb_const=cc, approximate_erfc=approximate_erfc)
+        coul_ewald = CoulombEwald(dist_cutoff=dist_cutoff, coulomb_const=cc,
+                                  approximate_erfc=approximate_erfc)
         for (inter_name, general_inter) in (
                 ("Ewald", Ewald(dist_cutoff)),
                 ("PME"  , PME(dist_cutoff, atoms, boundary; grad_safe=true, n_threads=1)),
@@ -465,6 +553,274 @@ end
             max_force = maximum(maximum(abs, f) for f in fs)
             frac_diff = maximum(maximum(abs, d + f) for (d, f) in zip(d_coords, fs)) / max_force
             @test frac_diff < tol
+        end
+    end
+end
+
+@testset "ReaxFF $quantity gradient CPU $structure_file smoothness=$smoothness_correction" for smoothness_correction in (false, true),
+        quantity in (:energy, :force_loss), structure_file in ("ethane.pdb", "water.pdb")
+    reaxff = ReaxFF(
+        force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
+        float_type=Float64,
+        array_type=Array,
+        smoothness_correction=smoothness_correction,
+    )
+
+    sys = System(
+        joinpath(data_dir, "ReaxFF", "data", structure_file),
+        reaxff;
+        boundary=CubicBoundary(2.5),
+        array_type=Array,
+        units=false,
+        eem_tolerance=1e-12
+    )
+
+    neighbors = find_neighbors(sys; n_threads=1)
+
+    function loss_function(reaxff, sys, neighbors)
+        eem = sys.general_inters[1]
+        fill!(eem.state.q, 0.0)
+
+        forces, energy = Molly.enzyme_forces_and_energy(sys, reaxff, eem; neighbors)
+        if quantity == :energy
+            return energy
+        else
+            return sqrt(sum(abs2, forces))
+        end
+    end
+
+    loss_function(reaxff, sys, neighbors)
+
+    grad_sys = Enzyme.make_zero(sys)
+    grad_reaxff = grad_sys.general_inters[2]
+
+    Enzyme.autodiff(
+        Reverse,
+        loss_function,
+        Active,
+        Duplicated(reaxff, grad_reaxff),
+        Duplicated(sys, grad_sys),
+        Const(neighbors)
+    )
+
+    function fd_general_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        dp = reaxff_new.device_params
+
+        reaxff_new.device_params = Molly.DeviceParams(
+            parameters, dp.atom_parameters, dp.bond_parameters,
+            dp.off_diagonal_parameters, dp.angle_entries,
+            dp.angle_parameters, dp.torsion_parameters,
+            dp.h_bond_parameters, dp.global_parameters,
+            dp.taper_parameters, dp.h_bond_donors, dp.h_bond_acceptors
+        )
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_atom_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        reaxff_new.device_params.atom_parameters .= parameters
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_bond_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        bonds = reaxff_new.device_params.bond_parameters
+
+        for i in eachindex(bonds)
+            bonds[i] = Molly.BondParameters(parameters[i]..., bonds[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_off_diagonal_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        pairs = reaxff_new.device_params.off_diagonal_parameters
+
+        for i in eachindex(pairs)
+            pairs[i] = Molly.OffDiagonalParameters(parameters[i]..., pairs[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_angle_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        angles = reaxff_new.device_params.angle_parameters
+
+        for i in eachindex(angles)
+            angles[i] = Molly.AngleParameters(parameters[i]..., angles[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_torsion_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        torsions = reaxff_new.device_params.torsion_parameters
+
+        for i in eachindex(torsions)
+            torsions[i] = Molly.TorsionParameters(parameters[i]..., torsions[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    function fd_h_bond_loss(parameters)
+        sys_new = deepcopy(sys)
+        reaxff_new = sys_new.general_inters[2]
+        h_bonds = reaxff_new.device_params.h_bond_parameters
+
+        for i in eachindex(h_bonds)
+            h_bonds[i] = Molly.HBondParameters(parameters[i]..., h_bonds[i].is_defined)
+        end
+
+        return loss_function(reaxff_new, sys_new, neighbors)
+    end
+
+    parameters = reaxff.device_params.general_parameters
+    fdm = central_fdm(5, 1)
+    finite_diff_gradients = grad(fdm, fd_general_loss, parameters)[1]
+
+    enzyme_gradients = grad_reaxff.device_params.general_parameters
+
+    for name in fieldnames(typeof(parameters))
+        # these parameters require updating cached values first
+        if name in (:upper_taper_radius, :cutoff_bond_order)
+            continue
+        end
+
+        @test isapprox(
+            getfield(enzyme_gradients, name),
+            getfield(finite_diff_gradients, name);
+            rtol=1e-6,
+            atol=1e-8
+        )
+    end
+
+    atom_params = reaxff.device_params.atom_parameters
+    finite_diff_atom_gradients = grad(fdm, fd_atom_loss, atom_params)[1]
+    enzyme_atom_gradients = grad_reaxff.device_params.atom_parameters
+
+    for i in eachindex(atom_params)
+        for name in fieldnames(typeof(atom_params[i]))
+            if name in (:D_ij, :r_vdW, :alpha, :ro_sigma, :ro_pi, :ro_pipi)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_atom_gradients[i], name),
+                getfield(finite_diff_atom_gradients[i], name);
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    bond_params = reaxff.device_params.bond_parameters
+    bond_names = fieldnames(eltype(bond_params))[1:end-1]
+    bond_values = [[getfield(bond, name) for name in bond_names] for bond in bond_params]
+
+    finite_diff_bond_gradients = grad(fdm, fd_bond_loss, bond_values)[1]
+    enzyme_bond_gradients = grad_reaxff.device_params.bond_parameters
+
+    for i in eachindex(bond_params)
+        for (j, name) in enumerate(bond_names)
+            if name in (:ot_corr, :ovcoord)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_bond_gradients[i], name),
+                finite_diff_bond_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    off_diagonal_params = reaxff.device_params.off_diagonal_parameters
+    off_diagonal_names = fieldnames(eltype(off_diagonal_params))[1:end-1]
+    off_diagonal_values = [[getfield(pair, name) for name in off_diagonal_names] for pair in off_diagonal_params]
+
+    finite_diff_off_diagonal_gradients = grad(fdm, fd_off_diagonal_loss, off_diagonal_values)[1]
+    enzyme_off_diagonal_gradients = grad_reaxff.device_params.off_diagonal_parameters
+
+    for i in eachindex(off_diagonal_params)
+        for (j, name) in enumerate(off_diagonal_names)
+            if name in (:gamma_w_inv_pow, :gamma_ij_inv_pow)
+                continue
+            end
+
+            @test isapprox(
+                getfield(enzyme_off_diagonal_gradients[i], name),
+                finite_diff_off_diagonal_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    angle_params = reaxff.device_params.angle_parameters
+    angle_names = fieldnames(eltype(angle_params))[1:end-1]
+    angle_values = [[getfield(angle, name) for name in angle_names] for angle in angle_params]
+
+    angle_fdm = central_fdm(5, 1; factor=100)
+    finite_diff_angle_gradients = grad(angle_fdm, fd_angle_loss, angle_values)[1]
+    enzyme_angle_gradients = grad_reaxff.device_params.angle_parameters
+
+    for i in eachindex(angle_params)
+        for (j, name) in enumerate(angle_names)
+            @test isapprox(
+                getfield(enzyme_angle_gradients[i], name),
+                finite_diff_angle_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    torsion_params = reaxff.device_params.torsion_parameters
+    torsion_names = fieldnames(eltype(torsion_params))[1:end-1]
+    torsion_values = [[getfield(torsion, name) for name in torsion_names] for torsion in torsion_params]
+
+    finite_diff_torsion_gradients = grad(fdm, fd_torsion_loss, torsion_values)[1]
+    enzyme_torsion_gradients = grad_reaxff.device_params.torsion_parameters
+
+    for i in eachindex(torsion_params)
+        for (j, name) in enumerate(torsion_names)
+            @test isapprox(
+                getfield(enzyme_torsion_gradients[i], name),
+                finite_diff_torsion_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
+        end
+    end
+
+    h_bond_params = reaxff.device_params.h_bond_parameters
+    h_bond_names = fieldnames(eltype(h_bond_params))[1:end-1]
+    h_bond_values = [[getfield(h_bond, name) for name in h_bond_names] for h_bond in h_bond_params]
+
+    finite_diff_h_bond_gradients = grad(fdm, fd_h_bond_loss, h_bond_values)[1]
+    enzyme_h_bond_gradients = grad_reaxff.device_params.h_bond_parameters
+
+    for i in eachindex(h_bond_params)
+        for (j, name) in enumerate(h_bond_names)
+            @test isapprox(
+                getfield(enzyme_h_bond_gradients[i], name),
+                finite_diff_h_bond_gradients[i][j];
+                rtol=1e-6,
+                atol=1e-8
+            )
         end
     end
 end

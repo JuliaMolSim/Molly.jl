@@ -16,7 +16,7 @@
             atoms=[Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3],
             coords=copy(coords_start),
             boundary=CubicBoundary(5.0u"nm"),
-            pairwise_inters=(LennardJones(),),
+            pairwise_inters=(LennardJones(use_neighbors=false),),
         )
 
         simulate!(sys, minimizer)
@@ -47,7 +47,7 @@
             atoms=[Atom(σ=0.4 / (2 ^ (1 / 6)), ϵ=1.0, mass=1.0) for i in 1:3],
             coords=copy(coords_start_nounits),
             boundary=CubicBoundary(5.0),
-            pairwise_inters=(LennardJones(),),
+            pairwise_inters=(LennardJones(use_neighbors=false),),
             force_units=NoUnits,
             energy_units=NoUnits,
         )
@@ -66,7 +66,7 @@
         atoms=[Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3],
         coords=copy(coords_start),
         boundary=CubicBoundary(5.0u"nm"),
-        pairwise_inters=(LennardJones(),),
+        pairwise_inters=(LennardJones(use_neighbors=false),),
         loggers=(coords=CoordinatesLogger(1), energy=PotentialEnergyLogger(1)),
     )
     for minimizer in (SteepestDescentMinimizer(tol=tol, max_steps=5, log_stream=IOBuffer()),
@@ -93,7 +93,7 @@
                                  for i in 1:3], AT),
                 coords=to_device(copy(coords_start), AT),
                 boundary=CubicBoundary(5.0u"nm"),
-                pairwise_inters=(LennardJones(),),
+                pairwise_inters=(LennardJones(use_neighbors=false),),
             )
 
             simulate!(sys, minimizer)

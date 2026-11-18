@@ -36,7 +36,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
             atoms=to_device(atoms, AT),
             coords=to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
@@ -56,6 +56,7 @@ const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
         )
 
         show(devnull, sys)
+        @test unit(scalar_pressure(sys)) == u"bar * nm"
 
         simulate!(sys, simulator, n_steps; n_threads=1)
 
@@ -102,7 +103,7 @@ end
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
                                  chain_id="B", element="Ar")
                         for i in 1:n_atoms],
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -262,7 +263,7 @@ end
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
                                  chain_id="B", element="Ar")
                         for i in 1:n_atoms],
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -313,7 +314,7 @@ end
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -355,6 +356,7 @@ end
         StormerVerlet(dt=dt),
         Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1"),
         OverdampedLangevin(dt=dt, temperature=temp, friction=10.0u"ps^-1"),
+        NoseHoover(dt=dt, temperature=temp),
     ]
 
     for AT in array_list
@@ -376,7 +378,7 @@ end
             atoms=to_device(atoms, AT),
             coords=to_device(coords, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             loggers=(coords=CoordinatesLogger(100),),
         )
@@ -391,21 +393,21 @@ end
             atoms=to_device(atoms, AT),
             coords=to_device(coords_nan, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             strictness=:nowarn,
         )
-        @test_throws NaNSimulationError System(
+        @test_throws Molly.NaNSimulationError System(
             atoms=to_device(atoms, AT),
             coords=to_device(coords_nan, AT),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=neighbor_finder,
             strictness=:error,
         )
         for simulator in simulators
-            @test_throws NaNSimulationError simulate!(sys_nan, simulator, sim_time; n_threads=1,
-                                                      check_nans=true)
+            @test_throws Molly.NaNSimulationError simulate!(sys_nan, simulator, sim_time;
+                                                            n_threads=1, check_nans=true)
         end
     end
 
@@ -460,7 +462,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
 
     # The narrowed list of atom fields read by the interactions on the CUDA path is only
     #   used when every entry is a field of the atom type, otherwise every field is used
-    inters_test = (LennardJones(use_neighbors=true), Coulomb(use_neighbors=true))
+    inters_test = (LennardJones(), Coulomb())
     fields_test = Molly.combine_atom_fields(inters_test)
     @test Molly.resolve_atom_fields(fields_test, typeof(make_ref_atom(1))) ==
           (:σ, :ϵ, :λ, :charge)
@@ -492,8 +494,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
             coords=to_device(copy(coords_start), AT),
             boundary=boundary,
             velocities=to_device(copy(vels_start), AT),
-            pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),
-                             Coulomb(cutoff=cutoff, use_neighbors=true)),
+            pairwise_inters=(LennardJones(cutoff=cutoff), Coulomb(cutoff=cutoff)),
             specific_inter_lists=(InteractionList2Atoms(
                 to_device(Int32.(collect(1:2:n_atoms)), AT),
                 to_device(Int32.(collect(2:2:n_atoms)), AT),
@@ -589,7 +590,7 @@ end
         coords=coords,
         velocities=velocities,
         boundary=boundary,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -609,7 +610,7 @@ end
             coords=CuArray(coords),
             velocities=CuArray(velocities),
             boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
+            pairwise_inters=(LennardJones(),),
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
@@ -647,18 +648,18 @@ end
     G = 10.0u"kJ * mol * nm * g^-2"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true), LennardJones(use_neighbors=false),
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
-        SoftSphere(use_neighbors=true), SoftSphere(use_neighbors=false),
-        Mie(m=5, n=10, use_neighbors=true), Mie(m=5, n=10, use_neighbors=false),
-        Coulomb(use_neighbors=true), Coulomb(use_neighbors=false),
-        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
+        LennardJones(), LennardJones(use_neighbors=false),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
+        SoftSphere(), SoftSphere(use_neighbors=false),
+        Mie(m=5, n=10), Mie(m=5, n=10, use_neighbors=false),
+        Coulomb(), Coulomb(use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm"),
         CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=false),
-        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true, solvent_dielectric=Inf),
-        Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm", solvent_dielectric=Inf),
+        Gravity(G=G), Gravity(G=G, use_neighbors=false),
     )
 
     for inter in pairwise_inter_types
@@ -666,7 +667,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         sys = System(
@@ -695,12 +696,12 @@ end
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps")
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true),
+        LennardJones(),
         LennardJones(use_neighbors=false),
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm")),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm")),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm")),
     )
 
     for inter in pairwise_inter_types
@@ -708,7 +709,7 @@ end
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.2u"nm")
         else
-            neighbor_finder = NoNeighborFinder()
+            neighbor_finder = nothing
         end
 
         if run_cuda_tests
@@ -719,7 +720,7 @@ end
                     array_type=CuArray,
                 )
             else
-                neighbor_finder_gpu = NoNeighborFinder()
+                neighbor_finder_gpu = nothing
             end
         end
 
@@ -804,7 +805,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -824,7 +825,7 @@ end
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -882,14 +883,14 @@ end
             coords=to_device(copy(starting_coords), AT),
             boundary=boundary,
             atoms_data=atoms_data,
-            pairwise_inters=(LennardJones(),),
+            pairwise_inters=(LennardJones(use_neighbors=false),),
             loggers=(coords=CoordinatesLogger(100),),
         )
 
         atom_selector(at, at_data) = at_data.atom_type == "A1"
 
-        sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
-                                          atom_selector=atom_selector)
+        sys_res = Molly.add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
+                                                atom_selector=atom_selector)
 
         simulate!(sys_res, sim, n_steps)
 
@@ -911,7 +912,7 @@ end
         coords=coords,
         boundary=boundary,
         velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
+        pairwise_inters=(LennardJones(),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -948,7 +949,7 @@ end
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", temp; rng=Xoshiro(2024 + i))
                     for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),),
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -986,29 +987,220 @@ end
 end
 
 @testset "Nosé-Hoover" begin
+    # Systems from test/reference/openmm_nose_hoover.py, which gives the OpenMM values
+    #   after 200 steps with its NoseHooverIntegrator
+    box_size = 2.0u"nm"
+    lj = LennardJones(cutoff=DistanceCutoff(0.9u"nm"), use_neighbors=false)
+    hb_observable(sys, neighbors, step_n, buffers; heat_bath_energy, kwargs...) =
+                                                                        heat_bath_energy
+    E = typeof(1.0u"kJ * mol^-1")
+
+    function lattice_lj_system(AT; loggers=(heat_bath=GeneralObservableLogger(
+                                                        hb_observable, E, 200),))
+        n_side = 5
+        spacing = ustrip(box_size) / n_side
+        coords, velocities = SVector{3, Float64}[], SVector{3, Float64}[]
+        for i in 0:(n_side - 1), j in 0:(n_side - 1), k in 0:(n_side - 1)
+            n = n_side^2 * i + n_side * j + k
+            push!(coords, SVector(spacing * i + 0.2 + 0.02 * sin(1.3 * n),
+                                  spacing * j + 0.2 + 0.02 * cos(2.1 * n),
+                                  spacing * k + 0.2 + 0.02 * sin(0.7 * n + 0.5)))
+            push!(velocities, SVector(0.3 * cos(0.9 * n), 0.3 * sin(1.7 * n),
+                                      0.3 * cos(2.3 * n)))
+        end
+        velocities .-= (sum(velocities) / length(velocities),)
+        atoms = [Atom(mass=39.948u"g/mol", σ=0.34u"nm", ϵ=0.997u"kJ * mol^-1")
+                 for _ in coords]
+        return System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords .* u"nm", AT),
+            boundary=CubicBoundary(box_size),
+            velocities=to_device(velocities .* u"nm * ps^-1", AT),
+            pairwise_inters=(lj,),
+            loggers=loggers,
+        )
+    end
+
+    function diatomic_system(AT; loggers=(heat_bath=GeneralObservableLogger(
+                                                        hb_observable, E, 200),))
+        n_side = 4
+        spacing = ustrip(box_size) / n_side
+        bond_length = 0.15
+        coords, velocities = SVector{3, Float64}[], SVector{3, Float64}[]
+        for i in 0:(n_side - 1), j in 0:(n_side - 1), k in 0:(n_side - 1)
+            m = n_side^2 * i + n_side * j + k
+            u = normalize(SVector(sin(1.1 * m + 0.3), cos(0.7 * m), sin(1.9 * m + 1.0)))
+            centre = SVector(spacing * i + 0.25, spacing * j + 0.25, spacing * k + 0.25)
+            for s in (-1, 1)
+                n = length(coords)
+                push!(coords, centre + u * (s * bond_length / 2))
+                push!(velocities, SVector(0.4 * cos(0.9 * n), 0.4 * sin(1.7 * n),
+                                          0.4 * cos(2.3 * n)))
+            end
+        end
+        velocities .-= (sum(velocities) / length(velocities),)
+        n_atoms = length(coords)
+        atoms = [Atom(mass=14.0u"g/mol", σ=0.32u"nm", ϵ=0.3u"kJ * mol^-1") for _ in coords]
+        bonded_pairs = [(2m - 1, 2m) for m in 1:(n_atoms ÷ 2)]
+        constraints = SHAKE_RATTLE(
+            n_atoms=n_atoms,
+            dist_tolerance=1e-10u"nm",
+            vel_tolerance=1e-10u"nm^2 * ps^-1",
+            dist_constraints=[DistanceConstraint(i, j, bond_length * u"nm")
+                              for (i, j) in bonded_pairs],
+            max_iters=1_000,
+        )
+        neighbor_finder = DistanceNeighborFinder(
+            n_atoms=n_atoms,
+            dist_cutoff=0.95u"nm",
+            excluded_pairs=bonded_pairs,
+            n_steps=1,
+            array_type=AT,
+        )
+        return System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords .* u"nm", AT),
+            boundary=CubicBoundary(box_size),
+            velocities=to_device(velocities .* u"nm * ps^-1", AT),
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(0.9u"nm")),),
+            neighbor_finder=neighbor_finder,
+            constraints=(constraints,),
+            loggers=loggers,
+        )
+    end
+
+    function test_openmm_agreement(sys, ke, pe, hb, coords_ref, vels_ref)
+        @test kinetic_energy(sys) ≈ ke * u"kJ * mol^-1" atol=1e-6u"kJ * mol^-1"
+        @test potential_energy(sys) ≈ pe * u"kJ * mol^-1" atol=1e-6u"kJ * mol^-1"
+        @test last(values(sys.loggers.heat_bath)) ≈ hb * u"kJ * mol^-1" atol=1e-6u"kJ * mol^-1"
+        coords, velocities = from_device(sys.coords), from_device(sys.velocities)
+        for i in 1:2
+            @test coords[i] ≈ SVector(coords_ref[i]...)u"nm" atol=1e-8u"nm"
+            @test velocities[i] ≈ SVector(vels_ref[i]...)u"nm * ps^-1" atol=1e-7u"nm * ps^-1"
+        end
+    end
+
+    for AT in array_list
+        sys = lattice_lj_system(AT)
+        @test sys.df == 372
+        simulate!(sys, NoseHoover(dt=0.002u"ps", temperature=120.0u"K", damping=0.1u"ps"),
+                  200; n_threads=1)
+        test_openmm_agreement(
+            sys,
+            220.17911404829675,
+            -431.5953783305511,
+            26.74018608093807,
+            ([0.22827712671351566, 0.22109678178040812, 0.25514311959525227],
+             [0.26718834419226156, 0.24374395241262184, 0.637611322015795]),
+            ([-0.22042795320562067, 0.028199271534965483, -0.0617853356013445],
+             [0.024094222615233436, -0.10701095893053617, 0.35708061238505573]),
+        )
+
+        sys = diatomic_system(AT)
+        @test sys.df == 317
+        simulate!(sys, NoseHoover(dt=0.002u"ps", temperature=150.0u"K", damping=0.05u"ps"),
+                  200; n_threads=1)
+        test_openmm_agreement(
+            sys,
+            187.7044101321484,
+            -81.11752662776419,
+            -7.104887232025964,
+            ([0.36401279812680026, 0.32118277929635386, 0.34967299947700586],
+             [0.3687315240141996, 0.34717347645250984, 0.20201726038320508]),
+            ([0.056469218550416894, 0.6181503050498004, 0.11576768757139103],
+             [0.294070160694085, -0.15578278290240608, -0.017427631037624305]),
+        )
+        @test check_position_constraints(sys)
+    end
+
+    # Sampling of a Lennard-Jones gas
     n_atoms = 256
     atom_mass = 39.98u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.34u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(4.0u"nm")
-    coords = place_atoms(n_atoms, boundary; min_dist=0.36u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.36u"nm", rng=Xoshiro(10))
     temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+    dt = 0.002u"ps"
+    conserved_energy(sys, neighbors, step_n, buffers; heat_bath_energy, kwargs...) =
+        kinetic_energy(sys) + potential_energy(sys, neighbors, step_n) + heat_bath_energy
+    thermostat_vels(sys, neighbors, step_n, buffers; thermostat_velocities, kwargs...) =
+        copy(thermostat_velocities)
 
-    sys = System(
+    rng_vel = Xoshiro(11)
+    sys_start = System(
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(),),
-        loggers=(temp=TemperatureLogger(1),),
+        velocities=[random_velocity(atom_mass, temp; rng=rng_vel) for i in 1:n_atoms],
+        pairwise_inters=(LennardJones(use_neighbors=false),),
     )
+    simulate!(sys_start, SteepestDescentMinimizer())
+    simulate!(sys_start, NoseHoover(dt=dt, temperature=temp), 5_000)
+    # The kinetic energy fluctuations in the canonical ensemble
+    temp_std = temp * sqrt(2 / sys_start.df)
 
-    minimizer = SteepestDescentMinimizer()
-    simulate!(sys, minimizer)
+    sys = System(
+        deepcopy(sys_start);
+        loggers=(
+            temp=TemperatureLogger(10),
+            pe=PotentialEnergyLogger(10),
+            conserved=GeneralObservableLogger(conserved_energy, E, 10),
+            thermostat_vels=GeneralObservableLogger(thermostat_vels, Vector{Float64}, 10),
+        ),
+    )
+    simulate!(sys, NoseHoover(dt=dt, temperature=temp), 50_000)
+    temps = values(sys.loggers.temp)
+    pe_mean = mean(values(sys.loggers.pe))
+    @test (temp - 1.0u"K") < mean(temps) < (temp + 1.0u"K")
+    @test isapprox(std(temps), temp_std; rtol=0.1)
 
-    simulator = NoseHoover(dt=0.002u"ps", temperature=temp)
-    simulate!(sys, simulator, 50_000)
+    # The conserved quantity does not drift
+    conserved = values(sys.loggers.conserved)
+    n_logged = length(conserved)
+    @test std(conserved) < 0.1u"kJ * mol^-1"
+    @test abs(mean(conserved[(end - n_logged ÷ 10):end]) -
+              mean(conserved[1:(n_logged ÷ 10)])) < 0.05u"kJ * mol^-1"
+    @test length(last(values(sys.loggers.thermostat_vels))) == 3
+    @test !iszero(last(values(sys.loggers.thermostat_vels)))
 
-    @test (temp - 1.0u"K") < mean(values(sys.loggers.temp)) < (temp + 1.0u"K")
-    @test std(values(sys.loggers.temp)) > 2.0u"K"
+    # Strong coupling to the thermostat is stable and samples the same distribution
+    sys = System(
+        deepcopy(sys_start);
+        loggers=(temp=TemperatureLogger(10), pe=PotentialEnergyLogger(10)),
+    )
+    simulate!(sys, NoseHoover(dt=dt, temperature=temp, damping=10*dt, chain_length=5,
+                              n_mts=1, n_yoshida_suzuki=5), 50_000)
+    temps = values(sys.loggers.temp)
+    @test (temp - 1.0u"K") < mean(temps) < (temp + 1.0u"K")
+    @test isapprox(std(temps), temp_std; rtol=0.1)
+    @test abs(mean(values(sys.loggers.pe)) - pe_mean) < 1.5u"kJ * mol^-1"
+
+    # Constraints are accounted for in the degrees of freedom
+    sys = diatomic_system(Array; loggers=(temp=TemperatureLogger(10),))
+    simulate!(sys, NoseHoover(dt=0.002u"ps", temperature=150.0u"K"), 20_000)
+    temps = values(sys.loggers.temp)[201:end]
+    @test 147.0u"K" < mean(temps) < 153.0u"K"
+    @test check_position_constraints(sys)
+
+    # Coupling methods are applied
+    for barostat in (MonteCarloBarostat(1000.0u"bar", temp, boundary; n_steps=10),
+                     CRescaleBarostat(1000.0u"bar", 1.0u"ps"))
+        sys = System(deepcopy(sys_start); loggers=(temp=TemperatureLogger(10),))
+        simulate!(sys, NoseHoover(dt=dt, temperature=temp, coupling=barostat), 5_000)
+        @test volume(sys.boundary) < 0.95 * volume(boundary)
+        @test (temp - 5.0u"K") < mean(values(sys.loggers.temp)) < (temp + 5.0u"K")
+    end
+
+    @test_throws ArgumentError NoseHoover(dt=dt, temperature=-1.0u"K")
+    @test_throws ArgumentError NoseHoover(dt=dt, temperature=temp, damping=0.0u"ps")
+    @test_throws ArgumentError NoseHoover(dt=dt, temperature=temp, chain_length=0)
+    @test_throws ArgumentError NoseHoover(dt=dt, temperature=temp, n_mts=0)
+    @test_throws ArgumentError NoseHoover(dt=dt, temperature=temp, n_yoshida_suzuki=2)
+    sys_one_atom = System(
+        atoms=[Atom(mass=atom_mass, σ=0.34u"nm", ϵ=0.2u"kJ * mol^-1")],
+        coords=[SVector(1.0, 1.0, 1.0)u"nm"],
+        boundary=boundary,
+    )
+    @test_throws ArgumentError simulate!(sys_one_atom, NoseHoover(dt=dt, temperature=temp),
+                                         10)
 end

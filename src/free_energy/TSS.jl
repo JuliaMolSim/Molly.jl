@@ -1,10 +1,14 @@
 export
-    TSSHistoryForgetting,
     TSSState,
-    TSSSimulation,
+    TSSSampleLogger,
+    TSSSimulation
+
+@public TSSHistoryForgetting,
     tss_grid_graph,
+    tss_free_energies,
     tss_free_energy_uncertainties,
-    tss_free_energies
+    TSSSample,
+    log_tss_sample!
 
 include("TSS/common.jl")
 include("TSS/history.jl")
