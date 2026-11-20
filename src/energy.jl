@@ -16,10 +16,13 @@ export
     total_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                  n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                  specific_inter_lists=system.specific_inter_lists,
-                 general_inters=system.general_inters, strictness=:warn)
+                 general_inters=system.general_inters, visit_state=false, strictness=:warn)
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 """
 function total_energy(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return total_energy(sys, find_neighbors(sys; n_threads=n_threads);
@@ -70,6 +73,57 @@ function kinetic_energy_tensor!(kin_tensor, sys::System{D, <:Any, <:Any, TH}) wh
     return kin_tensor
 end
 
+# The contribution of one atom to twice the kinetic energy tensor, as a number in the units
+#   of mass times velocity squared
+struct KineticTensorContribution{D, TH} end
+
+@inline function (::KineticTensorContribution{D, TH})(m, v) where {D, TH}
+    v_th = SVector{D, TH}(ustrip.(v))
+    return TH(ustrip(m)) * (v_th * transpose(v_th))
+end
+
+# Reduce on the device rather than copying the velocities to the host
+function kinetic_energy_tensor!(kin_tensor,
+                                sys::System{D, <:AbstractGPUArray, <:Any, TH}) where {D, TH}
+    twice_kin = mapreduce(KineticTensorContribution{D, TH}(), +, sys.masses, sys.velocities;
+                          init=zero(SMatrix{D, D, TH}))
+    mv2_unit = unit(eltype(sys.masses)) * unit(eltype(eltype(sys.velocities)))^2
+    for col in 1:D
+        for row in 1:D
+            kin_tensor[row, col] = uconvert(sys.energy_units,
+                                            (twice_kin[row, col] / 2) * mv2_unit)
+        end
+    end
+    return kin_tensor
+end
+
+# Twice the kinetic energy of one atom, as a number in the units of mass times
+#   velocity squared
+@inline function mass_vel_sq(m, v, ::Type{TH}) where TH
+    v_th = TH.(ustrip.(v))
+    return TH(ustrip(m)) * dot(v_th, v_th)
+end
+
+struct MassVelSq{TH} end
+
+@inline (::MassVelSq{TH})(m, v) where {TH} = mass_vel_sq(m, v, TH)
+
+# Twice the kinetic energy as a number in the units of mass times velocity squared,
+#   accumulated in type TH without allocating
+# Not inlined to work with Enzyme
+@noinline function sum_mass_vel_sq(masses, velocities, ::Type{TH}) where TH
+    s = zero(TH)
+    @inbounds for i in eachindex(masses, velocities)
+        s += mass_vel_sq(masses[i], velocities[i], TH)
+    end
+    return s
+end
+
+@noinline function sum_mass_vel_sq(masses::AbstractGPUArray, velocities,
+                                   ::Type{TH}) where TH
+    return mapreduce(MassVelSq{TH}(), +, masses, velocities; init=zero(TH))
+end
+
 @doc raw"""
     kinetic_energy(system; kin_tensor=nothing)
 
@@ -99,15 +153,47 @@ Calculate the virial tensor of the system.
 
 The virial, in its most general form, is defined as:
 ```math
-\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
+\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i} \quad\textrm{i.e.}\quad
+W_{\alpha\beta} = \sum_i r_{i,\alpha} f_{i,\beta}
 ```
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
 respectively, acting on atom ``i``.
-The [virial definition from LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
-is used, taking into account pairwise interactions, specific interactions, the
-[`Ewald`](@ref) and [`PME`](@ref) methods computed as indicated in
-[Essmann et al. 1995](https://doi.org/10.1063/1.470117), and bias potentials.
-Contributions from implicit solvent methods are ignored.
+It has units of energy and is positive for repulsive interactions.
+In periodic systems the sum depends on which image of each atom is used, so it is
+evaluated in translation-invariant forms that are equivalent for interactions whose forces
+sum to zero:
+```math
+\bf{W} = \sum_{i<j} \bf{r_{ij}} \otimes \bf{f_{ij}}
++ \sum_{\textrm{specific}} \sum_{k} (\bf{r_k} - \bf{r_s}) \otimes \bf{f_k}
++ \bf{W}_\textrm{general}
+```
+where ``\bf{r_{ij}} = \bf{r_i} - \bf{r_j}`` is the minimum image vector,
+``\bf{f_{ij}}`` is the pairwise force on atom ``i`` due to atom ``j``, and each specific
+interaction uses the minimum image vectors from its second atom ``s``.
+The contribution of specific interactions consisting of one atom, such as
+[`HarmonicPositionRestraint`](@ref), are ignored.
+The general interaction terms include the reciprocal space of [`Ewald`](@ref) and
+[`PME`](@ref), computed as ``-\partial E / \partial \bf{\epsilon}`` for a homogeneous
+strain ``\bf{\epsilon}`` of the box as indicated in
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117), the isotropic dispersion
+correction terms, and bias potentials.
+Contributions from implicit solvent methods and specific interactions acting on a
+single atom, such as [`HarmonicPositionRestraint`](@ref), are ignored.
+Use a non-virial barostat such as the [`MonteCarloBarostat`](@ref) to control pressure
+in these cases.
+
+This is the same sign convention and normalization as the
+[global virial in LAMMPS](https://docs.lammps.org/compute_pressure.html), so the
+pressure is ``(2 \bf{K} + \bf{W}) / V`` in both.
+The [per-atom stress of LAMMPS](https://docs.lammps.org/compute_stress_atom.html)
+is ``S_{i,\alpha\beta} = -m_i v_{i,\alpha} v_{i,\beta} - W_{i,\alpha\beta}``, so
+``\sum_i \bf{W_i} = \bf{W}`` apart from long-range dispersion (tail) corrections, which
+LAMMPS leaves out of the per-atom stress and Molly includes in ``\bf{W}`` when a
+dispersion correction is used.
+GROMACS defines the virial as
+``\bf{\Xi} = -\frac{1}{2} \sum_{i<j} \bf{r_{ij}} \otimes \bf{f_{ij}}``, so
+``\bf{\Xi} = -\bf{W} / 2`` and the `Vir-XX` energy terms of GROMACS are ``-W_{xx} / 2``.
+
 For constrained systems, constraint contributions are approximated using a
 deterministic small-step constraint preview.
 Compatible with virtual sites apart from [`OutOfPlaneSite`](@ref) and
@@ -132,7 +218,7 @@ function virial(sys, neighbors, step_n::Integer=0;
     end
 end
 
-"""
+@doc raw"""
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                   specific_inter_lists=system.specific_inter_lists,
@@ -140,7 +226,14 @@ end
 
 Calculate the virial of the system as a scalar.
 
-This is the trace of the [`virial`](@ref) tensor.
+This is the trace of the [`virial`](@ref) tensor:
+```math
+W = \rm{Tr}\left[ \bf{W} \right] = \sum_i \bf{r_i} \cdot \bf{f_i}
+```
+It is not divided by the number of dimensions, so the virial contribution to
+[`scalar_pressure`](@ref) is ``W / (d V)`` in ``d`` dimensions.
+Some sources instead call ``-\frac{1}{2} \sum_i \bf{r_i} \cdot \bf{f_i}`` the virial,
+which is ``-W / 2`` and is the trace of the GROMACS virial tensor.
 """
 function scalar_virial(sys; n_threads::Integer=Threads.nthreads(), kwargs...)
     return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads);
@@ -204,11 +297,14 @@ end
     potential_energy(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
                      n_threads=Threads.nthreads(), pairwise_inters=system.pairwise_inters,
                      specific_inter_lists=system.specific_inter_lists,
-                     general_inters=system.general_inters, strictness=:warn,
-                     visit_state=false)
+                     general_inters=system.general_inters, visit_state=false,
+                     strictness=:warn)
 
 Calculate the potential energy of a system using the pairwise, specific and
-general interactions. `visit_state` is as for [`forces`](@ref).
+general interactions.
+
+`visit_state=true` marks the current state as visited by a simulation, which lets
+history-dependent general interactions such as [`Metadynamics`](@ref) update.
 
     potential_energy(inter, vec_ij, atom_i, atom_j, energy_units, special, coord_i, coord_j,
                      boundary, velocity_i, velocity_j, step_n)
@@ -246,17 +342,37 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness(),
-                          visit_state::Bool=false) where TH
+                          visit_state::Bool=false,
+                          strictness=default_strictness()) where TH
+    pe = zero(TH) * sys.energy_units
+    pes_early = map(values(general_inters)) do inter
+        if evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(TH) * sys.energy_units
+        end
+    end
+    for pe_early in pes_early
+        pe += pe_early
+    end
+
     if length(pairwise_inters) > 0
         use_vel = any_uses_velocity(pairwise_inters)
-        pe = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
+        pe_pairwise = with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
             pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                              neighbors, sys.energy_units, length(sys), pis_nonl, pis_nl,
                              step_n, Val(TH), Val(n_threads), Val(use_vel), Val(sys.grad_safe))
         end
-    else
-        pe = zero(TH) * sys.energy_units
+        if any(evaluate_before_pairwise, values(general_inters))
+            pe += pe_pairwise
+        else
+            pe = pe_pairwise
+        end
     end
 
     if length(specific_inter_lists) > 0
@@ -270,14 +386,22 @@ function potential_energy(sys::System{<:Any, <:Any, <:Any, TH},
                           Val(TH), step_n)
     end
 
-    # visit_state lets history-dependent interactions (e.g. Metadynamics) update at this state
-    for inter in values(general_inters)
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                              n_threads=n_threads, strictness=strictness,
-                                              visit_state=visit_state),
-        )
+    # `map` over the tuple keeps each interaction concretely typed; a loop over general
+    #   interactions of different types gives a Union that Enzyme can not differentiate
+    pes_general = map(values(general_inters)) do inter
+        if !evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(TH) * sys.energy_units
+        end
+    end
+    for pe_general in pes_general
+        pe += pe_general
     end
 
     return pe
@@ -533,19 +657,44 @@ function potential_energy(sys::System{<:Any, <:AbstractGPUArray},
                           pairwise_inters=sys.pairwise_inters,
                           specific_inter_lists=sys.specific_inter_lists,
                           general_inters=sys.general_inters,
-                          strictness=default_strictness(),
-                          visit_state::Bool=false)
+                          visit_state::Bool=false,
+                          strictness=default_strictness())
+    pe = zero(float_type_high(sys)) * sys.energy_units
+    pes_early = map(values(general_inters)) do inter
+        if evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(float_type_high(sys)) * sys.energy_units
+        end
+    end
+    for pe_early in pes_early
+        pe += pe_early
+    end
+
     # Allow an Enzyme reverse rule
-    pe = gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
+    pe += gpu_potential_energy(sys, neighbors, step_n, buffers, pairwise_inters,
                               specific_inter_lists, n_threads)
 
-    for inter in values(general_inters)
-        pe += uconvert(
-            sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
-                                n_threads=n_threads, strictness=strictness,
-                                visit_state=visit_state),
-        )
+    # `map` keeps each general interaction concretely typed for Enzyme, as on the CPU
+    pes_general = map(values(general_inters)) do inter
+        if !evaluate_before_pairwise(inter)
+            uconvert(
+                sys.energy_units,
+                AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, step_n=step_n,
+                                                  n_threads=n_threads, visit_state=visit_state,
+                                                  strictness=strictness),
+            )
+        else
+            zero(float_type_high(sys)) * sys.energy_units
+        end
+    end
+    for pe_general in pes_general
+        pe += pe_general
     end
 
     return pe
@@ -573,7 +722,7 @@ function gpu_potential_energy(sys::System{<:Any, <:AbstractGPUArray, <:Any, TH},
                          sys.boundary, step_n, sys.energy_units, Val(TH))
     end
 
-    return only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
+    return sum(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 end
 
 """
@@ -582,12 +731,12 @@ Calculate the potential energy between atoms due to a given interaction type on 
 See [`potential_energy`](@ref) for more details.
 This function is only required when a different code path is required on CPU and GPU.
 """
-potential_energy_gpu(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
-potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn, data) = potential_energy(inter, ci, bnd, ai, eu, vi, sn, data)
-potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
-potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
+@inline potential_energy_gpu(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
+@inline potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn, data) = potential_energy(inter, ci, bnd, ai, eu, vi, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn, data)
+@inline potential_energy_gpu(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data) = potential_energy(inter, ci, cj, ck, cl, cm, bnd, ai, aj, ak, al, am, eu, vi, vj, vk, vl, vm, sn, data)
 
 @inline zero_pairwise_energy(dr, energy_units) = ustrip(zero(dr[1])) * energy_units
 

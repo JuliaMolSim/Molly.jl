@@ -12,11 +12,11 @@ Through the years, researchers have developed a collection of techniques to solv
 \Delta F_{A \rightarrow B} = F_B - F_A = k_B T \ln \left \langle \exp\left( - \frac{E_B - E_A}{k_B T} \right) \right \rangle _A
 ```
 
-This states that, for a given system, the change of FE in going from state *A* to state *B* is equal to the FE difference between the two states and, more importantly, directly related to the total energy difference of states *A* and *B* through Botzmann statistics. In this equation, the angle brackets represent the expected value of the Boltzmann-weighted energy difference of the two states, but sampled only from conformations extracted from state *A*. This implies that, even when sampling only one state, we are able to infer information from the other, given that some niceness criteria is met, i.e. the energy difference between the two states is small enough. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.
+This expresses the free-energy difference in terms of configurations sampled from state *A*. In practice it is useful when states *A* and *B* have sufficient configurational overlap, so that re-evaluating state *B* on samples from *A* is statistically meaningful. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.
 
 A little over 20 years after Zwanzig introduced FE perturbation, Charles H Bennett expanded on this and developed the [Bennett Acceptance Ratio](https://doi.org/10.1016/0021-9991(76)90078-4) (BAR). Bennett built directly upon the statistical foundation of the Zwanzig equation, and recognized that both forward and reverse energy differences between two states contain complementary information; that is, while Zwanzig’s formulation reweights configurations from a single ensemble to estimate the free energy of another, BAR symmetrizes this process. It combines samples from both states and determines the free energy shift $\Delta F$ that makes each ensemble equally probable under some weighting derived from Boltzmann statistics. In this sense, BAR can be viewed as a generalization of Zwanzig’s exponential averaging, reducing to the Zwanzig equation when only one direction of sampling is available. However, it is because of this that BAR still suffers from the same issue as Zwanzig's reweighting method: the energy difference between states $A$ and $B$ must be small enough such that there is sufficient overlap between their configurational spaces, otherwise the necessary statistics for FE estimation will be very poor and intermediate steps between $A$ and $B$ are needed.
 
-Thus, in 2008 Michael R Shirts and John D Chodera introduced the [Multistate Bennett Acceptance Ratio](https://doi.org/10.1063/1.2978177) (MBAR) method. MBAR expands on BAR by instead of just using two states *A* and *B*, considering a collection of *k* $\in$ *K* different thermodynamic states. The only thing that is expected from these states is that they must be sampled from equivalent thermodynamic ensembles, this is, all states should be NVT or NPT, etc.; but other than that, the specific Hamiltonian for each evaluated state can differ in an arbitrary manner. Then, a series of $n_k$ samples are drawn from each thermodynamic state, until a total of $N = \sum_{k}^{K} n_k$ samples are obtained. By evaluating each sample $n \in N$ with each Hamiltonian $\mathcal{H}_{k}; k \in K$, one obtains a matrix of reduced potentials $u_{nk} = \beta_{k} \left[ E_{k}(n)+p_{k}V(n) \right]$. MBAR then solves a set of self-consistent equations that yield the relative free energies $f_k$ of all states simultaneously, using every sample across all simulations to estimate each state’s free energy in a statistically optimal way. In this sense, MBAR generalizes BAR to an arbitrary number of thermodynamic states and provides the maximum-likelihood, minimum-variance estimator for free energies and ensemble averages, efficiently combining data from overlapping simulations into a unified framework. MBAR also allows the reweighting of any observable to a completely unsampled thermodynamic state. Because this themodynamic state is compared to a collection of sampled states, instead of just one, the conformational space between states is much more likely to overlap, therefore increasing the probability of the reweighting to be meaningful.
+Thus, in 2008 Shirts and Chodera introduced the [Multistate Bennett Acceptance Ratio](https://doi.org/10.1063/1.2978177) (MBAR) method. Instead of just using two states *A* and *B*, MBAR considers a collection of thermodynamic states. These states should belong to compatible ensembles, such as all NVT or all NPT, but the Hamiltonian in each state may differ. If state `k` contributes `n_k` samples, with a total of `N = \sum_k n_k`, then evaluating each sample under each Hamiltonian yields the reduced potentials `u_{nk} = \beta_k [E_k(n) + p_k V(n)]`. MBAR solves for the relative free energies `f_k` of all states simultaneously, using all of the data at once. It also supports reweighting observables to unsampled target states, which is practical when the sampled states provide enough overlap.
 
 ## How to run MBAR with Molly
 
@@ -212,10 +212,10 @@ dR     = FT(6)u"deg"           # Increment in CV (torsion angle) in each consecu
 K_bias = FT(250)u"kJ * mol^-1" # Energy constant for restraint potential
 Δt     = FT(1)u"fs"            # Simulation timestep
 T0     = FT(310)u"K"           # Simulation temperature
-P0     = FT(1)u"bar"           # Simulation pessure
+P0     = FT(1)u"bar"           # Simulation pressure
 ```
 
-One must take into account that the simulations will start from an initial (ideally equilibrated) configuration, and therefore an arbitrarirly imposed restraint may be too far away from the equilibrium distribution of the CV to be biased, causing numerical issues. Thus, we will begin our setup by gently pulling the system along the CV in a series of short, sequential simulations. How short? The answer to that question depends on the system to be simulated; the pulling simulations should be long enough so that the system has time to move towards and stabilize around the imposed biased equilibrium, but also sufficiently short as to not waste time in this initial sequential part, as once each umbrella window is equilibrated it can run in parallel with the rest. For this simple study case, equilibrating each window for 0.5 ns is enough. We can define:
+The simulations start from an initial, ideally equilibrated, configuration. If a restraint is imposed too far from the current CV value, the system may respond poorly and the dynamics can become unstable. We therefore begin by gently pulling the system along the CV in a series of short sequential simulations. The required pulling length is system-dependent; for this example, 0.5 ns per window is enough.
 
 ```julia
 # pulling.jl
@@ -349,7 +349,7 @@ dR     = FT(6)u"deg"           # Increment in CV (torsion angle) in each consecu
 K_bias = FT(250)u"kJ * mol^-1" # Energy constant for restraint potential
 Δt     = FT(1)u"fs"            # Simulation timestep
 T0     = FT(310)u"K"           # Simulation temperature
-P0     = FT(1)u"bar"           # Simulation pessure
+P0     = FT(1)u"bar"           # Simulation pressure
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")
@@ -550,7 +550,7 @@ Threads.@threads for nt in 1:N_TRJ
 end
 ```
 
-Next, we define a vector of thermodynamic states to represent each Hamiltonian used to produce the simulations, as well a single state that represents the system in the absence of bias potentials. We will use the [`ThermoState`](@ref) struct provided by Molly:
+Next, we define a vector of thermodynamic states to represent each Hamiltonian used to produce the simulations, plus a single target state for the unbiased system. In Molly, [`ThermoState`](@ref) stores a system together with an integrator that defines the ensemble:
 
 ```julia
 # MBAR.jl
@@ -590,6 +590,16 @@ This generates the necessary inputs to use the self-consistent iteration method 
 
 # Returns the relative free energy of each k state and log.(N_counts), needed for downstream computations
 F_k, logN = Molly.iterate_mbar(u, win_of, N_counts)
+```
+
+The self-consistent iteration converges slowly when neighbouring states overlap poorly, as on long temperature ladders. In that case `method=:newton` solves the same equations with a damped Newton method, which stops when the weights of every sampled state are normalised to within `atol`. Free energies from a related problem, for instance from the previous step of an optimisation or from the full data set when solving a subset, can be passed as `f_init` so that only a few iterations are needed:
+
+```julia
+# MBAR.jl
+
+F_k, logN = Molly.iterate_mbar(u, win_of, N_counts; method=:newton)
+F_k_subset, _ = Molly.iterate_mbar(u[subset, :], win_of[subset], N_subset;
+                                   method=:newton, f_init=F_k)
 ```
 
 With this, we can also produce a weight matrix and a vector of target weights, using the  [`Molly.mbar_weights`](@ref) method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:
@@ -807,9 +817,11 @@ The schedulers scale the sterics and electrostatics of each role differently (se
 
 An alchemical system keeps the parameter keys of the system it was built from (see [`extract_parameters`](@ref)), so force field parameters can be differentiated through an [`AbsoluteFESystem`](@ref) or a dual topology [`RelativeFESystem`](@ref) like through the original system. Single topology systems, which store two values per parameter, are not supported by the parameter functions.
 
+The reaction field correction of excluded pairs and self terms, [`CoulombReactionFieldExclusion`](@ref), takes the charges of alchemical atoms from the scheduler in the same way as [`EwaldExclusion`](@ref) and has no soft core. With [`Molly.GROMACSLambdaABFEScheduler`](@ref) and [`Molly.GROMACSLambdaRBFEScheduler`](@ref) the charge products of the two end states are mixed linearly in $\lambda$. [`AbsoluteFESystem`](@ref) and [`RelativeFESystem`](@ref) keep these terms if the input system has them.
+
 ### Matching OpenFE default settings
 
-Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `LJsoftcore=:gapsys, Csoftcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
+Molly has many more options for running RBFE calculations than OpenFE including different softcore potentials, variety of $\lambda$-scaled bonded energy functions (e.g. CMAP torsions, periodic and harmonic torsion, etc.), lambda schedulers, and the option for either single or dual topology. To match the OpenFE settings and architectural choices for setup, we have implemented the [`Molly.OpenFEScheduler`](@ref). When using this with `lj_softcore=:gapsys, coulomb_softcore=:scaled`, the system setup will be performed similar to the system setup in [OpenFE](https://github.com/OpenFreeEnergy/openfe/blob/main/src/openfe/protocols/openmm_rfe/_rfe_utils/relative.py), which uses a single topology and specific setup choices, including:
 
 - Only using a softcore potential for the LennardJones potential, the CoulombEwald direct space is scaled by lambda directly without using a softcore.
 - In CoulombEwald potential, the charges are individually scaled for the regular interactions: 
@@ -836,10 +848,10 @@ scheduler = Molly.OpenFEScheduler(
     intraLJ=false,       # LJ between alchemical atoms is decoupled
 )
 
-# For system setup, set LJsoftcore=:gapsys, Csoftcore=:scaled
+# For system setup, set lj_softcore=:gapsys, coulomb_softcore=:scaled
 # More on system setup, see the example below
 sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
-                       scheduler=scheduler, LJsoftcore=:gapsys, Csoftcore=:scaled)
+                       scheduler=scheduler, lj_softcore=:gapsys, coulomb_softcore=:scaled)
 ```
 
 All the settings have been tested by comparing energies and forces between Molly and OpenFE, and the comparison is part of the test suite (`test/free_energy.jl`).
@@ -908,16 +920,16 @@ sys_solv = AbsoluteFESystem(sysb_solv, global_λ, mapping;
                              temp=298.0u"K",
                              scheduler=scheduler,
                              loggers=(),
-                             LJsoftcore=:beutler,
-                             Csoftcore=:scaled
+                             lj_softcore=:beutler,
+                             coulomb_softcore=:scaled
                             )
 
 sys_vac = AbsoluteFESystem(sysb_vac, global_λ, mapping;
                             temp=298.0u"K",
                             scheduler=scheduler,
                             loggers=(),
-                            LJsoftcore=:beutler,
-                            Csoftcore=:scaled
+                            lj_softcore=:beutler,
+                            coulomb_softcore=:scaled
                           )
 ```
 
@@ -999,8 +1011,8 @@ sys = RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB;
                        temp=298.0u"K", 
                        scheduler=Molly.OpenFEScheduler(dual=false),
                        loggers=(),
-                       LJsoftcore=:gapsys,
-                       Csoftcore=:scaled)
+                       lj_softcore=:gapsys,
+                       coulomb_softcore=:scaled)
 ```
 
 This system can then be used in AWH, TSS or REMD simulations for free energy estimation, how to run free energy calculations with each of these methods is described below.
@@ -1163,7 +1175,7 @@ TOTAL_STEPS = Int(floor(AWH_TIME / DT))
 
 awh_sim = AWHSimulation(
     awh_state;
-    num_md_steps = N_MD_STEPS,
+    n_md_steps = N_MD_STEPS,
     update_freq = 1,
     well_tempered_factor = FT(500.0),
     log_freq = 10,
@@ -1372,8 +1384,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -1386,7 +1398,7 @@ For an alchemical ladder, no PMF deconvolution is needed: the state coordinate a
     awh_state = AWHState(thermo_states; reuse_neighbors = true)
     awh_sim = AWHSimulation(
         awh_state;
-        num_md_steps = N_MD_STEPS,
+        n_md_steps = N_MD_STEPS,
         update_freq = 1,
         well_tempered_factor = FT(Inf),
         log_freq = 10,
@@ -1902,8 +1914,8 @@ After minimization and equilibration, the script checks that the barostat has no
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -2321,8 +2333,8 @@ After minimization and equilibration, the function checks the box against the cu
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -2635,7 +2647,7 @@ The experimental hydration free energy of benzene is $-3.67 \pm 0.05$ kJ mol^-1 
 
 ### Method overview
 
-[Metadynamics](https://doi.org/10.1073/pnas.202427399) (Laio & Parrinello, 2002) is a history-dependent biasing method for enhanced sampling and free energy estimation. Rather than pre-defining a fixed set of thermodynamic states as MBAR, AWH and TSS do, it runs a single simulation and periodically deposits small Gaussian "hills" of bias potential at the current value of one or more collective variables (CVs). Over time these hills accumulate and fill in the free energy wells the system would otherwise stay trapped in, pushing it to explore new regions of CV space:
+[Metadynamics](https://doi.org/10.1073/pnas.202427399) is a history-dependent biasing method for enhanced sampling and free energy estimation. Rather than pre-defining a fixed set of thermodynamic states as MBAR, AWH and TSS do, it runs a single simulation and periodically deposits small Gaussian "hills" of bias potential at the current value of one or more collective variables (CVs). Over time these hills accumulate and fill in the free energy wells the system would otherwise stay trapped in, pushing it to explore new regions of CV space:
 
 ```math
 V_{bias}(\boldsymbol{s}, t) = \sum_{t' < t} h_{t'} \exp\left(-\frac{|\boldsymbol{s} - \boldsymbol{s}(t')|^2}{2\sigma^2}\right)
@@ -2645,12 +2657,12 @@ Once the bias has grown to compensate the underlying free energy landscape, $V_{
 
 In Molly this is implemented by [`Metadynamics`](@ref), usable directly as a `general_inters` entry. Hills on periodic CVs such as [`CalcTorsion`](@ref) wrap around automatically; custom CV types opt in by defining [`Molly.cv_period`](@ref). The CVs and the resulting force or potential are evaluated each step and the rate at which new gaussians are added is controlled via `n_steps`. Two aspects are controlled by Julia type dispatch:
 
-- **Hill memory**, an [`Molly.AbstractMetadynamicsMemory`](@ref): 
+- **Hill memory**, a [`Molly.AbstractMetadynamicsMemory`](@ref): 
     - [`ListHills`](@ref) stores every deposited hill and sums them at evaluation time (exact, O(n_hills), no knowledge of CV range needed)
     - [`GridHills`](@ref) accumulates hills onto a discretized grid instead (approximate, O(1) regardless of the number of hills), as a 1D grid for one CV or a dense N-dimensional grid for several.
-- **Hill height scaling**, an [`Molly.AbstractTempering`](@ref):
+- **Hill height scaling**, a [`Molly.AbstractTempering`](@ref):
     - the default [`Molly.NoTempering`](@ref) always deposits the full configured height (standard, constant-height Metadynamics)
-    - [`WellTempered`](@ref) (Barducci, Bussi & Parrinello, 2008) instead shrinks each new hill according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
+    - [`WellTempered`](@ref) instead [shrinks each new hill](https://doi.org/10.1103/PhysRevLett.100.020603) according to how much bias has already accumulated nearby, so the bias self-limits and converges to a free energy estimate instead of growing without bound.
 
 Standard metadynamics is prone to over-filling: if the total deposited height grows much larger than $k_B T$, the bias floods the well and the system random-walks broadly for the rest of the run, widening the reconstructed profile well beyond the true surface. Well-tempered metadynamics avoids this at the cost of one extra parameter, `bias_factor`.
 
@@ -2756,7 +2768,7 @@ savefig(fig2,"./docs/src/images/MetaDynamicsHistogram.png")
 
 ### Reweighting
 
-Since the bias changes during the run, samples can't simply be reweighted by the final bias. A [`MetadynamicsLogger`](@ref) records, at each deposit, the CV value $s$, the bias $V(s, t)$ it was sampled under and the offset $c(t)$ of Tiwary & Parrinello (2015). The frames then get the weights $w \propto \exp\left((V(s, t) - c(t)) / k_B T\right)$, which reweight any observable of those frames to the unbiased ensemble.
+Since the bias changes during the run, samples can't simply be reweighted by the final bias. A [`MetadynamicsLogger`](@ref) records, at each deposit, the CV value $s$, the bias $V(s, t)$ it was sampled under and the [offset](https://doi.org/10.1021/jp504920s) $c(t)$. The frames then get the weights $w \propto \exp\left((V(s, t) - c(t)) / k_B T\right)$, which reweight any observable of those frames to the unbiased ensemble.
 
 The records can be used in two equivalent ways. Either use the live logger of the bias straight after the run:
 
@@ -2764,16 +2776,16 @@ The records can be used in two equivalent ways. Either use the live logger of th
 logger = bias.logger
 ```
 
-or, since the example passed a `filepath`, read the records back from `metadynamics.txt`, e.g. in a later session, with [`read_metadynamics_logger`](@ref):
+or, since the example passed a `filepath`, read the records back from `metadynamics.txt`, e.g. in a later session, with [`Molly.read_metadynamics_logger`](@ref):
 
 ```julia
-logger = read_metadynamics_logger("metadynamics.txt")
+logger = Molly.read_metadynamics_logger("metadynamics.txt")
 ```
 
 Both give the same weights:
 
 ```julia
-w = metadynamics_weights(logger)
+w = Molly.metadynamics_weights(logger)
 r_s = values(logger)
 mean_r = sum(w .* r_s) # Unbiased average distance
 ```

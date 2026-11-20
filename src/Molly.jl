@@ -10,6 +10,7 @@ using Reexport
 @reexport using Unitful
 
 using AcceleratedKernels
+import Adapt
 using Atomix
 import AtomsBase
 import AtomsCalculators
@@ -33,6 +34,7 @@ using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
 using ProgressMeter
 using SimpleCrystals
 using SpecialFunctions
+using Suppressor
 using Unitful
 using UnitfulAtomic
 using StructArrays
@@ -67,6 +69,7 @@ include("kernels.jl")
 include("force.jl")
 include("energy.jl")
 include("free_energy/alchemy.jl")
+include("interactions/charge_equilibration.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
@@ -116,5 +119,6 @@ include("free_energy/cycle.jl")
 include("bias/bias.jl")
 include("bias/cv.jl")
 include("bias/metadynamics.jl")
+include("interactions/reaxff.jl")
 
 end

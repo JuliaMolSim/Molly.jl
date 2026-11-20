@@ -30,6 +30,8 @@ export
     read_frame!
 
 @public pairwise_uses_velocity,
+    evaluate_before_pairwise,
+    concurrent_with_pairwise,
     from_device,
     to_device
 
@@ -50,6 +52,37 @@ An alias for NBodyInteraction{2}.
 Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
+
+"""
+    evaluate_before_pairwise(inter)
+
+Whether a general interaction is evaluated before pairwise and specific interactions
+when calculating the potential energy and forces.
+
+This is `false` by default, meaning that general interactions are calculated afterwards.
+Custom general interactions should implement this function to return `true` if
+they change the state such that it affects subsequent interactions (e.g. atomic charges).
+
+On the GPU those calculated afterwards can instead be calculated at the same time as the
+pairwise and specific interactions, see [`Molly.concurrent_with_pairwise`](@ref).
+"""
+evaluate_before_pairwise(inter) = false
+
+"""
+    concurrent_with_pairwise(inter)
+
+Whether a general interaction that is not evaluated before the pairwise interactions, see
+[`Molly.evaluate_before_pairwise`](@ref), can be calculated at the same time as the pairwise
+and specific interactions on the GPU.
+
+This is `false` by default, meaning that the interaction is calculated after the forces of
+the pairwise and specific interactions have been added.
+Custom general interactions can implement this function to return `true` if they only add
+their forces, rather than reading the forces of other interactions or changing the state.
+They are then calculated on a separate stream while the pairwise force kernel runs, unless
+a general interaction before them in the list returns `false`.
+"""
+concurrent_with_pairwise(inter) = false
 
 """
     from_device(arr)
@@ -769,27 +802,26 @@ work on the GPU.
 end
 
 """
-    MolecularTopology(bond_is, bond_js, n_atoms; array_type=Array)
-    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms=[];
-                      array_type=Array)
+    MolecularTopology(bond_is, bond_js, n_atoms)
+    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms=[])
 
 Topology information for a system.
 
 Stores the index of the molecule each atom belongs to, the number of
 atoms in each molecule and the list of bonded atom pairs.
-`array_type` sets where the arrays for the GPU unwrap live; host arrays are uploaded on first
-GPU use.
 """
-struct MolecularTopology{VI <: AbstractVector{Int32}}
+struct MolecularTopology
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
     bonded_atoms::Vector{Tuple{Int32, Int32}}
-    parent::VI       # length N; spanning-forest parent per atom, parent[root] == root
-    cluster_inds::VI # length N; bonded cluster (spanning tree) index per atom
-    sort_perm::VI    # length N; permutation grouping atoms contiguously by bonded cluster
-    cluster_offsets::VI # length n_clusters+1; 0-based prefix boundaries into sort_perm order
-    n_rounds::Int    # pointer-doubling round count for GPU unwrap_molecules; host Int, not device data
-    gpu_cache::Base.RefValue{Any}  # lazily filled device-resident arrays, see device_topology_arrays
+    # Cache of the data used to move molecules as units on the GPU, see
+    #   `molecule_unwrap_plan`, filled when first needed
+    unwrap_cache::Base.RefValue{Any}
+end
+
+function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms,
+                             Ref{Any}(nothing))
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -800,9 +832,9 @@ function bond_graph(bond_is, bond_js, n_atoms)
     return g
 end
 
-MolecularTopology(amis, macs; kwargs...) = MolecularTopology(amis, macs, []; kwargs...)
+MolecularTopology(amis, macs) = MolecularTopology(amis, macs, [])
 
-function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
+function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     g = bond_graph(bond_is, bond_js, n_atoms)
     cc = connected_components(g)
     atom_molecule_inds = zeros(Int32, n_atoms)
@@ -813,87 +845,7 @@ function MolecularTopology(bond_is, bond_js, n_atoms::Integer; kwargs...)
     end
     molecule_atom_counts = length.(cc)
     bonded_atoms = collect(zip(bond_is, bond_js))
-    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g; kwargs...)
-end
-
-# Spanning forest of the bond graph (parent per atom, roots point to themselves), for the
-# pointer doubling of the GPU unwrap_molecules; any spanning tree gives a valid unwrap
-function molecule_spanning_forest(g)
-    n_atoms = nv(g)
-    parent = collect(Int32, 1:n_atoms)   # self-loop default (covers bond-free/isolated atoms too)
-    cluster = zeros(Int32, n_atoms)
-    depth = zeros(Int, n_atoms)
-    visited = falses(n_atoms)
-    n_clusters = 0
-    for seed in 1:n_atoms
-        visited[seed] && continue
-        visited[seed] = true
-        n_clusters += 1
-        cluster[seed] = n_clusters
-        stack = Int[seed]
-        while !isempty(stack)
-            i = pop!(stack)
-            for j in neighbors(g, i)
-                visited[j] && continue
-                parent[j] = i
-                cluster[j] = n_clusters
-                depth[j] = depth[i] + 1
-                visited[j] = true
-                push!(stack, j)
-            end
-        end
-    end
-    max_depth = maximum(depth; init=0)
-    n_rounds = max_depth <= 1 ? 0 : ceil(Int, log2(max_depth)) # 2^n_rounds >= max_depth
-    return parent, cluster, n_clusters, n_rounds
-end
-
-function MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms;
-                           array_type::Type{AT}=Array) where AT
-    n_atoms = length(atom_molecule_inds)
-    bond_is = isempty(bonded_atoms) ? Int[] : first.(bonded_atoms)
-    bond_js = isempty(bonded_atoms) ? Int[] : last.(bonded_atoms)
-    g = bond_graph(bond_is, bond_js, n_atoms)
-    return molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
-                                    array_type=AT)
-end
-
-# Shared by both constructors, which pass the bond graph they have built
-function molecular_topology_inner(atom_molecule_inds, molecule_atom_counts, bonded_atoms, g;
-                                  array_type::Type{AT}=Array) where AT
-    parent_cpu, cluster_cpu, n_clusters, n_rounds = molecule_spanning_forest(g)
-
-    # Segments for the GPU unwrap are bonded clusters, as in the CPU unwrap, which can be
-    # smaller than the molecules given by atom_molecule_inds
-    sort_perm_cpu = Int32.(sortperm(cluster_cpu))
-    cluster_offsets_cpu = zeros(Int32, n_clusters + 1)
-    for c in cluster_cpu
-        cluster_offsets_cpu[c + 1] += 1
-    end
-    cumsum!(cluster_offsets_cpu, cluster_offsets_cpu)
-
-    return MolecularTopology(
-        Vector{Int32}(atom_molecule_inds), Vector{Int32}(molecule_atom_counts),
-        Vector{Tuple{Int32, Int32}}(collect(bonded_atoms)),
-        to_device(parent_cpu, AT), to_device(cluster_cpu, AT), to_device(sort_perm_cpu, AT),
-        to_device(cluster_offsets_cpu, AT), n_rounds, Base.RefValue{Any}(nothing),
-    )
-end
-
-# The spanning-forest arrays on device AT for the GPU unwrap_molecules, uploaded once and cached
-function device_topology_arrays(topology::MolecularTopology, ::Type{AT}) where AT
-    cached = topology.gpu_cache[]
-    !isnothing(cached) && cached.array_type === AT && return cached.arrays
-    arrays = (
-        parent = topology.parent isa AT ? topology.parent : to_device(topology.parent, AT),
-        cluster_inds = topology.cluster_inds isa AT ? topology.cluster_inds :
-                           to_device(topology.cluster_inds, AT),
-        sort_perm = topology.sort_perm isa AT ? topology.sort_perm : to_device(topology.sort_perm, AT),
-        cluster_offsets = topology.cluster_offsets isa AT ? topology.cluster_offsets :
-                              to_device(topology.cluster_offsets, AT),
-    )
-    topology.gpu_cache[] = (array_type=AT, arrays=arrays)
-    return arrays
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
 end
 
 """
@@ -909,7 +861,21 @@ The first `n` entries of `list` are the `(i, j, special)` pairs, see
 mutable struct NeighborList{T}
     n::Int # Number of neighbors in list (n <= length(list))
     list::T
+    # Not used, but makes the object take more than 128 bytes. CellListMap.jl fills a
+    #   list for each task, which are allocated next to each other and have `n` changed
+    #   for every pair. When two of them shared a 128 byte block of memory, which the
+    #   cache of Intel CPUs fetches together, the cores slowed each other down.
+    padding::NTuple{15, Int}
+
+    function NeighborList{T}(n, list,
+                             padding::NTuple{15, Int}=ntuple(_ -> 0, Val(15))) where T
+        return new{T}(n, list, padding)
+    end
 end
+
+NeighborList(n, list::T, padding...) where {T} = NeighborList{T}(n, list, padding...)
+
+Base.show(io::IO, nl::NeighborList) = print(io, typeof(nl), "(", nl.n, ", ", nl.list, ")")
 
 NeighborList() = NeighborList{Vector{Tuple{Int32, Int32, Bool}}}(0, [])
 
@@ -1537,6 +1503,7 @@ function System(;
     end
 
     check_specific_inter_lists(specific_inter_lists, n_atoms, on_gpu)
+    check_reaction_field_parameters(pairwise_inters, specific_inter_lists)
     check_neighbor_finder(neighbor_finder, pairwise_inters, n_atoms, boundary, on_gpu, strictness)
     max_sqdist = max_zero_beyond(pairwise_inters)
     if !isnothing(max_sqdist) && !iszero(max_sqdist)

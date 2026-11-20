@@ -1,5 +1,5 @@
 using Molly
-using Molly: box_sides, sorted_morton_seq!
+using Molly: sorted_morton_seq!
 using CUDA
 using StaticArrays
 
@@ -55,11 +55,8 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
     compress_ms = 0.0
     reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
     if reorder_needed
-        morton_bits = 10
-        sides = box_sides(sys.boundary)
-        cell_width = sides ./ (2^morton_bits)
         morton_sort_ms = gpu_stage_time_ms!() do
-            sorted_morton_seq!(buffers, sys.coords, cell_width, morton_bits)
+            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
@@ -72,33 +69,15 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
     end
 
     bounds_ms = gpu_stage_time_ms!() do
-        if sys.boundary isa TriclinicBoundary
-            H = SMatrix{3, 3, T}(
-                sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val,
-            )
-            @cuda blocks=n_blocks threads=32 ext.kernel_min_max_triclinic!(
-                buffers.morton_seq,
-                buffers.box_mins,
-                buffers.box_maxs,
-                sys.coords,
-                inv(H),
-                Val(N),
-                sys.boundary,
-                Val(D),
-            )
-        else
-            @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
-                buffers.morton_seq,
-                buffers.box_mins,
-                buffers.box_maxs,
-                sys.coords,
-                Val(N),
-                sys.boundary,
-                Val(D),
-            )
-        end
+        @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
+            buffers.morton_seq,
+            buffers.box_mins,
+            buffers.box_maxs,
+            sys.coords,
+            Val(N),
+            sys.boundary,
+            Val(D),
+        )
     end
 
     max_tiles = length(buffers.interacting_tiles_i)
@@ -261,11 +240,8 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
     compress_ms = 0.0
     reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
     if reorder_needed
-        morton_bits = 10
-        sides = box_sides(sys.boundary)
-        cell_width = sides ./ (2^morton_bits)
         morton_sort_ms = gpu_stage_time_ms!() do
-            sorted_morton_seq!(buffers, sys.coords, cell_width, morton_bits)
+            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
             sys.neighbor_finder.initialized = true
         end
         compress_ms = gpu_stage_time_ms!() do
@@ -278,33 +254,15 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
     end
 
     bounds_ms = gpu_stage_time_ms!() do
-        if sys.boundary isa TriclinicBoundary
-            H = SMatrix{3, 3, T}(
-                sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
-                sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
-                sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val,
-            )
-            @cuda blocks=n_blocks threads=32 ext.kernel_min_max_triclinic!(
-                buffers.morton_seq,
-                buffers.box_mins,
-                buffers.box_maxs,
-                sys.coords,
-                inv(H),
-                Val(N),
-                sys.boundary,
-                Val(D),
-            )
-        else
-            @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
-                buffers.morton_seq,
-                buffers.box_mins,
-                buffers.box_maxs,
-                sys.coords,
-                Val(N),
-                sys.boundary,
-                Val(D),
-            )
-        end
+        @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
+            buffers.morton_seq,
+            buffers.box_mins,
+            buffers.box_maxs,
+            sys.coords,
+            Val(N),
+            sys.boundary,
+            Val(D),
+        )
     end
 
     max_tiles = length(buffers.interacting_tiles_i)

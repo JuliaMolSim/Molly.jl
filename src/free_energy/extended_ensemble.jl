@@ -54,6 +54,15 @@ function ExtendedStateSpace(thermo_states::AbstractArray{<:ThermoState};
     )
 end
 
+# The partition evaluates the energies of the states with frozen copies of the
+#   interactions, so a changing bias would be ignored
+function check_thermo_states_history_inters(thermo_states, sim_name)
+    for ts in thermo_states
+        check_no_history_inters(values(ts.system.general_inters), sim_name)
+    end
+    return nothing
+end
+
 # n_states(space::ExtendedStateSpace)
 #
 # Return the number of thermodynamic states in an expanded ensemble.

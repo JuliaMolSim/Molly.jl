@@ -12,6 +12,8 @@ export ANIPotential
 # Base type for ML interatomic potentials, a shared supertype for current and future ones.
 abstract type AbstractMLPotential end
 
+concurrent_with_pairwise(::AbstractMLPotential) = true
+
 # ANI energies are produced in Hartree; MD in Molly is typically in eV.
 const HARTREE_TO_EV = ustrip(u"eV", 1u"Eh_au")
 
@@ -25,7 +27,7 @@ end
 celu01(x::T) where T = x >= zero(T) ? x : T(0.1) * (exp(x / T(0.1)) - one(T))
 
 """
-    ANIPotential(path; T=Float32, ensemble_idx=nothing)
+    ANIPotential(path; ensemble_idx=nothing)
 
 The ANI potential implemented as an AtomsCalculators.jl calculator.
 
@@ -42,10 +44,11 @@ By default all ensemble members are loaded and their energies averaged. Pass
 
 Coordinates without units are treated as nm following the Molly convention, and
 converted internally to the Å the ANI parameters use. Periodic systems must use a
-neighbor finder.
+neighbor finder with the eligible pairs set.
 
-Note: the ANI-2x weights are `Float32`, so the energy/force paths run in `Float32`
+The ANI-2x weights are `Float32`, so the energy/force paths run in `Float32`
 internally regardless of the system's coordinate type.
+Not compatible with virial calculation.
 """
 struct ANIPotential{M, PV, SV, SP, P, SE, D} <: AbstractMLPotential
     model::M          # NamedTuple of per-element Lux.Chain sub-networks (shared architecture)
@@ -58,11 +61,28 @@ struct ANIPotential{M, PV, SV, SP, P, SE, D} <: AbstractMLPotential
     buffers::Ref{Any} # lazily-initialized AEVBuffers for zero-allocation AEV computation
 end
 
+# The AEVs read the pairs of the neighbor list when there is one, out to the cutoff, so
+#   that a neighbor finder with `auto_update` knows when to rebuild the list
+neighbor_cutoff(inter::ANIPotential) = inter.cutoff * u"Å"
+
 # Fallback constructor. The real `AbstractString` method is in ext/MollyLuxExt.jl (needs Lux +
 # HDF5); `path` is left untyped here so that method is strictly more specific and does not
 # overwrite this one (method overwriting is an error during extension precompilation).
 function ANIPotential(path; kwargs...)
     error("ANIPotential requires Lux and HDF5 to be loaded: `using Lux, HDF5`")
+end
+
+# Number of neural network weights and biases in nested parameter NamedTuples
+n_nn_parameters(x::AbstractArray{<:Number}) = length(x)
+n_nn_parameters(::Number) = 1
+n_nn_parameters(x) = sum(n_nn_parameters, values(x); init=0)
+
+function Base.show(io::IO, inter::ANIPotential)
+    elements = sort(collect(keys(inter.species_map)); by=(el -> inter.species_map[el]))
+    n_members = length(inter.ps_vec)
+    print(io, "ANIPotential with ", length(elements), " elements (", join(elements, ", "),
+          "), ", n_members, " ensemble member", (n_members == 1 ? "" : "s"), " and ",
+          n_nn_parameters(inter.ps_vec), " parameters")
 end
 
 """

@@ -143,7 +143,9 @@ function hydrodynamic_radius(coords::Array{SVector{D, T}}, boundary) where {D, T
     return inv(inv_R_hyd)
 end
 
-function axis_limits(boundary_conv, coord_logger, dim)
+# `boundary_min_conv` is the lower corner of the box, which is not the origin for some
+#   triclinic boxes, see `cubic_bounding_box_min`
+function axis_limits(boundary_conv, coord_logger, dim, boundary_min_conv=nothing)
     lim = boundary_conv[dim]
     if isinf(lim)
         # Find coordinate limits in given dimension
@@ -151,7 +153,8 @@ function axis_limits(boundary_conv, coord_logger, dim)
         high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), values(coord_logger)))
         return low, high
     else
-        return 0.0, lim
+        low = (isnothing(boundary_min_conv) ? 0.0 : boundary_min_conv[dim])
+        return low, lim
     end
 end
 

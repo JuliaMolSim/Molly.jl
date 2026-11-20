@@ -160,8 +160,10 @@ Give this when setting up a pairwise interaction such as [`LennardJones`](@ref).
 """
 struct GeometricMixing end
 
+# The parameters are non-negative, and the absolute value lets the compiler drop the
+#   domain check of `sqrt`, which is a branch in every pair of the GPU kernels
 function xy_mixing(::GeometricMixing, x, y, args...) 
-    return sqrt(x * y)
+    return sqrt(abs(x * y))
 end
 
 function xy_mixing(::GeometricMixing, x::Tuple, y::Tuple, λ_params, alch_role, args...) 
@@ -292,6 +294,26 @@ Provide when setting up a [`Molly.MixingException`](@ref).
 struct ExceptionList{N, K, V} # GPU-compatible dictionary-like object for pair lookup
     keys::SVector{N, K}
     values::SVector{N, V}
+    type_mask::UInt64
+end
+
+# One bit per atom type, so a type that appears in no exception key can be recognised
+#   without reading the keys at all. `% UInt8` rather than a conversion as it cannot throw
+#   on a negative or otherwise unusual type index. Non-integer types get an all-ones mask,
+#   which always takes the full lookup.
+@inline type_bit(t::Integer) = UInt64(1) << ((t % UInt8) & 0x3f)
+@inline type_bit(t) = typemax(UInt64)
+
+function exception_type_mask(ks)
+    mask = zero(UInt64)
+    for (t1, t2) in ks
+        mask |= type_bit(t1) | type_bit(t2)
+    end
+    return mask
+end
+
+function ExceptionList(ks::SVector{N}, vs::SVector{N}) where N
+    return ExceptionList(ks, vs, exception_type_mask(ks))
 end
 
 function ExceptionList(d)
@@ -301,14 +323,44 @@ function ExceptionList(d)
     return ExceptionList(ks, vs)
 end
 
-# Avoiding branches helps GPU performance
-function get_pair(d::ExceptionList{N}, i, j, default) where N
+# Most pairs are not an exception, and skipping them matters more than the branch costs:
+#   an exception covers a handful of the force field's types, so for whole warps of water
+#   or bulk protein the mask rules the pair out with no key reads at all. Exact when every
+#   type index is below 64; above that `& 0x3f` aliases, which can only cause a needless
+#   lookup and never a wrong value.
+@inline function get_pair(d::ExceptionList, i, j, default)
+    mask = d.type_mask
+    if iszero(mask & type_bit(i)) || iszero(mask & type_bit(j))
+        return default
+    end
+    return exception_lookup(d, i, j, default)
+end
+
+# Unrolled, because the list travels into a GPU kernel inside the interaction struct, as a
+#   by-value kernel parameter. A run-time index into such a parameter makes the compiler
+#   copy the whole aggregate to the per-thread stack and load it back with `ld.local`;
+#   compile-time indices are served from parameter space instead. The chain is built in
+#   ascending order so the last matching key wins, as in `get_pair_loop`, and stays
+#   branchless. `get_pair_loop` catches an implausibly long list, where unrolling would
+#   cost more compile time than the lookup saves.
+@generated function exception_lookup(d::ExceptionList{N}, i, j, default) where N
+    N > 128 && return :(get_pair_loop(d, i, j, default))
+    expr = :default
+    for ki in 1:N
+        expr = :(ifelse(((d.keys[$ki][1] == i) & (d.keys[$ki][2] == j)) |
+                        ((d.keys[$ki][1] == j) & (d.keys[$ki][2] == i)),
+                        oftype(default, d.values[$ki]), $expr))
+    end
+    return expr
+end
+
+function get_pair_loop(d::ExceptionList{N}, i, j, default) where N
     k1 = (i, j)
     k2 = (j, i)
     val = default
     for ki in 1:N
         if d.keys[ki] == k1 || d.keys[ki] == k2
-            val = d.values[ki]
+            val = oftype(default, d.values[ki])
         end
     end
     return val

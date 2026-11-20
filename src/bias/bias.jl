@@ -35,12 +35,15 @@ function potential_energy(lb::LinearBias, cv_sim; kwargs...)
 end
 
 """
-    bias_gradient(bias_type, cv_sim)
+    bias_gradient(bias_type, cv_sim; kwargs...)
 
 Calculate the gradient of a bias potential with respect to the value of a
 collective variable.
 
 Custom bias types should implement this function along with [`potential_energy`](@ref).
+Both are given the keyword arguments of the force or energy call, such as `step_n`,
+`visit_state` and `strictness`, so a bias type that changes with the simulation history
+can update when `visit_state` is `true`.
 
 # Arguments
 - `bias_type`: a struct that defines the type of bias to be used, such as
@@ -48,7 +51,7 @@ Custom bias types should implement this function along with [`potential_energy`]
 - `cv_sim`: the value of a measured collective variable given the coordinates
     of a simulation.
 """
-function bias_gradient(lb::LinearBias, cv_sim)
+function bias_gradient(lb::LinearBias, cv_sim; kwargs...)
     d = cv_sim - lb.cv_target
     iszero(d) && return zero(lb.k)
     return lb.k * d / abs(d)
@@ -79,7 +82,7 @@ function potential_energy(sb::SquareBias, cv_sim; kwargs...)
     return (sb.k / 2) * (cv_sim - sb.cv_target)^2
 end
 
-function bias_gradient(sb::SquareBias, cv_sim)
+function bias_gradient(sb::SquareBias, cv_sim; kwargs...)
     return sb.k * (cv_sim - sb.cv_target)
 end
 
@@ -135,7 +138,7 @@ function potential_energy(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     return (fb.k / 2) * (d_abs - fb.r_fb)^2 * H
 end
 
-function bias_gradient(fb::FlatBottomSquareBias, cv_sim)
+function bias_gradient(fb::FlatBottomSquareBias, cv_sim; kwargs...)
     d = cv_sim - fb.cv_target
     d_abs = abs(d)
     d_abs <= fb.r_fb && return zero(fb.k * fb.r_fb)
@@ -210,7 +213,7 @@ function potential_energy(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     end
 end
 
-function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim)
+function bias_gradient(pb::PeriodicFlatBottomBias, cv_sim; kwargs...)
     d_wrapped = periodic_flat_bottom_displacement(cv_sim, pb.cv_target)
     
     dist = abs(d_wrapped)
@@ -252,6 +255,9 @@ struct BiasPotential{C, B}
     bias_type::B
 end
 
+# A bias type that changes with the simulation history makes the whole bias potential do so
+is_history_dependent(bias::BiasPotential) = is_history_dependent(bias.bias_type)
+
 bias_all_finite(values::AbstractArray) = all(bias_all_finite, values)
 bias_all_finite(values::Tuple) = all(bias_all_finite, values)
 bias_all_finite(value) = isfinite(ustrip(value))
@@ -280,23 +286,24 @@ function check_bias_finite(value, label::AbstractString, bias;
     error(msg)
 end
 
-# Coordinates a BiasPotential should use, unwrapped for correction==:pbc. With buffers, routes
-# through the shared once-per-forces!-call unwrap cache (ensure_unwrapped_coords!, force.jl)
-# instead of recomputing per bias.
-function bias_coords(sys, cv_type, buffers=nothing, step_n=nothing)
-    cv_type.correction != :pbc && return sys.coords
-    return unwrapped_coords(sys, buffers, step_n)
-end
-
-# Unwrapped coordinates on the device of sys.coords, from the cache inside a forces! call
-function unwrapped_coords(sys, buffers=nothing, step_n=nothing)
-    if !isnothing(buffers) && !isnothing(step_n) && hasproperty(buffers, :unwrapped_coords)
-        return ensure_unwrapped_coords!(buffers, sys)
+# Unwrapped coordinates on the device of sys.coords, computed once per call of the GPU
+#   forces!, which passes its cache as the unwrapped_coords keyword
+function cached_unwrap(sys, cache=nothing)
+    isnothing(cache) && return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    if isnothing(cache[])
+        cache[] = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
     end
-    return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    return cache[]
 end
 
-function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
+# The coordinates a bias uses, unwrapped for correction=:pbc
+function bias_coords(sys, cv_type, cache=nothing)
+    cv_type.correction != :pbc && return sys.coords
+    return cached_unwrap(sys, cache)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                            bias::BiasPotential; kwargs...)
     coords = bias_coords(sys, bias.cv_type)
 
     cv_sim = calculate_cv(
@@ -313,15 +320,15 @@ function AtomsCalculators.potential_energy(sys, bias::BiasPotential; kwargs...)
     return check_bias_finite(pe, "potential energy", bias; cv_sim=cv_sim)
 end
 
-function AtomsCalculators.forces!(
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
-    step_n = nothing,
+    unwrapped_coords = nothing,
     kwargs...
 )
     # Copied to the host once, also for the virial
-    coords = from_device(bias_coords(sys, bias.cv_type, buffers, step_n))
+    coords = from_device(bias_coords(sys, bias.cv_type, unwrapped_coords))
     atoms = from_device(sys.atoms)
 
     # Gradient of CV with respect to coordinates
@@ -335,8 +342,8 @@ function AtomsCalculators.forces!(
     check_bias_finite(cv_sim, "collective variable", bias)
     check_bias_finite(d_coords, "CV gradient", bias; cv_sim=cv_sim)
 
-    # Gradient of bias function with respect to CV
-    d_bias = bias_gradient(bias.bias_type, cv_sim)
+    # Gradient of bias function with respect to CV, given the keyword arguments of the force call
+    d_bias = bias_gradient(bias.bias_type, cv_sim; kwargs...)
     check_bias_finite(d_bias, "bias gradient", bias; cv_sim=cv_sim)
 
     fs_svec = d_bias .* d_coords
@@ -355,3 +362,7 @@ function AtomsCalculators.forces!(
     fs .-= to_device(fs_svec, typeof(fs))
     return fs
 end
+
+AtomsCalculators.zero_forces(sys::System, ::BiasPotential) = zero_forces(sys)
+
+concurrent_with_pairwise(::BiasPotential) = true

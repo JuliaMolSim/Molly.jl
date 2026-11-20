@@ -53,7 +53,8 @@ end
 end
 
 @doc raw"""
-    CosineAngleλ(; k, θ0, λ_mixing=MinimumMixing(), scheduler=Molly.DefaultLambdaScheduler())
+    CosineAngleλ(; k, θ0, λ_mixing=Molly.MinimumMixing(),
+                 scheduler=Molly.DefaultLambdaScheduler())
 
 A cosine bond angle between three atoms in an alchemical system, the λ version of
 [`CosineAngle`](@ref).

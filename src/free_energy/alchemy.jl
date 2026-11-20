@@ -265,8 +265,8 @@ Lambda scheduler that reproduces the relative free energy setup of
 The electrostatics and sterics follow the same stages as [`Molly.DefaultLambdaScheduler`](@ref),
 but the defaults use single topology with individual scaling of the Coulomb parameters. As in
 OpenFE, the charges of the 1-4 interactions are scaled for each state, and the alchemical atoms
-do not contribute to the Lennard-Jones dispersion correction. Use `LJsoftcore=:gapsys` and
-`Csoftcore=:scaled` to match OpenFE.
+do not contribute to the Lennard-Jones dispersion correction. Use `lj_softcore=:gapsys` and
+`coulomb_softcore=:scaled` to match OpenFE.
 
 A [`Molly.LambdaScheduler`](@ref), see there for the keyword arguments.
 """

@@ -151,8 +151,8 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))
@@ -161,7 +161,7 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum=false, rng=Ran
     awh_state = AWHState(thermo_states; reuse_neighbors=true)
     awh_sim = AWHSimulation(
         awh_state;
-        num_md_steps = N_MD_STEPS,
+        n_md_steps = N_MD_STEPS,
         update_freq = 1,
         well_tempered_factor = FT(Inf),
         log_freq = 10,

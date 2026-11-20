@@ -158,7 +158,7 @@ end
             ),
         )
 
-        coupling = (BerendsenBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01),)
+        coupling = (BerendsenBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01, n_steps=1),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,

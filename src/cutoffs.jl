@@ -66,15 +66,19 @@ function pe_cutoff(cutoff::AbstractCutoff{0}, inter, r, params)
     return pairwise_pe(inter, r, params)
 end
 
+# `ifelse` with zero rather than multiplying by the `Bool` avoids the sign handling of
+#   `Bool` multiplication, which is an extra instruction per pair on the GPU
+@inline within_cutoff(x, r, dist_cutoff) = ifelse(r <= dist_cutoff, x, zero(x))
+
 function pe_cutoff(cutoff::AbstractCutoff{1}, inter, r, params)
-    return pe_apply_cutoff(cutoff, inter, r, params) * (r <= cutoff.dist_cutoff)
+    return within_cutoff(pe_apply_cutoff(cutoff, inter, r, params), r, cutoff.dist_cutoff)
 end
 
 function pe_cutoff(cutoff::AbstractCutoff{2}, inter, r, params)
     return ifelse(
         r <= cutoff.dist_activation,
         pairwise_pe(inter, r, params),
-        pe_apply_cutoff(cutoff, inter, r, params) * (r <= cutoff.dist_cutoff),
+        within_cutoff(pe_apply_cutoff(cutoff, inter, r, params), r, cutoff.dist_cutoff),
     )
 end
 
@@ -92,14 +96,14 @@ function force_cutoff(cutoff::AbstractCutoff{0}, inter, r, params)
 end
 
 function force_cutoff(cutoff::AbstractCutoff{1}, inter, r, params)
-    return force_apply_cutoff(cutoff, inter, r, params) * (r <= cutoff.dist_cutoff)
+    return within_cutoff(force_apply_cutoff(cutoff, inter, r, params), r, cutoff.dist_cutoff)
 end
 
 function force_cutoff(cutoff::AbstractCutoff{2}, inter, r, params)
     return ifelse(
         r <= cutoff.dist_activation,
         pairwise_force(inter, r, params),
-        force_apply_cutoff(cutoff, inter, r, params) * (r <= cutoff.dist_cutoff),
+        within_cutoff(force_apply_cutoff(cutoff, inter, r, params), r, cutoff.dist_cutoff),
     )
 end
 

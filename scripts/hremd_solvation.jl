@@ -111,8 +111,8 @@ function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum
             FT(λ),
             solute_indices;
             scheduler = scheduler,
-            LJsoftcore = :beutler,
-            Csoftcore = :scaled,
+            lj_softcore = :beutler,
+            coulomb_softcore = :scaled,
         )
 
         push!(thermo_states, ThermoState(sys_w, deepcopy(integrator)))

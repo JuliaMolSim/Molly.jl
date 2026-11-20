@@ -1,3 +1,17 @@
+# A pairwise force that is not along the vector between the atoms, giving a virial
+#   tensor that is not symmetric
+struct NonCentralInter{T} <: PairwiseInteraction
+    dist_cutoff::T
+end
+
+function Molly.force(inter::NonCentralInter, dr, atom_i, atom_j, force_units, special,
+                     coord_i, coord_j, boundary, vel_i, vel_j, step_n, args...)
+    T = eltype(dr)
+    r2 = sum(abs2, dr)
+    w = (r2 < inter.dist_cutoff^2 ? (1 - r2 / inter.dist_cutoff^2)^2 : zero(T))
+    return w * SVector(T(0.3) * dr[2] + dr[1], T(-0.7) * dr[3] + dr[2], T(0.5) * dr[1] + dr[3])
+end
+
 @testset "GPU Consistency" begin
     if run_cuda_tests
         @testset "33-atom (No Cancellation)" begin
@@ -346,6 +360,62 @@
             @test isapprox(pe_gpu, pe_cpu, rtol=1e-8, atol=1e-10)
         end
 
+        @testset "Triclinic Boundary with negative off-diagonal components" begin
+            # Wrapped coordinates can be negative in these boxes, which the Morton ordering
+            #   and the block bounds of the tile search have to handle
+            T = Float64
+            d = T(4.0)
+            boundaries = (
+                # Truncated octahedron
+                TriclinicBoundary(
+                    SVector(d, zero(T), zero(T)),
+                    SVector(d / 3, 2 * sqrt(T(2)) * d / 3, zero(T)),
+                    SVector(-d / 3, sqrt(T(2)) * d / 3, sqrt(T(6)) * d / 3),
+                ),
+                TriclinicBoundary(SVector(d, d, d), deg2rad.(SVector(T(100), T(80), T(120)))),
+            )
+            for boundary in boundaries
+                n_atoms = 1_000
+                coords = place_atoms(n_atoms, boundary; min_dist=T(0.1), rng=Xoshiro(1))
+                @test minimum(c -> c[1], coords) < zero(T)
+                atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.1), ϵ=T(1.0))
+                         for i in 1:n_atoms]
+                r_cut = T(1.0)
+                pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
+                sys = System(
+                    atoms=CuArray(atoms),
+                    coords=CuArray(coords),
+                    boundary=boundary,
+                    pairwise_inters=pairwise_inters,
+                    neighbor_finder=GPUNeighborFinder(
+                        n_atoms=n_atoms,
+                        dist_cutoff=r_cut,
+                        array_type=CuArray,
+                    ),
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+                cpu_sys = System(
+                    atoms=atoms,
+                    coords=coords,
+                    boundary=boundary,
+                    pairwise_inters=pairwise_inters,
+                    neighbor_finder=DistanceNeighborFinder(
+                        n_atoms=n_atoms,
+                        dist_cutoff=r_cut,
+                    ),
+                    force_units=NoUnits,
+                    energy_units=NoUnits,
+                )
+
+                fs_cpu = forces(cpu_sys, find_neighbors(cpu_sys))
+                fs_gpu = Array(forces(sys, nothing))
+                @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                @test isapprox(potential_energy(sys, nothing),
+                               potential_energy(cpu_sys, find_neighbors(cpu_sys)); rtol=1e-8)
+            end
+        end
+
         @testset "Exclusions and Special Pairs" begin
             n_atoms = 10
             D = 3
@@ -407,68 +477,139 @@
             ext = Base.get_extension(Molly, :MollyCUDAExt)
             n_atoms = 8000
             T = Float64
-            boundary = CubicBoundary(T(4.5))
+            # Truncated octahedra of the same volume, given as basis vectors (cx < 0) and
+            #   as angles of 109.47 degrees (bx, cx and cy < 0)
+            d = cbrt(T(4.5)^3 / (4 * sqrt(T(3)) / 9))
+            boundaries = (
+                CubicBoundary(T(4.5)),
+                TriclinicBoundary(SVector(d, zero(T), zero(T)),
+                                  SVector(d / 3, 2 * sqrt(T(2)) * d / 3, zero(T)),
+                                  SVector(-d / 3, sqrt(T(2)) * d / 3, sqrt(T(6)) * d / 3)),
+                TriclinicBoundary(SVector(d, d, d), SVector(acos(T(-1/3)), acos(T(-1/3)),
+                                                            acos(T(-1/3)))),
+            )
             r_cut = T(1.0)
-            Random.seed!(7)
-            coords = place_atoms(n_atoms, boundary; min_dist=T(0.1))
-            atoms = [Atom(index=i, mass=T(10.0), charge=T(0.0), σ=T(0.2), ϵ=T(0.2))
-                     for i in 1:n_atoms]
-            pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
+            for boundary in boundaries
+                Random.seed!(7)
+                coords = place_atoms(n_atoms, boundary; min_dist=T(0.1))
+                atoms = [Atom(index=i, mass=T(10.0), charge=T(0.0), σ=T(0.2), ϵ=T(0.2))
+                         for i in 1:n_atoms]
+                pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
 
-            # Random exclusions and special pairs among close atoms, so that they matter
-            sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
-                             pairwise_inters=pairwise_inters,
-                             neighbor_finder=DistanceNeighborFinder(
-                                 n_atoms=n_atoms, dist_cutoff=r_cut),
-                             force_units=NoUnits, energy_units=NoUnits)
-            close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
-            shuffle!(close_pairs)
-            excluded_pairs = close_pairs[1:2000]
-            special_pairs = close_pairs[2001:3000]
+                # Random exclusions and special pairs among close atoms, so that they matter
+                sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
+                                 pairwise_inters=pairwise_inters,
+                                 neighbor_finder=DistanceNeighborFinder(
+                                     n_atoms=n_atoms, dist_cutoff=r_cut),
+                                 force_units=NoUnits, energy_units=NoUnits)
+                close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
+                shuffle!(close_pairs)
+                excluded_pairs = close_pairs[1:2000]
+                special_pairs = close_pairs[2001:3000]
 
-            cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
-                             pairwise_inters=pairwise_inters,
-                             neighbor_finder=DistanceNeighborFinder(
-                                 n_atoms=n_atoms, dist_cutoff=r_cut,
-                                 excluded_pairs=excluded_pairs, special_pairs=special_pairs),
-                             force_units=NoUnits, energy_units=NoUnits)
-            gpu_sys = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
-                             pairwise_inters=pairwise_inters,
-                             neighbor_finder=GPUNeighborFinder(
-                                 n_atoms=n_atoms, dist_cutoff=r_cut,
-                                 excluded_pairs=excluded_pairs, special_pairs=special_pairs,
-                                 array_type=CuArray),
-                             force_units=NoUnits, energy_units=NoUnits)
-            @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.eligible) == 2000
-            @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.special) == 1000
+                cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                                 pairwise_inters=pairwise_inters,
+                                 neighbor_finder=DistanceNeighborFinder(
+                                     n_atoms=n_atoms, dist_cutoff=r_cut,
+                                     excluded_pairs=excluded_pairs, special_pairs=special_pairs),
+                                 force_units=NoUnits, energy_units=NoUnits)
+                gpu_sys = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
+                                 pairwise_inters=pairwise_inters,
+                                 neighbor_finder=GPUNeighborFinder(
+                                     n_atoms=n_atoms, dist_cutoff=r_cut,
+                                     excluded_pairs=excluded_pairs, special_pairs=special_pairs,
+                                     array_type=CuArray),
+                                 force_units=NoUnits, energy_units=NoUnits)
+                @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.eligible) == 2000
+                @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.special) == 1000
 
-            fs_cpu = forces(cpu_sys)
-            pe_cpu = potential_energy(cpu_sys)
+                fs_cpu = forces(cpu_sys)
+                pe_cpu = potential_energy(cpu_sys)
 
-            # The tree search finds the same tiles as the search over all pairs of blocks
-            buffers = Molly.init_buffers!(gpu_sys, 1)
-            Molly.forces!(Molly.zero_forces(gpu_sys), gpu_sys, nothing, 0, buffers, Val(false))
-            n_blocks = cld(n_atoms, 32)
-            tile_list(buffers) = sort(collect(zip(
-                Array(buffers.interacting_tiles_i)[1:buffers.num_pairs],
-                Array(buffers.interacting_tiles_j)[1:buffers.num_pairs],
-            )))
-            function search_tiles!(search!)
-                ext.reset_interacting_tile_state!(buffers)
-                search!(buffers, gpu_sys, n_blocks)
-                buffers.num_pairs = Int(only(Array(buffers.num_interacting_tiles)))
-                return tile_list(buffers)
-            end
-            tiles_all_pairs = search_tiles!(ext.find_interacting_tiles_all_pairs!)
-            @test search_tiles!(ext.find_interacting_tiles_tree!) == tiles_all_pairs
-            @test length(tiles_all_pairs) > n_blocks
+                # The tree search finds the same tiles as the search over all pairs of blocks
+                buffers = Molly.init_buffers!(gpu_sys, 1)
+                Molly.forces!(Molly.zero_forces(gpu_sys), gpu_sys, nothing, 0, buffers, Val(false))
+                n_blocks = cld(n_atoms, 32)
+                tile_list(buffers) = sort(collect(zip(
+                    Array(buffers.interacting_tiles_i)[1:buffers.num_pairs],
+                    Array(buffers.interacting_tiles_j)[1:buffers.num_pairs],
+                )))
+                function search_tiles!(search!)
+                    ext.reset_interacting_tile_state!(buffers)
+                    search!(buffers, gpu_sys, n_blocks)
+                    buffers.num_pairs = Int(only(Array(buffers.num_interacting_tiles)))
+                    return tile_list(buffers)
+                end
+                tiles_all_pairs = search_tiles!(ext.find_interacting_tiles_all_pairs!)
+                @test search_tiles!(ext.find_interacting_tiles_tree!) == tiles_all_pairs
+                @test n_blocks < length(tiles_all_pairs) < n_blocks * (n_blocks + 1) ÷ 2
 
-            for tree_min_blocks in ("1", "1000000")
-                withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
-                    fs_gpu = Array(forces(gpu_sys, nothing))
-                    pe_gpu = potential_energy(gpu_sys, nothing)
+                # After the tree search the tiles, with their types, are sorted by 32x32
+                #   groups of blocks, the order in which the all-pairs search finds them
+                function found_tiles(tree_min_blocks)
+                    withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
+                        ext.find_interacting_tiles!(buffers, gpu_sys, n_blocks)
+                    end
+                    return collect(zip(
+                        Array(buffers.interacting_tiles_i)[1:buffers.num_pairs],
+                        Array(buffers.interacting_tiles_j)[1:buffers.num_pairs],
+                        Array(buffers.interacting_tiles_type)[1:buffers.num_pairs],
+                    ))
+                end
+                found_all_pairs = found_tiles("1000000")
+                found_tree = found_tiles("1")
+                @test sort(found_tree) == sort(found_all_pairs)
+                @test issorted(found_tree; by=t -> ((t[2] - 1) ÷ 32, (t[1] - 1) ÷ 32, t[2], t[1]))
+                @test any(t -> t[3] == 0x00, found_tree) && any(t -> t[3] == 0x01, found_tree)
+
+                # The tree search is used from a number of blocks that grows with the tiles
+                #   per block of the previous search, or 0 tiles before the first search
+                @test ext.use_tile_tree(gpu_sys, 20_000, 0)
+                @test !ext.use_tile_tree(gpu_sys, 2_000, 0)
+                @test ext.use_tile_tree(gpu_sys, 6_000, 6_000 * 30)
+                @test !ext.use_tile_tree(gpu_sys, 6_000, 6_000 * 300)
+
+                for tree_min_blocks in ("1", "1000000")
+                    withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
+                        fs_gpu = Array(forces(gpu_sys, nothing))
+                        pe_gpu = potential_energy(gpu_sys, nothing)
+                        @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                        @test isapprox(pe_gpu, pe_cpu; rtol=1e-10)
+                    end
+                end
+
+                if boundary isa TriclinicBoundary
+                    # Coordinates moved by lattice vectors give the same forces, since the
+                    #   Morton order and the block bounds wrap them into the box
+                    B = Molly.box_matrix(boundary)
+                    rng = Xoshiro(8)
+                    coords_shifted = [c + B * SVector{3, T}(rand(rng, -2:2), rand(rng, -2:2),
+                                                           rand(rng, -2:2)) for c in coords]
+                    gpu_sys_shifted = System(gpu_sys; coords=CuArray(coords_shifted))
+                    fs_gpu = Array(forces(gpu_sys_shifted, nothing))
                     @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
-                    @test isapprox(pe_gpu, pe_cpu; rtol=1e-10)
+
+                    # The triclinic box test is exact, checked against the distance between
+                    #   the boxes over all images up to three lattice vectors away
+                    sides = Molly.box_sides(boundary)
+                    n_wrong = 0
+                    for _ in 1:2000
+                        ext_1 = rand(rng, SVector{3, T}) .* sides .* T(0.4)
+                        ext_2 = rand(rng, SVector{3, T}) .* sides .* T(0.4)
+                        min_1 = rand(rng, SVector{3, T}) .* (sides .- ext_1)
+                        min_2 = rand(rng, SVector{3, T}) .* (sides .- ext_2)
+                        r_cut_test = rand(rng, T) * minimum(sides) / 2
+                        dist2 = minimum(Iterators.product(-3:3, -3:3, -3:3)) do n
+                            shift = B * SVector{3, T}(n)
+                            gaps = max.(min_2 .+ shift .- (min_1 .+ ext_1),
+                                        min_1 .- (min_2 .+ ext_2 .+ shift), zero(T))
+                            sum(abs2, gaps)
+                        end
+                        within = ext.boxes_within_cutoff(min_1, min_1 + ext_1, min_2,
+                                                         min_2 + ext_2, boundary, r_cut_test^2)
+                        n_wrong += (within != (dist2 <= r_cut_test^2))
+                    end
+                    @test n_wrong == 0
                 end
             end
         end
@@ -739,6 +880,44 @@
 
             @test vels_cpu != init_vels
             @test maximum(norm, vels_gpu_cpu .- vels_cpu) < 16 * eps(FT)
+        end
+
+        @testset "Non-central virial T=$T" for T in (Float32, Float64)
+            # 300 atoms gives partial tiles, and the exclusions give masked tiles
+            # The box is slightly over three cutoffs wide since GPUCellListNeighborFinder
+            #   pads the cutoff to guard against rounding
+            n_atoms = 300
+            boundary = CubicBoundary(T(3.0001))
+            dist_cutoff = T(1.0)
+            coords = place_atoms(n_atoms, boundary; min_dist=T(0.1), rng=Xoshiro(1))
+            atoms = [Atom(index=i, mass=T(1.0)) for i in 1:n_atoms]
+            excluded_pairs = [(i, i + 1) for i in 1:3:(n_atoms - 1)]
+            inters = (NonCentralInter(dist_cutoff),)
+            make_sys(AT, nf) = System(atoms=AT(atoms), coords=AT(coords), boundary=boundary,
+                                      pairwise_inters=inters, neighbor_finder=nf,
+                                      force_units=NoUnits, energy_units=NoUnits)
+            nf_args = (n_atoms=n_atoms, dist_cutoff=dist_cutoff, excluded_pairs=excluded_pairs)
+            sys_cpu = make_sys(Array, DistanceNeighborFinder(; nf_args...))
+
+            # W_αβ = Σ dr_α f_β over the pairs, with f the force on the second atom
+            W_ref = zeros(T, 3, 3)
+            for (i, j, special) in Molly.neighbor_pairs(find_neighbors(sys_cpu))
+                dr = vector(coords[i], coords[j], boundary)
+                f = Molly.force(inters[1], dr, atoms[i], atoms[j], NoUnits, special, coords[i],
+                                coords[j], boundary, nothing, nothing, 0)
+                W_ref .+= dr * transpose(f)
+            end
+            @test norm(W_ref - transpose(W_ref)) > norm(W_ref) / 2
+
+            rtol = (T == Float32 ? 1e-5 : 1e-12)
+            @test isapprox(virial(sys_cpu; n_threads=1), W_ref; rtol=rtol)
+            @test isapprox(virial(sys_cpu), W_ref; rtol=rtol)
+            for nf in (DistanceNeighborFinder(; nf_args..., array_type=CuArray),
+                       GPUCellListNeighborFinder(; nf_args..., array_type=CuArray),
+                       GPUNeighborFinder(; nf_args..., array_type=CuArray))
+                sys_gpu = make_sys(CuArray, nf)
+                @test isapprox(Array(virial(sys_gpu)), W_ref; rtol=rtol)
+            end
         end
     end
 end

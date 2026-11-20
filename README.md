@@ -18,6 +18,7 @@ Implemented features include:
 - Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants for alchemical simulation.
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Ewald and particle mesh Ewald (PME) electrostatic summation.
+- ReaxFF simulation.
 - Interface to allow definition of new interactions, simulators, thermostats, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl).
 - Write out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC.
@@ -27,12 +28,12 @@ Implemented features include:
 - Steepest descent, FIRE and L-BFGS energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
-- Periodic, triclinic and infinite boundary conditions.
+- Periodic, triclinic and infinite boundary conditions. Simulate in 2D or 3D.
 - Constraints with SHAKE and RATTLE.
 - Virtual sites.
 - Flexible loggers to track arbitrary properties throughout simulations.
 - Cutoff and mixing algorithms for non-bonded interactions.
-- Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
+- Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl). Automatic displacement tracking to keep neighbour lists up to date.
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Set up crystal systems using [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl).

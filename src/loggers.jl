@@ -78,6 +78,17 @@ function pressure_logger_due_on_step(loggers, step_n::Integer, run_loggers)
                                             run_loggers), loggers)
 end
 
+# Whether a logger may log on a step, so that simulators can skip calculating values that
+#   are only given to the loggers on other steps
+# true unless it is known that the logger only logs on some steps
+logger_may_log_on_step(logger, step_n::Integer) = true
+
+function any_logger_may_log_on_step(loggers, step_n::Integer, run_loggers)
+    run_loggers == false && return false
+    run_loggers == :skipstart && step_n == 0 && return false
+    return any(logger -> logger_may_log_on_step(logger, step_n), values(loggers))
+end
+
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
 
@@ -122,6 +133,9 @@ function log_property!(logger::GeneralObservableLogger, s::System, neighbors=not
         push!(logger.history, obs)
     end
 end
+
+logger_may_log_on_step(logger::GeneralObservableLogger, step_n::Integer) =
+                                                            (step_n % logger.n_steps) == 0
 
 """
     logger_virial_interval(logger)
@@ -597,6 +611,9 @@ end
 
 Base.values(dl::DisplacementsLogger) = dl.displacements
 
+logger_may_log_on_step(dl::DisplacementsLogger, step_n::Integer) =
+                                                            (step_n % dl.n_steps_update) == 0
+
 function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
                        step_n::Integer=0, buffers=nothing; kwargs...)
     if (step_n % dl.n_steps_update) == 0
@@ -939,6 +956,9 @@ function Base.show(io::IO, tw::TrajectoryWriter)
           "\", correction ", tw.correction, ", ", tw.structure_n, " frames written")
 end
 
+logger_may_log_on_step(logger::TrajectoryWriter, step_n::Integer) =
+                                                            (step_n % logger.n_steps) == 0
+
 function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                        step_n::Integer=0, buffers=nothing; kwargs...)
     if step_n % logger.n_steps == 0
@@ -1206,6 +1226,9 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
     end
 end
 
+logger_may_log_on_step(aol::AverageObservableLogger, step_n::Integer) =
+                                                            (step_n % aol.n_steps) == 0
+
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
                         step_n::Integer=0, buffers=nothing;
                         n_threads::Integer=Threads.nthreads(), kwargs...) where T
@@ -1297,12 +1320,11 @@ function finish_logs!(rexl::ReplicaExchangeLogger;
 end
 
 @doc raw"""
-    MonteCarloLogger()
-    MonteCarloLogger(T)
+    MonteCarloLogger(T=Float64)
 
 A logger that records acceptances in a Monte Carlo simulation.
 
-The logged quantities include the number of new selections (`n_select`),
+The logged quantities include the number of trial moves (`n_trials`),
 the number of successful acceptances (`n_accept`), an array named `energy_rates` which stores
 the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states,
 and a `BitVector` named `state_changed` that stores whether a new state was accepted for the

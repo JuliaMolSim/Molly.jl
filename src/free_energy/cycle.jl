@@ -91,6 +91,12 @@ end
 
 Free energy of a [`ThermodynamicCycle`](@ref), ``\\sum_i c_i \\Delta F_i`` plus the
 correction, in the energy units of the first leg.
+
+    free_energy(bias::Metadynamics, cv_value)
+
+Estimate of the free energy at `cv_value` (scalar, or a tuple for several CVs) from the
+current bias, up to an additive constant. Broadcasts over CV values:
+`Molly.free_energy.(bias, cv_values)`.
 """
 function free_energy(cycle::ThermodynamicCycle)
     ΔF = map(leg -> free_energy_difference(leg.source, leg.from, leg.to), cycle.legs)

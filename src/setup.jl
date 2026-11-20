@@ -11,8 +11,8 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100,
-                rng=Random.default_rng())
+    place_atoms(n_atoms, boundary; min_dist=zero(Molly.length_type(boundary)),
+                max_attempts=100, rng=Random.default_rng())
 
 Generate random coordinates.
 
@@ -64,8 +64,9 @@ function place_atoms(n_atoms::Integer,
 end
 
 """
-    place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
-                    max_attempts=100, aligned=false, rng=Random.default_rng())
+    place_diatomics(n_molecules, boundary, bond_length;
+                    min_dist=zero(Molly.length_type(boundary)), max_attempts=100,
+                    aligned=false, rng=Random.default_rng())
 
 Generate random diatomic molecule coordinates.
 
@@ -130,10 +131,21 @@ function place_diatomics(n_molecules::Integer,
     return wrap_coords.([coords...], (boundary,))
 end
 
-get_res_id(res) = (
-    Chemfiles.id(res),
-    "chainid" in Chemfiles.list_properties(res) ? Chemfiles.property(res, "chainid") : "X",
-)
+# Residues are keyed by residue number within a chain
+# Files from CHARMM-GUI and similar can reuse a chain ID and residue numbers for different
+#   molecules, e.g. protein and water, and distinguish them only by segment name, so the
+#   segment name forms part of the chain key when present
+function get_res_id(res)
+    props = Chemfiles.list_properties(res)
+    chain = ("chainid" in props ? Chemfiles.property(res, "chainid") : "X")
+    if "segname" in props
+        segname = strip(Chemfiles.property(res, "segname"))
+        if !isempty(segname)
+            chain = "$chain (segment $segname)"
+        end
+    end
+    return Chemfiles.id(res), chain
+end
 
 atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_types), "/")
 
@@ -222,6 +234,13 @@ function canonicalize_system(top, resname_replacements, atomname_replacements,
 
         if !haskey(canon_system, res_id[2])
             canon_system[res_id[2]] = Dict(res_id[1] => rgraph)
+        elseif haskey(canon_system[res_id[2]], res_id[1])
+            # Can occur with insertion codes or with molecules that share a chain ID and
+            #   residue numbers without distinct segment names
+            other_name = canon_system[res_id[2]][res_id[1]].res_name
+            throw(ArgumentError("residue $res_name and residue $other_name have the same " *
+                "residue number $(res_id[1]) in chain \"$(res_id[2])\", residues must have " *
+                "unique numbers within a chain or segment"))
         else
             canon_system[res_id[2]][res_id[1]] = rgraph
         end
@@ -487,8 +506,11 @@ Each residue is matched to a residue template of the force field, and a
     `Float64` by default, or `float_type` on backends that do not support
     `Float64` such as Metal.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for the non-bonded interactions.
-- `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
-    classical neighbor lists every few steps.
+- `dist_buffer=nothing`: distance added to `dist_cutoff` when calculating
+    neighbor lists. When `neighbor_finder_auto_update=true` this only affects
+    performance and is chosen based on the neighbour finder type, when that is
+    `false` this needs to be selected to avoid atoms crossing the buffer distance
+    and defaults to 0.2u"nm".
 - `constraints=:none`: which constraints to apply during the simulation, options
     are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` (all bonds)
     and `:hangles` (all bonds plus H-X-H and H-O-X angles). Note that not all options
@@ -508,12 +530,12 @@ Each residue is matched to a residue template of the force field, and a
     electrostatic interactions, including implicit solvent unless that sets its own.
 - `lj_cutoff=nothing`: the cutoff method to use for the Lennard-Jones interaction,
     by default uses `DistanceCutoff(dist_cutoff)`. The cutoff distance must not exceed
-    `dist_cutoff`. If the long-range Lennard-Jones dispersion correction is being used,
-    this must be a [`DistanceCutoff`](@ref), [`ShiftedPotentialCutoff`](@ref) or
-    [`PolynomialCutoff`](@ref).
-- `dispersion_correction=nothing`: whether to use the long-range Lennard-Jones
-    dispersion correction, [`LJDispersionCorrection`](@ref). Defaults to the force
-    field setting, which defaults to `true`.
+    `dist_cutoff`. If the long-range dispersion correction is being used, this must be a
+    [`DistanceCutoff`](@ref), [`ShiftedPotentialCutoff`](@ref) or [`PolynomialCutoff`](@ref).
+- `dispersion_correction=nothing`: whether to use the long-range dispersion correction,
+    [`LJDispersionCorrection`](@ref), or [`DExpDispersionCorrection`](@ref) for a double
+    exponential force field. Defaults to the force field setting, which defaults to `true`
+    for Lennard-Jones and `false` for double exponential.
 - `hydrogen_mass=false`: if set to a number or unitful value (e.g. `2` or `2u"g/mol"`)
     then hydrogens are given the specified mass, which is transferred from the
     atom they are bonded to. This is applied before constraints are generated.
@@ -525,9 +547,14 @@ Each residue is matched to a residue template of the force field, and a
     [`GPUCellListNeighborFinder`](@ref) on non-CUDA compatible GPUs, falling back to
     [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
     `Nothing`, the type of `nothing`, gives a system with no neighbor finder.
-- `neighbor_finder_n_steps=10`: the number of steps between neighbor finder
-    updates. Can be tuned along with `dist_buffer` to ensure that particles
-    do not cross the buffer distance during the update interval.
+- `neighbor_finder_auto_update=true`: whether the neighbor finder rebuilds the
+    neighbor list only when the atoms have moved far enough since the last rebuild
+    that a pair within `dist_cutoff` could be missing from it, given the buffer
+    distance `dist_buffer`. If `true`, `neighbor_finder_n_steps` is ignored.
+- `neighbor_finder_n_steps=10`: with `neighbor_finder_auto_update=false`, the
+    number of steps between neighbor finder updates. Can be tuned along with
+    `dist_buffer` to ensure that particles do not cross the buffer distance during
+    the update interval.
 - `launch_config=CUDALaunchConfig()`: stored CUDA launch overrides for this
     system. Ignored on CPU and non-CUDA GPU backends.
 - `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
@@ -563,7 +590,7 @@ function System(coord_file::AbstractString,
                 float_type=(array_type <: AbstractGPUArray ? Float32 : Float64),
                 float_type_high=default_float_type_high(array_type, float_type),
                 dist_cutoff=add_units(1.0, u"nm", units),
-                dist_buffer=add_units(0.2, u"nm", units),
+                dist_buffer=nothing,
                 constraints=:none,
                 rigid_water::Bool=false,
                 constraint_algorithm=SetupLINCS(),
@@ -573,6 +600,7 @@ function System(coord_file::AbstractString,
                 hydrogen_mass::Union{Bool, Number}=false,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
+                neighbor_finder_auto_update::Bool=true,
                 neighbor_finder_n_steps::Integer=10,
                 launch_config=CUDALaunchConfig(),
                 autotune_launch::Bool=true,
@@ -597,7 +625,7 @@ function System(coord_file::AbstractString,
     if dist_cutoff <= zero(dist_cutoff)
         throw(ArgumentError("dist_cutoff ($dist_cutoff) should be positive"))
     end
-    if dist_buffer < zero(dist_buffer)
+    if !isnothing(dist_buffer) && dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
     if !(constraints in (:none, :hbonds, :allbonds, :hangles))
@@ -644,6 +672,13 @@ function System(coord_file::AbstractString,
                   "that bonded atoms will not be excluded from the non-bonded interactions"
         report_issue(err_str, strictness)
     end
+    if nonbonded_method isa SetupCoulombReactionField && nonbonded_method.exclusion_correction &&
+            neighbor_finder_type === Nothing
+        throw(ArgumentError("exclusion_correction=true needs a neighbor finder, since without " *
+                            "one excluded pairs are not removed from the pairwise reaction " *
+                            "field and would be counted twice; use a neighbor_finder_type other " *
+                            "than Nothing or set exclusion_correction=false"))
+    end
     if neighbor_finder_n_steps <= 0
         throw(ArgumentError("neighbor_finder_n_steps ($neighbor_finder_n_steps) must be positive"))
     end
@@ -678,16 +713,13 @@ function System(coord_file::AbstractString,
         end
         disp_corr = dispersion_correction
     end
-    if disp_corr && force_field.custom_nonbonded
-        throw(ArgumentError("dispersion correction is not supported with CustomNonbondedForce"))
-    end
     if disp_corr && !(isnothing(lj_cutoff) ||
                       lj_cutoff isa Union{DistanceCutoff, ShiftedPotentialCutoff, PolynomialCutoff})
         throw(ArgumentError("dispersion correction is not supported with lj_cutoff values " *
                             "other than DistanceCutoff, ShiftedPotentialCutoff and " *
-                            "PolynomialCutoff, found $lj_cutoff"))
+                            "PolynomialCutoff, found $lj_cutoff; pass " *
+                            "dispersion_correction=false to use this cutoff without it"))
     end
-    dist_neighbors = dist_cutoff + dist_buffer
     T, TH = float_type, float_type_high
     if units
         E  = typeof(zero(T) * u"kJ * mol^-1")
@@ -702,7 +734,11 @@ function System(coord_file::AbstractString,
 
     # Read structure
     traj = Chemfiles.Trajectory(coord_file)
-    frame = Chemfiles.read(traj)
+    if strictness == :nowarn
+        frame = @suppress_err Chemfiles.read(traj)
+    else
+        frame = Chemfiles.read(traj)
+    end
     top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
@@ -772,37 +808,47 @@ function System(coord_file::AbstractString,
                                               Union{Vector{Int}, Nothing},
                                               Union{String, Nothing},
                                               Union{Vector{String}, Nothing}}}()
+    matched_residues = Tuple{ResidueGraph, ResidueTemplate, Vector{Int}}[]
+    unmatched_residues = Tuple{String, Int, ResidueGraph}[]
     for (chain, resids) in canonical_system
         for (res_id, rgraph) in resids
             template, matches = match_residue(rgraph, force_field, sorted_template_names,
                                               chain, res_id, strictness, match_cache)
-            matched = !isnothing(matches)
-            if matched
-                for (r_i, m_i) in enumerate(matches)
-                    global_idx = rgraph.atom_inds[r_i]
-                    atom_type_of[global_idx] = template.types[m_i]
-                    charge_of[global_idx] = template.charges[m_i]
-                    element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
-                    template_id_of[global_idx] = m_i
-                    template_of[global_idx] = template
-                    resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
-                end
-                add_virtual_sites!(virtual_sites, template, rgraph, matches)
-            end
-            if !matched
-                n_names = length(rgraph.atom_names)
-                if n_names > 30
-                    atom_str = join(rgraph.atom_names[1:30], ", ") * " and $(n_names - 30) more"
-                else
-                    atom_str = join(rgraph.atom_names, ", ")
-                end
-                throw(MissingResidueTemplateError("could not match residue $(rgraph.res_name) " *
-                    "(residue number $res_id of chain \"$chain\") to any of the residue templates " *
-                    "in the force field. " * residue_match_error(rgraph, force_field.residues) *
-                    " The residue has $n_names atoms: $atom_str. See the Molly documentation " *
-                    "section on simulating a protein for tips on obtaining compatible files."))
+            if isnothing(matches)
+                push!(unmatched_residues, (chain, res_id, rgraph))
+            else
+                push!(matched_residues, (rgraph, template, matches))
             end
         end
+    end
+    # Residues that do not match a template can match as a bonded pair, e.g. a disulfide bond
+    unmatched_residues = match_two_residue_patches!(matched_residues, unmatched_residues,
+                                force_field.two_residue_patches, top_bonds, atom_lookup)
+    if length(unmatched_residues) > 0
+        chain, res_id, rgraph = unmatched_residues[1]
+        n_names = length(rgraph.atom_names)
+        if n_names > 30
+            atom_str = join(rgraph.atom_names[1:30], ", ") * " and $(n_names - 30) more"
+        else
+            atom_str = join(rgraph.atom_names, ", ")
+        end
+        throw(MissingResidueTemplateError("could not match residue $(rgraph.res_name) " *
+            "(residue number $res_id of chain \"$chain\") to any of the residue templates " *
+            "in the force field. " * residue_match_error(rgraph, force_field.residues) *
+            " The residue has $n_names atoms: $atom_str. See the Molly documentation " *
+            "section on simulating a protein for tips on obtaining compatible files."))
+    end
+    for (rgraph, template, matches) in matched_residues
+        for (r_i, m_i) in enumerate(matches)
+            global_idx = rgraph.atom_inds[r_i]
+            atom_type_of[global_idx] = template.types[m_i]
+            charge_of[global_idx] = template.charges[m_i]
+            element_of[global_idx] = force_field.atom_types[template.types[m_i]].element
+            template_id_of[global_idx] = m_i
+            template_of[global_idx] = template
+            resnum_of[global_idx] = resnum_from_atom_idx(global_idx, atom_lookup)
+        end
+        add_virtual_sites!(virtual_sites, template, rgraph, matches)
     end
     virtual_sites_type = (length(virtual_sites) > 0 ? virtual_sites : [])
 
@@ -1199,8 +1245,9 @@ function System(coord_file::AbstractString,
                   angles_il, tors_il, imps_il, tors_pad, imps_pad, htors_il, cmaps_il, cmaps_maps,
                   lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                   units, dist_cutoff, constraints, rigid_water, coul_method, lj_cutoff,
-                  neighbor_finder_type, neighbor_finder_n_steps, implicit_solvent,
-                  grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb, disp_corr,
+                  neighbor_finder_type, neighbor_finder_auto_update,
+                  neighbor_finder_n_steps, implicit_solvent,
+                  grad_safe, dist_buffer, weight_14_lj, weight_14_coulomb, disp_corr,
                   hydrogen_mass, strictness, launch_config, autotune_launch,
                   constraint_algorithm, n_threads)
 end
@@ -1430,8 +1477,8 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                 impropers, torsion_inters_pad, improper_inters_pad, htors_il, cmaps_il, cmaps_maps,
                 lj_exceptions_σ, lj_exceptions_ϵ, σs_14, ϵs_14, separate_lj14, eligible, special,
                 units, dist_cutoff, constraints_type, rigid_water, nonbonded_method, lj_cutoff,
-                neighbor_finder_type, neighbor_finder_n_steps,
-                implicit_solvent, grad_safe, dist_neighbors, weight_14_lj,
+                neighbor_finder_type, neighbor_finder_auto_update, neighbor_finder_n_steps,
+                implicit_solvent, grad_safe, dist_buffer, weight_14_lj,
                 weight_14_coulomb, dispersion_correction,
                 hydrogen_mass, strictness, launch_config, autotune_launch, constraint_algorithm,
                 n_threads)
@@ -1460,7 +1507,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         end
     end
     if length(bonds_all_vs_is) > 0
-        topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev); array_type=AT)
+        topology = MolecularTopology(bonds_all_vs_is, bonds_all_vs_js, length(coords_dev))
     else
         topology = nothing
     end
@@ -1637,52 +1684,68 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     else # SetupCoulomb and SetupCoulombReactionField
         coul = setup_coulomb_pairwise(nonbonded_method, dist_cutoff, weight_14_coulomb,
                                       using_neighbors, units, T)
+        if nonbonded_method isa SetupCoulombReactionField && nonbonded_method.exclusion_correction
+            push!(specific_inter_array, reaction_field_exclusions(coul, eligible, special;
+                                                                  array_type=AT))
+        end
         general_inters_ewald = ()
     end
 
     pairwise_inters = (lj, coul)
     specific_inter_lists = tuple(specific_inter_array...)
 
+    # Used in branch
+    dist_neighbors_gpucl = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, GPUCellListNeighborFinder))
     if neighbor_finder_type === Nothing
         neighbor_finder = nothing
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT) && !grad_safe
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, GPUNeighborFinder))
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
             # GPUNeighborFinder reuses Morton ordering and tile metadata across
             # `n_steps`, so its search radius needs the same buffer as the other
             # neighbor finders
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=dist_neighbors,
             excluded_pairs=excluded_pairs,
             special_pairs=special_pairs,
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
             array_type=AT,
             strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, GPUCellListNeighborFinder) &&
-                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors)
+                AT <: AbstractGPUArray && gpu_cell_list_suitable(boundary, dist_neighbors_gpucl)
         neighbor_finder = GPUCellListNeighborFinder(
+            dist_cutoff=dist_neighbors_gpucl,
             eligible=eligible,
             special=special,
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
             array_type=AT,
             ragged=false,
             strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary))
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, DistanceNeighborFinder))
         neighbor_finder = DistanceNeighborFinder(
+            dist_cutoff=dist_neighbors,
             eligible=eligible,
             special=special,
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
             array_type=AT,
             strictness=strictness,
         )
     elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         # CellListMap requires the cell list cutoff to fit twice in the box
         min_box_side = minimum(box_sides(boundary))
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, CellListMapNeighborFinder))
         if !has_infinite_boundary(boundary) && min_box_side < (2 * dist_neighbors)
             throw(ArgumentError("the minimum box side ($min_box_side) is less than " *
                     "2 * (dist_cutoff + dist_buffer) ($(2 * dist_neighbors)), which " *
@@ -1691,20 +1754,24 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
                     "neighbor_finder_type=DistanceNeighborFinder."))
         end
         neighbor_finder = CellListMapNeighborFinder(
+            dist_cutoff=dist_neighbors,
+            boundary=boundary,
             eligible=eligible,
             special=special,
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
             x0=coords,
-            boundary=boundary,
-            dist_cutoff=T(dist_neighbors),
             strictness=strictness,
         )
     else
-        neighbor_finder = neighbor_finder_type(
+        dist_neighbors = T(calc_dist_neighbors(dist_cutoff, dist_buffer, units,
+                                        neighbor_finder_auto_update, neighbor_finder_type))
+        neighbor_finder = neighbor_finder_type(;
+            dist_cutoff=dist_neighbors,
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
+            auto_update=neighbor_finder_auto_update,
             n_steps=neighbor_finder_n_steps,
-            dist_cutoff=T(dist_neighbors),
         )
     end
 
@@ -1736,7 +1803,12 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
     end
     # Infinite boundaries give infinite volume, hence no dispersion correction
     if dispersion_correction && !has_infinite_boundary(boundary)
-        general_inters_disp = (LJDispersionCorrection(atoms, cutoff_lj, σ_mix, ϵ_mix),)
+        if lj isa DoubleExponential
+            general_inters_disp = (DExpDispersionCorrection(atoms, cutoff_lj, lj.α, lj.β, σ_mix,
+                                                            ϵ_mix),)
+        else
+            general_inters_disp = (LJDispersionCorrection(atoms, cutoff_lj, σ_mix, ϵ_mix),)
+        end
     else
         general_inters_disp = ()
     end

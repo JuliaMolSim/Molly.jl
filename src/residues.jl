@@ -27,6 +27,20 @@ struct ResiduePatchTemplate
     apply_to_residues::Vector{String}
 end
 
+# A patch that applies to two residue templates at once, such as the CHARMM disulfide
+#   patch DISU
+# The changes to each residue are stored as a single residue patch, in which a bond between
+#   the residues is an external bond, and the bonds between the residues are checked when
+#   matching
+# The templates are those made by applying the patch to the templates it allows for each
+#   residue, and are added once all the force field files have been read
+struct TwoResiduePatchTemplate
+    pname::String
+    residue_patches::NTuple{2, ResiduePatchTemplate}
+    inter_residue_bonds::Vector{Tuple{String, String}} # Atom of residue 1, atom of residue 2
+    templates::NTuple{2, Vector{ResidueTemplate}}
+end
+
 # Equivalent to the struct above, but this represents a residue read from the
 #   provided structure files
 struct ResidueGraph
@@ -172,6 +186,10 @@ function load_bond_definitions(; xmlpath=nothing, standardBonds=nothing)
     return standardBonds
 end
 
+bond_partner(atom_name, resnum) = (startswith(atom_name, "-") ? (resnum - 1, atom_name[2:end]) :
+                                   startswith(atom_name, "+") ? (resnum + 1, atom_name[2:end]) :
+                                   (resnum, atom_name))
+
 # Builds the topology of the system read from a structure file given the
 #   template bonds
 function create_bonds!(canon_sys, standard_bonds)
@@ -179,7 +197,6 @@ function create_bonds!(canon_sys, standard_bonds)
     bond_set = Set{Tuple{Int, Int}}() # Mirrors bonds to make the lookup below fast
 
     for (chain, resids) in canon_sys
-        n_resids = length(resids)
         atom_maps = Dict{Int, Dict{String, Int}}()
 
         for (resnum, rgraph) in resids
@@ -193,73 +210,29 @@ function create_bonds!(canon_sys, standard_bonds)
         end
 
         for (resnum, rgraph) in resids
-            i = resnum
-            res_name = rgraph.res_name
-
-            if haskey(standard_bonds, res_name)
-                for bond in standard_bonds[res_name]
-                    external = false
-                    if startswith(bond[1], "-") && i > 1
-                        external = true
-                        fromResidue = i - 1
-                        fromAtom = bond[1][2:end]
-
-                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
-                        resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    elseif startswith(bond[1], "+") && i < n_resids
-                        external = true
-                        fromResidue = i + 1
-                        fromAtom = bond[1][2:end]
-
-                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
-                        resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    else
-                        fromResidue = i
-                        fromAtom = bond[1]
-                    end
-
-                    if startswith(bond[2], "-") && i > 1
-                        external = true
-                        toResidue = i - 1
-                        toAtom = bond[2][2:end]
-
-                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
-                        resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    elseif startswith(bond[2], "+") && i < n_resids
-                        external = true
-                        toResidue = i + 1
-                        toAtom = bond[2][2:end]
-
-                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
-                        resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
-                        rgraph.external_bonds[ext_ind] += 1
-                    else
-                        toResidue = i
-                        toAtom = bond[2]
-                    end
-
-                    if fromAtom in keys(atom_maps[fromResidue]) && toAtom in keys(atom_maps[toResidue])
-                        atom1 = atom_maps[fromResidue][fromAtom]
-                        atom2 = atom_maps[toResidue][toAtom]
-                        pair = (atom1 < atom2 ? (atom1, atom2) : (atom2, atom1))
-                        if !(pair in bond_set)
-                            push!(bonds, pair)
-                            push!(bond_set, pair)
-                            if !external
-                                i_local = findfirst(isequal(fromAtom), rgraph.atom_names)
-                                j_local = findfirst(isequal(toAtom),   rgraph.atom_names)
-                                pair_local = (i_local < j_local ? (i_local, j_local) : (j_local, i_local))
-                                push!(rgraph.bonds, pair_local)
-                            end
-                        end
-                    end
+            haskey(standard_bonds, rgraph.res_name) || continue
+            for bond in standard_bonds[rgraph.res_name]
+                # A "-" or "+" prefix refers to the previous or next residue in the chain,
+                #   which may be absent at a chain end or a gap in the residue numbering
+                from_res, from_atom = bond_partner(bond[1], resnum)
+                to_res  , to_atom   = bond_partner(bond[2], resnum)
+                (haskey(atom_maps, from_res) && haskey(atom_maps, to_res)) || continue
+                (haskey(atom_maps[from_res], from_atom) &&
+                        haskey(atom_maps[to_res], to_atom)) || continue
+                atom1 = atom_maps[from_res][from_atom]
+                atom2 = atom_maps[to_res][to_atom]
+                pair = (atom1 < atom2 ? (atom1, atom2) : (atom2, atom1))
+                pair in bond_set && continue
+                push!(bonds, pair)
+                push!(bond_set, pair)
+                from_graph, to_graph = resids[from_res], resids[to_res]
+                i_local = findfirst(isequal(from_atom), from_graph.atom_names)
+                j_local = findfirst(isequal(to_atom)  , to_graph.atom_names)
+                if from_res == to_res
+                    push!(rgraph.bonds, minmax(i_local, j_local))
+                else
+                    from_graph.external_bonds[i_local] += 1
+                    to_graph.external_bonds[j_local] += 1
                 end
             end
         end
@@ -682,6 +655,64 @@ function find_residue_match(rgraph::ResidueGraph, force_field, sorted_template_n
     return templates[name_1], matches_1, name_1, ambiguous
 end
 
+# Match bonded pairs of residues that do not match any template to the templates of the
+#   two residue patches, a residue is matched by at most one two residue patch
+# Matches are added to matched_residues and the residues that remain unmatched are returned
+function match_two_residue_patches!(matched_residues, unmatched_residues, two_residue_patches,
+                                    bonds, atom_lookup)
+    (isempty(unmatched_residues) || isempty(two_residue_patches)) && return unmatched_residues
+    # Residues are keyed by chain and residue number
+    rgraphs = Dict((chain, res_id) => rgraph for (chain, res_id, rgraph) in unmatched_residues)
+    res_pairs = Tuple{Tuple{String, Int}, Tuple{String, Int}}[]
+    for (i, j) in bonds
+        key_i, key_j = atom_lookup[i][1:2], atom_lookup[j][1:2]
+        if key_i != key_j && haskey(rgraphs, key_i) && haskey(rgraphs, key_j)
+            push!(res_pairs, minmax(key_i, key_j))
+        end
+    end
+    unique!(res_pairs)
+    bond_set = Set(bonds)
+    matched_keys = Set{Tuple{String, Int}}()
+    for patch in two_residue_patches, (key_1, key_2) in res_pairs
+        (key_1 in matched_keys || key_2 in matched_keys) && continue
+        # Either residue can be the first residue of the patch
+        for (key_a, key_b) in ((key_1, key_2), (key_2, key_1))
+            pair_matches = match_two_residue_patch(rgraphs[key_a], rgraphs[key_b], patch,
+                                                   bond_set)
+            if !isnothing(pair_matches)
+                append!(matched_residues, pair_matches)
+                push!(matched_keys, key_1, key_2)
+                break
+            end
+        end
+    end
+    return filter(r -> !((r[1], r[2]) in matched_keys), unmatched_residues)
+end
+
+# The templates of a two residue patch that two residues match and the matches, provided
+#   that the bonds between the residues added by the patch are present, otherwise nothing
+function match_two_residue_patch(rgraph_1, rgraph_2, patch, bond_set)
+    for template_1 in patch.templates[1]
+        matches_1 = match_residue_to_template(rgraph_1, template_1)
+        isnothing(matches_1) && continue
+        for template_2 in patch.templates[2]
+            matches_2 = match_residue_to_template(rgraph_2, template_2)
+            isnothing(matches_2) && continue
+            bonded = all(patch.inter_residue_bonds) do (atom_name_1, atom_name_2)
+                i = atom_name_to_global_i(atom_name_1, template_1.atoms, rgraph_1.atom_inds,
+                                          matches_1)
+                j = atom_name_to_global_i(atom_name_2, template_2.atoms, rgraph_2.atom_inds,
+                                          matches_2)
+                return minmax(i, j) in bond_set
+            end
+            if bonded
+                return [(rgraph_1, template_1, matches_1), (rgraph_2, template_2, matches_2)]
+            end
+        end
+    end
+    return nothing
+end
+
 function count_occurrences(items)
     counts = Dict{eltype(items), Int}()
     for item in items
@@ -1091,11 +1122,7 @@ function apply_residue_patch(residue, patch, patch_res_name, res_name, patch_nam
         deleteat!(external_bonds, i)
         deleteat!(partial_charges, i)
         deleteat!(extras, i)
-        if any(bij -> (bij[1] == i || bij[2] == i), bonds)
-            err_str = "Can't apply patch $patch_name to residue template $res_name: " *
-                      "atom name $atom_name can't be removed as it is part of a bond"
-            report_issue(err_str, strictness; error_type=ForceFieldXMLError)
-        end
+        filter!(bij -> !(i in bij), bonds) # The bonds of a removed atom are removed
         bonds .= shift_bond_inds.(bonds, i)
     end
 

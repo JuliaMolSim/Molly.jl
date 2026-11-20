@@ -1,7 +1,8 @@
 export Mie
 
 @doc raw"""
-    Mie(; m, n, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
+    Mie(; m, n, cutoff=NoCutoff(), use_neighbors=true, shortcut=Molly.LJZeroShortcut(),
+        σ_mixing=Molly.LorentzMixing(), ϵ_mixing=Molly.GeometricMixing(), weight_special=1)
 
 The Mie generalized interaction between two atoms.
 
@@ -83,14 +84,16 @@ parameter_fields(::Type{<:Mie}) = ((:weight_special, "weight_14"),)
     ϵ = ϵ_mixing(inter.ϵ_mixing, atom_i, atom_j, special)
 
     cutoff = inter.cutoff
-    r = sqrt(sum(abs2, dr))
+    r2 = sum(abs2, dr)
+    r = sqrt(r2)
+    inv_r = inv(r)
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     params = (m, n, σ, const_mn)
 
     f = force_cutoff(cutoff, inter, r, params)
-    fdr = (f / r) * dr
+    fdr = (f * inv_r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -99,8 +102,9 @@ parameter_fields(::Type{<:Mie}) = ((:weight_special, "weight_14"),)
 end
 
 function pairwise_force(::Mie, r, (m, n, σ, const_mn))
-    σ_r = σ / r
-    return -(const_mn / r) * (m * σ_r ^ m - n * σ_r ^ n)
+    inv_r = inv(r)
+    σ_r = σ * inv_r
+    return -(const_mn * inv_r) * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
 @inline function potential_energy(inter::Mie,

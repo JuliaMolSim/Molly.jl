@@ -18,6 +18,22 @@ function check_env_alignment(sysA, sysB, env_A, env_B)
     return nothing
 end
 
+# The hybrid takes the reaction field exclusions of system A, so B must have the same ones
+function check_reaction_field_exclusions(sysA, sysB)
+    function rf_exclusions(sys)
+        return [(il.data.dist_cutoff, il.data.solvent_dielectric, il.data.solute_dielectric,
+                 il.data.coulomb_const, has_self_exclusions(il))
+                for il in sys.specific_inter_lists
+                if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData]
+    end
+    if rf_exclusions(sysA) != rf_exclusions(sysB)
+        throw(ArgumentError("the reaction field exclusion corrections of the two systems " *
+                            "differ; use the same exclusion_correction and reaction field " *
+                            "parameters for both"))
+    end
+    return nothing
+end
+
 # Env-Uniq bonds -> should be Core-Uniq
 function check_unique_env_bonds(sys, unique_inds, ligand, to_A, state, host_lists)
     unique_set = Set(unique_inds)
@@ -214,15 +230,15 @@ const softcore_param_names = Dict((:beutler, :LJ) => (:α,), (:gapsys, :LJ) => (
                                   (:scaled, :LJ) => (), (:beutler, :C) => (:α,),
                                   (:gapsys, :C) => (:α, :σQ), (:scaled, :C) => ())
 
-function check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params=(;), Csoftcore_params=(;))
-    if !(LJsoftcore in (:beutler, :gapsys, :scaled))
-        throw(ArgumentError("LJsoftcore is $(repr(LJsoftcore)), use :beutler, :gapsys or :scaled"))
+function check_softcores(lj_softcore, coulomb_softcore, lj_softcore_params=(;), coulomb_softcore_params=(;))
+    if !(lj_softcore in (:beutler, :gapsys, :scaled))
+        throw(ArgumentError("lj_softcore is $(repr(lj_softcore)), use :beutler, :gapsys or :scaled"))
     end
-    if !(Csoftcore in (:beutler, :gapsys, :scaled))
-        throw(ArgumentError("Csoftcore is $(repr(Csoftcore)), use :beutler, :gapsys or :scaled"))
+    if !(coulomb_softcore in (:beutler, :gapsys, :scaled))
+        throw(ArgumentError("coulomb_softcore is $(repr(coulomb_softcore)), use :beutler, :gapsys or :scaled"))
     end
-    for (side, softcore, params) in ((:LJ, LJsoftcore, LJsoftcore_params),
-                                     (:C, Csoftcore, Csoftcore_params))
+    for (side, softcore, params) in ((:LJ, lj_softcore, lj_softcore_params),
+                                     (:C, coulomb_softcore, coulomb_softcore_params))
         allowed = softcore_param_names[(softcore, side)]
         for name in keys(params)
             if !(name in allowed)
@@ -233,16 +249,16 @@ function check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params=(;), Csoftcore
     end
 end
 
-function lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT, LJsoftcore_params=(;),
-                                Csoftcore_params=(;))
+function lambda_pairwise_inters(sys, scheduler, lj_softcore, coulomb_softcore, FT, lj_softcore_params=(;),
+                                coulomb_softcore_params=(;))
     return map(sys.pairwise_inters) do inter
         if inter isa DoubleExponential
             return to_lambda_function(inter; scheduler=scheduler, λ_mixing=MinimumMixing())
         end
         lj = inter isa LennardJones
-        softcore = softcore_dic[lj ? LJsoftcore : Csoftcore]
+        softcore = softcore_dic[lj ? lj_softcore : coulomb_softcore]
         to_lambda_function(inter, softcore; scheduler=scheduler, λ_mixing=MinimumMixing(),
-                           float_type=FT, (lj ? LJsoftcore_params : Csoftcore_params)...)
+                           float_type=FT, (lj ? lj_softcore_params : coulomb_softcore_params)...)
     end
 end
 
@@ -271,6 +287,10 @@ function lambda_general_inters(sys, atoms, boundary, scheduler, global_λ)
             push!(inters, LJDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff,
                                                   MinimumMixing(), inter.σ_mix, inter.ϵ_mix;
                                                   scheduler=scheduler))
+        elseif inter isa DExpDispersionCorrection
+            push!(inters, DExpDispersionCorrectionλ(to_device(atoms, AT), inter.cutoff, inter.α,
+                                                    inter.β, MinimumMixing(), inter.σ_mix,
+                                                    inter.ϵ_mix; scheduler=scheduler))
         else
             @warn "$(typeof(inter).name.name) has no alchemical version yet and is left out of " *
                   "the system, so its contribution is missing at every λ, the end states included"
@@ -286,7 +306,8 @@ Set the global λ of an alchemical system, as set up by [`AbsoluteFESystem`](@re
 [`RelativeFESystem`](@ref), in place without rebuilding it.
 
 Only the λ of the alchemical atoms, the mesh weight of [`Molly.PME_λ`](@ref) and the
-precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
+precomputed factors of [`Molly.LJDispersionCorrectionλ`](@ref) and
+[`Molly.DExpDispersionCorrectionλ`](@ref) depend on λ; the neighbor masks, the interaction
 lists, the topology, the constraints and the virtual sites do not, which is what makes this much
 cheaper than building the system again. Environment atoms keep λ = 1.
 
@@ -312,6 +333,9 @@ function set_lambda!(sys::System, λ)
         elseif inter isa LJDispersionCorrectionλ
             LJDispersionCorrectionλ(sys.atoms, inter.cutoff, MinimumMixing(), inter.σ_mix,
                                     inter.ϵ_mix; scheduler=inter.scheduler)
+        elseif inter isa DExpDispersionCorrectionλ
+            DExpDispersionCorrectionλ(sys.atoms, inter.cutoff, inter.α, inter.β, MinimumMixing(),
+                                      inter.σ_mix, inter.ϵ_mix; scheduler=inter.scheduler)
         else
             inter
         end
@@ -351,7 +375,7 @@ end
 """
     AbsoluteFESystem(sys, global_λ, mapping; temp=298.0u"K",
                      scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
-                     LJsoftcore=:gapsys, Csoftcore=:gapsys)
+                     lj_softcore=:gapsys, coulomb_softcore=:gapsys)
 
 Set up an alchemical system for an absolute free energy calculation, in which the atoms in
 `mapping` are decoupled from the rest of `sys`.
@@ -370,28 +394,28 @@ random velocities are generated at `temp`.
     [`Molly.DefaultLambdaScheduler`](@ref), [`Molly.GROMACSLambdaABFEScheduler`](@ref) or
     [`Molly.OpenFEScheduler`](@ref). Absolute systems require dual topology (`dual=true`).
 - `loggers=()`: the loggers that record properties of interest during a simulation.
-- `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
+- `lj_softcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
     1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
     interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
-- `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
+- `coulomb_softcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
 function AbsoluteFESystem(sys::System, global_λ, mapping; 
                         temp = 298.0u"K", 
                         scheduler=DefaultLambdaScheduler(dual=true),
                         loggers=(),
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:gapsys,
-                        LJsoftcore_params=(;),
-                        Csoftcore_params=(;)
+                        lj_softcore=:gapsys,
+                        coulomb_softcore=:gapsys,
+                        lj_softcore_params=(;),
+                        coulomb_softcore_params=(;)
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sys, temp)
-    check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params, Csoftcore_params)
+    check_softcores(lj_softcore, coulomb_softcore, lj_softcore_params, coulomb_softcore_params)
     check_scheduler(scheduler, sys)
-    lj_sc = softcore_dic[LJsoftcore]
+    lj_sc = softcore_dic[lj_softcore]
     sys_atoms  = from_device(sys.atoms)
     sys_coords = from_device(sys.coords)
 
@@ -426,8 +450,8 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
     Coords = Vector{typeof(Coords[1])}(Coords)
     Data = Vector{typeof(Data[1])}(Data)
 
-    pairwise_inters = lambda_pairwise_inters(sys, scheduler, LJsoftcore, Csoftcore, FT,
-                                           LJsoftcore_params, Csoftcore_params)
+    pairwise_inters = lambda_pairwise_inters(sys, scheduler, lj_softcore, coulomb_softcore, FT,
+                                           lj_softcore_params, coulomb_softcore_params)
     general_inters = lambda_general_inters(sys, Atoms, Boundary, scheduler, global_λ)
     SpecificInteraction = Any[]
     for inter_list in sys.specific_inter_lists
@@ -439,8 +463,14 @@ function AbsoluteFESystem(sys::System, global_λ, mapping;
                                    coulomb_const=d.coulomb_const, scheduler=scheduler,
                                    λ_mix=d.λ_mixing),
             ))
+        elseif inter_list isa InteractionList2Atoms &&
+                    inter_list.data isa CoulombReactionFieldExclusionData
+            push!(SpecificInteraction, InteractionList2Atoms(
+                inter_list.is, inter_list.js, inter_list.inters, inter_list.types,
+                replace_fields(inter_list.data, (scheduler=scheduler,)),
+            ))
         else
-            push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, LJsoftcore_params))
+            push!(SpecificInteraction, to_lambda_inter_list(inter_list, scheduler, AT, FT, lj_sc, lj_softcore_params))
         end
     end
 
@@ -459,7 +489,7 @@ end
 """
     RelativeFESystem(sysA, sysB, global_λ, mapping, core_mapAB; temp=298.0u"K",
                      scheduler=Molly.DefaultLambdaScheduler(dual=true), loggers=(),
-                     LJsoftcore=:gapsys, Csoftcore=:gapsys)
+                     lj_softcore=:gapsys, coulomb_softcore=:gapsys)
 
 Set up a hybrid system for a relative free energy calculation that transforms system A
 (`global_λ = 0`) into system B (`global_λ = 1`).
@@ -492,28 +522,28 @@ thrown if `sysA` has no neighbor finder and there are such pairs.
     [`Molly.OpenFEScheduler`](@ref). `dual=true` uses dual topology (energy scaling) and
     `dual=false` single topology (parameter scaling), which does not support `intraLJ=true`.
 - `loggers=()`: the loggers that record properties of interest during a simulation.
-- `LJsoftcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
+- `lj_softcore=:gapsys`: the Lennard-Jones soft core, `:beutler`
     ([Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1)), `:gapsys`
     ([Gapsys et al. 2012](https://doi.org/10.1021/ct300220p)) or `:scaled`, where the potential
     is scaled directly by λ. The 1-4 Lennard-Jones interactions of force fields with separate
     1-4 parameters (e.g. CHARMM) use the same soft core. A [`DoubleExponential`](@ref)
     interaction always becomes a [`DoubleExponentialSoftCore`](@ref), its own soft core.
-- `Csoftcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
+- `coulomb_softcore=:gapsys`: the Coulomb soft core, `:beutler`, `:gapsys` or `:scaled`, where the
     potential is scaled directly by λ.
 """
 function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_mapAB; 
                         temp = 298.0u"K", 
                         scheduler=DefaultLambdaScheduler(dual=true),
                         loggers=(),
-                        LJsoftcore=:gapsys,
-                        Csoftcore=:gapsys,
-                        LJsoftcore_params=(;),
-                        Csoftcore_params=(;)
+                        lj_softcore=:gapsys,
+                        coulomb_softcore=:gapsys,
+                        lj_softcore_params=(;),
+                        coulomb_softcore_params=(;)
                         )
     FT, units, temp, AT, grad_safe = alchemical_settings(sysA, temp)
-    check_softcores(LJsoftcore, Csoftcore, LJsoftcore_params, Csoftcore_params)
+    check_softcores(lj_softcore, coulomb_softcore, lj_softcore_params, coulomb_softcore_params)
     check_scheduler(scheduler, sysA)
-    lj_sc = softcore_dic[LJsoftcore]
+    lj_sc = softcore_dic[lj_softcore]
     # To-do: Currently not implemented a 1-4 intramolecular LJ interaction for single topology that
     #   is not decoupled
     if !scheduler.dual && scheduler.intraLJ
@@ -521,10 +551,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                             "use a scheduler with dual=true or intraLJ=false"))
     end
 
+    check_reaction_field_exclusions(sysA, sysB)
+
     atomsA, coordsA = from_device(sysA.atoms), from_device(sysA.coords)
     atomsB, coordsB = from_device(sysB.atoms), from_device(sysB.coords)
     host_lists(sys) = [to_device(il, Array) for il in sys.specific_inter_lists
-                       if !(eltype(il.inters) <: EwaldExclusion)]
+                       if !(eltype(il.inters) <: Union{EwaldExclusion,
+                                                       CoulombReactionFieldExclusion})]
 
     # Check/add mappings by including mapping between environment A and environment B
     mapping, core_mapAB = deepcopy(mapping), copy(core_mapAB)
@@ -779,9 +812,9 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         field_types = fieldtypes(typeof(interaction))[1:end-1]
         
         if scheduler.dual
-            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, LJsoftcore_params))
+            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, lj_softcore_params))
         else
-            converted_type = typeof(lambda_single(interaction.inters[1], nothing, scheduler, lj_sc, LJsoftcore_params))
+            converted_type = typeof(lambda_single(interaction.inters[1], nothing, scheduler, lj_sc, lj_softcore_params))
         end
         
         field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
@@ -804,10 +837,10 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 end
                 
                 if scheduler.dual
-                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, LJsoftcore_params))
+                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, lj_softcore_params))
                 else
                     deleted = any(in(unique_A), field_tuple[1:(n_fields - 2)])
-                    push!(tmp[n_fields-1], lambda_single_A(field_tuple[end-1], scheduler, lj_sc, deleted, LJsoftcore_params))
+                    push!(tmp[n_fields-1], lambda_single_A(field_tuple[end-1], scheduler, lj_sc, deleted, lj_softcore_params))
                     single_top_atom_maps[(IT,IIT,P)][Tuple(mapped_atoms)] = length(tmp[n_fields-1])
                 end
                 
@@ -828,7 +861,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         field_types = fieldtypes(typeof(interaction))[1:end-1]
         
         if scheduler.dual
-            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, LJsoftcore_params))
+            converted_type = typeof(lambda_specific(interaction.inters[1], scheduler, FT, lj_sc, lj_softcore_params))
             field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
             tmp = [T() for T in field_types]
             
@@ -842,13 +875,13 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                     for (k, i) in enumerate(atoms_B)
                         push!(tmp[k], haskey(mapping_B, i) ? mapping_B[i] : mapping_A[env_BA[i]])
                     end
-                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, LJsoftcore_params))
+                    push!(tmp[n_fields-1], lambda_specific(field_tuple[end-1], scheduler, FT, lj_sc, lj_softcore_params))
                     push!(tmp[n_fields], field_tuple[end])
                 end
             end
             Interactions = push!(Interactions, IT(tmp..., interaction.data))
         else
-            converted_type = typeof(lambda_single(nothing, interaction.inters[1], scheduler, lj_sc, LJsoftcore_params))
+            converted_type = typeof(lambda_single(nothing, interaction.inters[1], scheduler, lj_sc, lj_softcore_params))
             field_types = [field_types[1:end-2]..., Vector{converted_type}, field_types[end]]
             
             tmp_unique_B = [T() for T in field_types]
@@ -882,7 +915,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                     for i in 1:n_fields-2
                         push!(tmp_unique_B[i], mapped_tuple[i])
                     end
-                    push!(tmp_unique_B[n_fields-1], lambda_single(nothing, field_tuple[end-1], scheduler, lj_sc, LJsoftcore_params))
+                    push!(tmp_unique_B[n_fields-1], lambda_single(nothing, field_tuple[end-1], scheduler, lj_sc, lj_softcore_params))
                     push!(tmp_unique_B[n_fields], field_tuple[end])
                 end
 
@@ -914,6 +947,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
     end
 
+    excluded_ends = copy(excluded_hybrid)
+
     # The unique alchemical groups are excluded from interating
     for i in unique_groups["sysA"], j in unique_groups["sysB"]
         push!(excluded_hybrid, (i, j))
@@ -923,8 +958,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
     eligible = SparsePairMatrix(n_atoms, excluded_hybrid; listed=false)
     special  = SparsePairMatrix(n_atoms, special_hybrid; listed=true)
 
-    # The neighbour finder of the end states, as `System` setup picks it: the type is compared with
-    #   `isa`, since the finders are parametric
+    # The neighbour finder of the end states, as `System` setup picks it
     nf_A = sysA.neighbor_finder
     if isnothing(nf_A)
         # Without a neighbor finder every pair interacts, including the A and B sides
@@ -936,33 +970,36 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         end
         nf = nothing
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
-        nf = GPUNeighborFinder(eligible=eligible, special=special, dist_cutoff=nf_A.dist_cutoff,
-                               n_steps=nf_A.n_steps, array_type=AT)
+        nf = GPUNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
+                               auto_update=nf_A.auto_update, n_steps=nf_A.n_steps, array_type=AT)
     elseif nf_A isa DistanceNeighborFinder &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
-        nf = DistanceNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
-                                    dist_cutoff=nf_A.dist_cutoff, array_type=AT)
+        nf = DistanceNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
+                                    auto_update=nf_A.auto_update, n_steps=nf_A.n_steps, array_type=AT)
     elseif nf_A isa CellListMapNeighborFinder && !(AT <: AbstractGPUArray)
-        nf = CellListMapNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
-                                       boundary=Boundary, x0=Coords, dist_cutoff=nf_A.dist_cutoff)
+        nf = CellListMapNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
+                                       auto_update=nf_A.auto_update, n_steps=nf_A.n_steps,
+                                       boundary=Boundary, x0=Coords, )
     elseif nf_A isa GPUCellListNeighborFinder && AT <: AbstractGPUArray
         # The default output, since the hybrid needs the exclusions applied even if an end
         #   state did not
-        nf = GPUCellListNeighborFinder(eligible=eligible, special=special, n_steps=nf_A.n_steps,
-                                       dist_cutoff=nf_A.dist_cutoff, array_type=AT,
-                                       max_neighbors=nf_A.max_neighbors, ragged=nf_A.ragged)
+        nf = GPUCellListNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
+                                       auto_update=nf_A.auto_update, n_steps=nf_A.n_steps,
+                                       array_type=AT, max_neighbors=nf_A.max_neighbors,
+                                       ragged=nf_A.ragged)
     else
         # Another finder, or one that does not suit the device, keeps the masks and the settings
-        nf = typeof(nf_A).name.wrapper(
+        nf = typeof(nf_A).name.wrapper(;
+            dist_cutoff=nf_A.dist_cutoff,
             eligible=to_device(eligible, AT),
             special=to_device(special, AT),
+            auto_update=nf_A.auto_update,
             n_steps=nf_A.n_steps,
-            dist_cutoff=nf_A.dist_cutoff,
         )
     end
 
-    pairwise_inters = lambda_pairwise_inters(sysA, scheduler, LJsoftcore, Csoftcore, FT,
-                                           LJsoftcore_params, Csoftcore_params)
+    pairwise_inters = lambda_pairwise_inters(sysA, scheduler, lj_softcore, coulomb_softcore, FT,
+                                           lj_softcore_params, coulomb_softcore_params)
     general_inters = lambda_general_inters(sysA, Atoms, Boundary, scheduler, global_λ)
 
     # The Ewald exclusions follow the hybrid masks
@@ -980,6 +1017,18 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                 exclusion_data,
             )
             push!(Interactions, ewald_exclusions)
+        end
+    end
+
+    # The reaction field exclusions follow the exclusions of the end states, with self terms for
+    #   all atoms if system A has them. Unlike Ewald, the pairs between the unique groups are
+    #   left out, since the neighbor list already removes their reaction field.
+    for il in sysA.specific_inter_lists
+        if il isa InteractionList2Atoms && il.data isa CoulombReactionFieldExclusionData
+            eligible_ends = SparsePairMatrix(n_atoms, excluded_ends; listed=false)
+            push!(Interactions, reaction_field_exclusions(
+                replace_fields(il.data, (scheduler=scheduler,)), n_atoms,
+                find_excluded_pairs(eligible_ends, special), has_self_exclusions(il), AT))
         end
     end
 
@@ -1062,7 +1111,7 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                              if Int(i) in unique_B_set || Int(j) in unique_B_set])
         end
         append!(bonded, [(v.atom_ind, v.atom_1) for v in virtual_sites])
-        topology = MolecularTopology(first.(bonded), last.(bonded), n_atoms; array_type=AT)
+        topology = MolecularTopology(first.(bonded), last.(bonded), n_atoms)
     end
 
     return alchemical_system(sysA, Atoms, Coords, Data, Boundary, temp;

@@ -48,13 +48,13 @@ end
 
 keep_master_general_inter(inter, λ_atoms) = !(inter isa AbstractEwald && effective_charges_vary(inter, λ_atoms))
 
-function ewald_exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
-    inter_list.data isa EwaldExclusionData || return false
+function exclusion_charges_vary(inter_list::InteractionList2Atoms, λ_atoms)
+    inter_list.data isa Union{EwaldExclusionData, CoulombReactionFieldExclusionData} || return false
 
     inds = unique!(vcat(Int.(from_device(inter_list.is)), Int.(from_device(inter_list.js))))
     isempty(inds) && return false
 
-    T = typeof(inter_list.data.error_tol)
+    T = float(typeof(ustrip(inter_list.data.dist_cutoff)))
     scheduler = inter_list.data.scheduler
     ref_atoms = from_device(first(λ_atoms))
     ref_charges = [effective_charge(scheduler, ref_atoms[i], Val(T)) for i in inds]
@@ -69,7 +69,7 @@ end
 
 keep_master_specific_inter(inter_list, λ_atoms) = true
 keep_master_specific_inter(inter_list::InteractionList2Atoms, λ_atoms) =
-    !ewald_exclusion_charges_vary(inter_list, λ_atoms)
+    !exclusion_charges_vary(inter_list, λ_atoms)
 
 function AlchemicalPartition(thermo_states::AbstractArray{<:ThermoState};
                              reuse_neighbors::Bool=true)
@@ -239,12 +239,15 @@ end
 # The eligible and special matrices are dense, since the partitions exclude dense patterns of
 #   pairs such as all solvent-solvent pairs, so the warning neighbor finders give for large
 #   dense matrices is turned off as it suggests giving the pairs sparsely
+# The lists are built from scratch for every energy evaluation, so the neighbor finders do not
+#   track displacements
 function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::Bool = true, boundary = nothing)
     if ref_nfinder isa DistanceNeighborFinder
         return DistanceNeighborFinder(
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
-            special   = special,
+            special = special,
+            auto_update = false,
             n_steps = 1,
             strictness = :nowarn,
         )
@@ -253,6 +256,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             boundary = boundary,
             strictness = :nowarn,
@@ -263,6 +267,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special = special,
+                auto_update = false,
                 n_steps = 1,
                 initialized = ref_nfinder.initialized,
                 strictness = :nowarn,
@@ -272,6 +277,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 eligible = eligible,
                 dist_cutoff = ref_nfinder.dist_cutoff,
                 special   = special,
+                auto_update = false,
                 n_steps = 1,
                 strictness = :nowarn,
             )
@@ -281,6 +287,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             max_neighbors = ref_nfinder.max_neighbors,
             output = :molly_pairs,
@@ -292,6 +299,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
             eligible = eligible,
             dist_cutoff = ref_nfinder.dist_cutoff,
             special = special,
+            auto_update = false,
             n_steps = 1,
             strictness = :nowarn,
         )
