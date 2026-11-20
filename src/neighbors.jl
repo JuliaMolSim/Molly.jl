@@ -841,12 +841,18 @@ end
 #=
     uses_gpu_neighbor_finder(AT)
 
-Indicate whether an array type `AT` is compatible with [`GPUNeighborFinder`](@ref).
+Whether [`GPUNeighborFinder`](@ref) is used for systems with array type `AT` by default,
+which is the case for GPU array types whose KernelAbstractions backend supports the tiled
+kernels on the active device, see `supports_tiled_kernels`.
 
-Custom GPU array types should define a method for this function that returns `true`
-if they are supported. By default, this returns `false`.
+Custom GPU array types are covered when their backend reports the KernelInterface traits
+that the kernels need, otherwise they can define a method for this function.
 =#
 uses_gpu_neighbor_finder(AT) = false
+
+function uses_gpu_neighbor_finder(::Type{AT}) where AT <: AbstractGPUArray
+    return supports_tiled_kernels(array_type_backend(AT))
+end
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
@@ -857,7 +863,10 @@ uses_gpu_neighbor_finder(AT) = false
 
 Neighbor finder for GPU systems that uses Molly's tiled pairwise kernels.
 These need a KernelAbstractions backend that supports atomics and sub-groups of 32
-work-items with shuffles, such as CUDA, see `Molly.supports_tiled_kernels`.
+work-items with shuffles, or of 64 work-items that can diverge in halves, which
+`Molly.supports_tiled_kernels(backend)` checks. This is the case for CUDA.jl, AMDGPU.jl,
+oneAPI.jl on devices with sub-groups of 32 work-items and Metal.jl where it supports
+atomics (Metal 4.1 and later).
 
 See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
@@ -877,7 +886,8 @@ points as for the other neighbor finders, since the tile list is rebuilt at the 
 force or energy evaluation after `find_neighbors` is called on a step that is a multiple
 of `n_steps` or with `force_recompute=true`.
 
-This is the recommended neighbor finder for `CuArray` systems. On other GPUs use
+This is the recommended neighbor finder on GPUs that support the tiled kernels, and the
+default there when setting up a [`System`](@ref) from a file. On other GPUs use
 [`GPUCellListNeighborFinder`](@ref).
 The exceptions are stored in the `eligible` and `special` fields as
 [`SparsePairMatrix`](@ref)s on the device. Updating the exception pairs should reset
@@ -1083,8 +1093,8 @@ Neighbor finder for GPU systems that bins atoms into a uniform grid of cells and
 searches the 3x3x3 stencil of cells around each atom.
 
 Returns a [`GPUCellListNeighborList`](@ref). It runs on any GPU backend and is
-the recommended neighbor finder for non-CUDA GPUs, where [`GPUNeighborFinder`](@ref)
-is not tested or not available. Three-dimensional [`CubicBoundary`](@ref) and
+the recommended neighbor finder on GPUs that do not support the tiled kernels of
+[`GPUNeighborFinder`](@ref). Three-dimensional [`CubicBoundary`](@ref) and
 [`TriclinicBoundary`](@ref) systems are supported, provided the grid has at least
 three cells along every box axis, i.e. opposite box faces are at least three times
 the internally padded search cutoff apart. For a [`TriclinicBoundary`](@ref), that
@@ -2480,7 +2490,8 @@ end
 
 Find close atoms by distance.
 
-This is the recommended neighbor finder on non-NVIDIA GPUs when the box is too small for
+This is the recommended neighbor finder on GPUs that do not support the tiled kernels of
+[`GPUNeighborFinder`](@ref) when the box is too small for
 [`GPUCellListNeighborFinder`](@ref). It checks every pair of atoms, so the time it takes
 grows with the square of the number of atoms.
 
@@ -2501,8 +2512,8 @@ These are iterables of `(i, j)` pairs or sparse matrices.
 They are stored as [`SparsePairMatrix`](@ref)s, so the memory used is proportional to the
 number of pairs.
 `array_type` is the array type used to store them, `Array` by default, and should match
-the [`System`](@ref) that the neighbor finder is used with, for example `CuArray` for a
-system on a NVIDIA GPU.
+the [`System`](@ref) that the neighbor finder is used with, for example `CuArray` or
+`ROCArray` for a system on a GPU.
 
 Alternatively, `eligible` can be given as a symmetric `n_atoms` x `n_atoms` Boolean
 matrix that is `true` for the pairs that can interact, along with `special` as a matrix

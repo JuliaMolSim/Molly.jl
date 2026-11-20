@@ -498,7 +498,7 @@ Each residue is matched to a residue template of the force field, and a
 - `units::Bool=true`: whether to use Unitful quantities. Should match the
     corresponding argument used for the force field argument.
 - `array_type=Array`: the array type for the simulation, for example
-    use `CuArray` or `ROCArray` for GPU support.
+    use `CuArray`, `ROCArray`, `oneArray` or `MtlArray` for GPU support.
 - `float_type`: the floating point type of the system, defaults to `Float64` on CPU
     and `Float32` on GPU.
 - `float_type_high`: the floating point type used for accumulation where
@@ -543,9 +543,10 @@ Each residue is matched to a residue template of the force field, and a
     simulation box.
 - `neighbor_finder_type=nothing`: which type of neighbor finder to use. The default
     `nothing` chooses [`CellListMapNeighborFinder`](@ref) on CPU,
-    [`GPUNeighborFinder`](@ref) on CUDA compatible GPUs and
-    [`GPUCellListNeighborFinder`](@ref) on non-CUDA compatible GPUs, falling back to
-    [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
+    [`GPUNeighborFinder`](@ref) on GPUs that support its tiled kernels, see
+    [`GPUNeighborFinder`](@ref), and [`GPUCellListNeighborFinder`](@ref) on other GPUs,
+    falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for
+    a cell list.
     `Nothing`, the type of `nothing`, gives a system with no neighbor finder.
 - `neighbor_finder_auto_update=true`: whether the neighbor finder rebuilds the
     neighbor list only when the atoms have moved far enough since the last rebuild
@@ -555,10 +556,13 @@ Each residue is matched to a residue template of the force field, and a
     number of steps between neighbor finder updates. Can be tuned along with
     `dist_buffer` to ensure that particles do not cross the buffer distance during
     the update interval.
-- `launch_config=CUDALaunchConfig()`: stored CUDA launch overrides for this
-    system. Ignored on CPU and non-CUDA GPU backends.
-- `autotune_launch=true`: whether to autotune CUDA launch parameters at the end
-    of setup. This is a no-op on CPU and non-CUDA GPU backends.
+- `launch_config=Molly.TileLaunchConfig()`: stored launch overrides of the tiled
+    kernels of [`GPUNeighborFinder`](@ref) for this system. Ignored by systems that do
+    not use them.
+- `autotune_launch=true`: whether to autotune the launch parameters of the tiled
+    kernels of [`GPUNeighborFinder`](@ref) at the end of setup, see
+    [`optimize_tile_launch_config!`](@ref). This is a no-op for systems that do not use
+    them.
 - `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=nothing`: the implicit solvent model to use, can be `nothing`
     or an instance of [`SetupImplicitSolventOBC`](@ref) or
@@ -602,7 +606,7 @@ function System(coord_file::AbstractString,
                 neighbor_finder_type=nothing,
                 neighbor_finder_auto_update::Bool=true,
                 neighbor_finder_n_steps::Integer=10,
-                launch_config=CUDALaunchConfig(),
+                launch_config=TileLaunchConfig(),
                 autotune_launch::Bool=true,
                 data=nothing,
                 implicit_solvent=nothing,
@@ -1844,7 +1848,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
 
     # Virtual sites are in the structure file but not necessarily in the correct place
     place_virtual_sites!(sys; n_threads=n_threads)
-    maybe_optimize_cuda_launch_config!(sys; enabled=autotune_launch)
+    maybe_optimize_tile_launch_config!(sys; enabled=autotune_launch)
     return sys
 end
 

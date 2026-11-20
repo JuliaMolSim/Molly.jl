@@ -1,4 +1,22 @@
-using CUDA
+# Benchmark of the tiled pairwise kernels of GPUNeighborFinder on a GPU backend chosen with
+#   MOLLY_BENCH_GPU, CUDA (the default), AMDGPU, oneAPI or Metal, and the device with
+#   MOLLY_BENCH_DEVICE, starting from 1
+const gpu_package = get(ENV, "MOLLY_BENCH_GPU", "CUDA")
+if gpu_package == "CUDA"
+    using CUDA
+    const AT = CuArray
+elseif gpu_package == "AMDGPU"
+    using AMDGPU
+    const AT = ROCArray
+elseif gpu_package == "oneAPI"
+    using oneAPI
+    const AT = oneArray
+elseif gpu_package == "Metal"
+    using Metal
+    const AT = MtlArray
+else
+    error("MOLLY_BENCH_GPU must be CUDA, AMDGPU, oneAPI or Metal, got $gpu_package")
+end
 using BenchmarkTools
 using StaticArrays
 using Unitful
@@ -33,9 +51,9 @@ function setup_benchmark_system(n_atoms;
     pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
     
     sys_gpu = System(
-        atoms=CuArray(atoms),
-        coords=CuArray(coords),
-        velocities=CuArray(velocities),
+        atoms=AT(atoms),
+        coords=AT(coords),
+        velocities=AT(velocities),
         boundary=boundary,
         pairwise_inters=pairwise_inters,
         neighbor_finder=Molly.GPUNeighborFinder(
@@ -43,7 +61,7 @@ function setup_benchmark_system(n_atoms;
             excluded_pairs=(),
             special_pairs=(),
             dist_cutoff=r_cut,
-            array_type=CuArray,
+            array_type=AT,
         ),
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
@@ -90,9 +108,10 @@ function print_profile(name, force_profile, energy_profile)
 end
 
 function run_benchmark()
-    device!(env_int("MOLLY_CUDA_DEVICE", 0))
-    samples = env_int("MOLLY_CUDA_BENCH_SAMPLES", 10)
-    n_atoms = env_int("MOLLY_CUDA_TILE_BENCH_ATOMS", 4096)
+    backend = Molly.array_type_backend(AT)
+    Molly.KI.device!(backend, env_int("MOLLY_BENCH_DEVICE", 1))
+    samples = env_int("MOLLY_BENCH_SAMPLES", 10)
+    n_atoms = env_int("MOLLY_TILE_BENCH_ATOMS", 4096)
 
     cases = [
         (
@@ -109,7 +128,8 @@ function run_benchmark()
 
 
     println("Molly GPU Nonbonded Tile Benchmark")
-    println("CUDA device: ", CUDA.name(CUDA.device()))
+    println("Backend: ", backend, ", device ", Molly.KI.device(backend), ", sub-group width ",
+            Molly.KI.sub_group_size(backend))
     println("Atoms per case: ", n_atoms)
     println("Benchmark samples per case: ", samples)
     println()
@@ -120,7 +140,7 @@ function run_benchmark()
     for case in cases
         sys = case.sys
         n_threads = 1
-        blocks_y = optimize_cuda_launch_config!(sys)
+        blocks_y = optimize_tile_launch_config!(sys)
         println("USING $(blocks_y) blocks")
         buffers_f = Molly.init_buffers!(sys, n_threads)
         buffers_e = Molly.init_buffers!(sys, n_threads, true)
@@ -128,7 +148,7 @@ function run_benchmark()
         fs = Molly.zero_forces(sys)
         Molly.forces!(fs, sys, nothing, 0, buffers_f, Val(false))
         potential_energy(sys, nothing, 0, buffers_e)
-        CUDA.synchronize()
+        KernelAbstractions.synchronize(backend)
 
         profile_gpu_force_path!(sys; buffers=buffers_f)
         force_profile = profile_gpu_force_path!(sys; buffers=buffers_f)
@@ -139,14 +159,14 @@ function run_benchmark()
         step_counter = 0
         forces_ms = 1_000 * @belapsed begin
             Molly.forces!($fs, $sys, nothing, $step_counter, $buffers_f, Val(false))
-            CUDA.synchronize()
+            KernelAbstractions.synchronize($backend)
             $step_counter += 1
         end samples=samples evals=1
 
         step_counter = 0
         pe_ms = 1_000 * @belapsed begin
             potential_energy($sys, nothing, $step_counter, $buffers_e)
-            CUDA.synchronize()
+            KernelAbstractions.synchronize($backend)
             $step_counter += 1
         end samples=samples evals=1
 

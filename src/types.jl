@@ -1035,18 +1035,18 @@ Base.firstindex(::GPUCellListNeighborList) = 1
 Base.lastindex(neighbors::GPUCellListNeighborList) = length(neighbors)
 Base.eachindex(neighbors::GPUCellListNeighborList) = Base.OneTo(length(neighbors))
 
-# CUDA launch configuration
-const CUDA_LAUNCH_UNSET = 0
-const CUDA_TILE_THREADS_UNSET = (0, 0)
+# Launch configuration of the tiled kernels of GPUNeighborFinder, see tile_launch_config.jl
+const TILE_LAUNCH_UNSET = 0
+const TILE_THREADS_UNSET = (0, 0)
 
-struct CUDALaunchConfig
+struct TileLaunchConfig
     force_block_y::Int
     force_maxregs::Int
     tile_threads::NTuple{2, Int}
     energy_block_y::Int
 end
 
-function CUDALaunchConfig(;
+function TileLaunchConfig(;
                           force_block_y=nothing,
                           force_maxregs=nothing,
                           tile_threads=nothing,
@@ -1064,32 +1064,32 @@ function CUDALaunchConfig(;
     end
 
     tile_threads_raw = tile_threads === nothing ?
-                       CUDA_TILE_THREADS_UNSET :
+                       TILE_THREADS_UNSET :
                        (Int(tile_threads[1]), Int(tile_threads[2]))
-    return CUDALaunchConfig(
-        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
-        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+    return TileLaunchConfig(
+        Int(something(force_block_y, TILE_LAUNCH_UNSET)),
+        Int(something(force_maxregs, TILE_LAUNCH_UNSET)),
         tile_threads_raw,
-        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(energy_block_y, TILE_LAUNCH_UNSET)),
     )
 end
 
-@inline function cuda_force_block_y(config::CUDALaunchConfig)
+@inline function config_force_block_y(config::TileLaunchConfig)
     value = config.force_block_y
     return iszero(value) ? nothing : value
 end
 
-@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+@inline function config_force_maxregs(config::TileLaunchConfig)
     value = config.force_maxregs
     return iszero(value) ? nothing : value
 end
 
-@inline function cuda_tile_threads(config::CUDALaunchConfig)
+@inline function config_tile_threads(config::TileLaunchConfig)
     value = config.tile_threads
-    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+    return value == TILE_THREADS_UNSET ? nothing : value
 end
 
-@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+@inline function config_energy_block_y(config::TileLaunchConfig)
     value = config.energy_block_y
     return iszero(value) ? nothing : value
 end
@@ -1116,9 +1116,14 @@ end
 default_float_type_high(::Type{<:AbstractArray}, ::Type{T}) where {T} = Float64
 
 function default_float_type_high(::Type{AT}, ::Type{T}) where {AT <: AbstractGPUArray, T}
-    # get_backend requires an array rather than an array type, Float32 is used to make
-    #   the array since it is supported by every backend
-    return default_float_type_high(get_backend(AT{Float32}(undef, 0)), T)
+    return default_float_type_high(array_type_backend(AT), T)
+end
+
+# The KernelAbstractions backend of the array type `AT`, e.g. `CuArray` or `CuArray{Float32}`
+# get_backend requires an array rather than an array type, Float32 is used to make the
+#   empty array since it is supported by every backend
+function array_type_backend(::Type{AT}) where AT <: AbstractArray
+    return get_backend(Base.typename(AT).wrapper{Float32}(undef, 0))
 end
 
 # The float type of a system with float type T moved to arrays of type AT, which is Float32
@@ -1355,7 +1360,7 @@ mutable struct System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, 
     total_mass::TM
     data::DA
     grad_safe::Bool
-    launch_config::CUDALaunchConfig
+    launch_config::TileLaunchConfig
 end
 
 function System(;
@@ -1380,7 +1385,7 @@ function System(;
                 data=nothing,
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                launch_config=CUDALaunchConfig())
+                launch_config=TileLaunchConfig())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
@@ -1667,7 +1672,7 @@ function System(crystal::Crystal{D};
                 float_type_high=Float64,
                 data=nothing,
                 grad_safe::Bool=false,
-                launch_config=CUDALaunchConfig()) where D
+                launch_config=TileLaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
@@ -2077,7 +2082,7 @@ end
     array_type(arr)
 
 The array type of a [`System`](@ref), [`ReplicaSystem`](@ref) or array, for example
-`Array` for systems on CPU or `CuArray` for systems on a NVIDIA GPU.
+`Array` for systems on CPU or `CuArray` for systems on an NVIDIA GPU.
 """
 array_type(::AT) where AT = AT.name.wrapper
 array_type(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}}) where {AT} = AT
@@ -2333,7 +2338,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 float_type_high=Float64,
                 data=nothing,
                 grad_safe::Bool=false,
-                launch_config=CUDALaunchConfig()) where D
+                launch_config=TileLaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)

@@ -178,7 +178,7 @@ end
     @test serial == (d2_all[end], d2_all[end - 1])
 
     # The GPU reductions give the same displacements as the CPU one, including the generic
-    #   kernel used on GPUs other than CUDA ones
+    #   kernel used on backends without `fused_tile_check`
     # The device code can contract a multiplication and an addition into a fused
     #   multiply-add, so the displacements of the atoms can differ in the last bits, and by
     #   more in a deformed box where the displacement is the difference of two coordinates

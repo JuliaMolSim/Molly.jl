@@ -185,8 +185,10 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 
 Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples](@ref "Testing GPU memory limits").
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
-Non-CUDA backends are less well-tested with Molly than CUDA.
-The tiled neighbor finder [`GPUNeighborFinder`](@ref) is only tested and used by default on CUDA, so on other GPU backends the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) should be used instead.
+The GPU code of Molly is written with [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), so the same kernels run on all of these backends, though backends other than CUDA are less well-tested with Molly.
+The tiled neighbor finder [`GPUNeighborFinder`](@ref) is used by default when setting up a system from a file on GPUs that support its kernels.
+This includes NVIDIA and AMD GPUs, Intel GPUs with sub-groups of 32 work-items and Apple GPUs with Metal 4.1 or later, and `Molly.supports_tiled_kernels(backend)` returns whether a backend supports them.
+On other GPUs the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) is used instead, and it can also be chosen with `neighbor_finder_type=GPUCellListNeighborFinder`.
 
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
@@ -222,12 +224,12 @@ simulate!(sys, simulator, 1_000)
 ```
 To use another GPU package, just swap out `CUDA` for your desired package and `CuArray` for your desired array type.
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
-There are two GPU code paths currently: a fast path specific to CUDA and a slower path using [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) that is suitable for all backends.
+On CUDA a few extra optimizations are used: the pairwise kernels are compiled with fast math for `Float32`, see [Fast math](@ref), and the specific and general interactions run on a second stream at the same time as the pairwise interactions.
 
 The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF`, `MOLLY_GPUNTHREADS_CELLLIST`, `MOLLY_GPUNTHREADS_COPY`, `MOLLY_GPUNTHREADS_IMPLICIT` and `MOLLY_GPUTILES_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
-For the tiled kernels used with [`GPUNeighborFinder`](@ref) on CUDA, users can explicitly call [`optimize_cuda_launch_config!`](@ref) on a system prior to a simulation. This will benchmark various launch configurations for the pairwise force and energy kernels and store the optimal parameters in the system, caching them for systems of the same type, size and box on the same device. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_CUDA_FORCE_BLOCK_Y`, `MOLLY_CUDA_ENERGY_BLOCK_Y`, `MOLLY_CUDA_TILE_THREADS_X`, `MOLLY_CUDA_TILE_THREADS_Y`, and `MOLLY_CUDA_FORCE_MAXREGS`.
+For the tiled kernels used with [`GPUNeighborFinder`](@ref), users can explicitly call [`optimize_tile_launch_config!`](@ref) on a system prior to a simulation. This will benchmark various launch configurations for the pairwise force and energy kernels and store the optimal parameters in the system, caching them for systems of the same type, size and box on the same device. Users can also manually override the kernel parameters by setting the environment variables `MOLLY_TILE_FORCE_BLOCK_Y`, `MOLLY_TILE_ENERGY_BLOCK_Y`, `MOLLY_TILE_THREADS_X`, `MOLLY_TILE_THREADS_Y` and, on CUDA, `MOLLY_TILE_FORCE_MAXREGS`.
 
 ## Simulating diatomic molecules
 
@@ -1672,8 +1674,8 @@ function Molly.simulate!(sys::ReplicaSystem,
 end
 ```
 
-Under the hood there are multiple implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, a CUDA version, and a version for other GPU backends.
-You can define different versions of a simulator for CPU, CUDA and generic GPU systems by dispatching on `System{D, Array}` or `System{D, CuArray}` and `System{D, AT} where AT <: AbstractGPUArray` respectively.
+Under the hood there are multiple implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism and a version for GPUs, which is the same for all GPU backends.
+You can define different versions of a simulator for CPU and GPU systems by dispatching on `System{D, Array}` and `System{D, AT} where AT <: AbstractGPUArray` respectively, or on a particular GPU array type such as `System{D, CuArray}`.
 This also applies to coupling methods, neighbor finders and analysis functions.
 You do not have to define different versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
 
@@ -2147,7 +2149,7 @@ The available neighbor finders are:
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 
-The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on GPUs that support its tiled kernels, see [GPU acceleration](@ref), and [`GPUCellListNeighborFinder`](@ref) on other GPUs, falling back to [`DistanceNeighborFinder`](@ref) there when the box is too small for a cell list.
 
 The [`find_neighbors`](@ref) function returns an object that can be indexed into, and all pairs can be extracted with [`neighbor_pairs`](@ref):
 ```julia
@@ -2203,14 +2205,15 @@ A [`SparsePairMatrix`](@ref) can also be given as the `eligible` and `special` m
 
 [`GPUNeighborFinder`](@ref) follows a different path based on the tiled GPU strategy of [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 Instead of materializing a conventional neighbor list, it stores sparse excluded and special pairs and lets the tiled pairwise kernels reorder atoms and cache a compact list of interacting `32x32` tiles internally, building the exclusion masks of the few tiles that need them from the sparse pairs.
-The kernels are written with the sub-group operations of KernelAbstractions, so they need a backend with sub-groups of 32 work-items, see `Molly.supports_tiled_kernels`; they are tested on CUDA and on the CPU backend of KernelAbstractions, which is used to test them without a GPU.
+The kernels are written with the sub-group operations of KernelAbstractions, so they need a backend with sub-groups of 32 work-items, or of 64 work-items whose halves can take different branches, in which case each half processes a tile, see `Molly.supports_tiled_kernels`.
+They are tested on CUDA and on the CPU backend of KernelAbstractions, which is used to test them without a GPU, and the kernels for 64-wide sub-groups, which also run correctly with 32-wide sub-groups, are tested on CUDA too.
 The memory it uses grows linearly with the number of atoms, and for large systems the interacting tiles are found by searching a tree of bounding boxes, so the time taken also grows close to linearly.
 Accordingly, [`find_neighbors`](@ref) returns `nothing` for [`GPUNeighborFinder`](@ref), and the force and energy kernels decide when to refresh the tile list.
 With `auto_update=false` it should still be called at the same points as for the other neighbor finders, since it then marks when the tile list is rebuilt.
 When using it, set `dist_cutoff` to the interaction cutoff distance plus a buffer distance as above.
 
 [`GPUCellListNeighborFinder`](@ref) is an `O(N)` cell list that does materialize a neighbor list, returning a [`GPUCellListNeighborList`](@ref), which also gives the neighbors of each atom as a padded matrix via [`ragged_neighbors`](@ref).
-It runs on any GPU backend and is the best option on GPUs other than NVIDIA ones, where the tiled kernels of [`GPUNeighborFinder`](@ref) are not tested or, for 64-wide sub-groups such as the wavefronts of AMD data center GPUs, not available.
+It runs on any GPU backend and is the best option on GPUs that do not support the tiled kernels of [`GPUNeighborFinder`](@ref).
 Three-dimensional [`CubicBoundary`](@ref) and [`TriclinicBoundary`](@ref) systems are supported, as long as opposite box faces are at least three times `dist_cutoff` apart so that the grid has at least three cells along every box axis.
 Like [`GPUNeighborFinder`](@ref) it stores the exclusions and special pairs as [`SparsePairMatrix`](@ref)s on the device, converting dense `eligible` and `special` matrices at construction rather than keeping them, since a dense mask is `n_atoms^2` bytes on the device.
 Most of the memory it uses for a large system is the per-atom neighbor matrix and the pair list.
@@ -2295,7 +2298,7 @@ Some functions require `Random.default_rng()` for thread safety, and will error 
 Here is a checklist to ensure that you are getting the optimal performance from your simulations:
 - On CPU, you should tune the `n_threads` argument to [`simulate!`](@ref). If running on a single thread, it should be `1`. Otherwise you should try various values, including larger than the number of threads available to Julia (which balances the load appropriately). Make sure to start Julia with as many threads as possible using `-t`. Generally, `Float32` is not much faster than `Float64` on CPU so `Float64` is the default float type.
 - On GPU, using `Float32` will give vastly better performance and is the default float type. You can try changing the number of threads for each kernel as described in the [GPU acceleration](@ref) section, but the defaults are generally suitable for modern hardware. Multiple simulations can be run on different GPUs using `device!`. It is not currently possible to split one simulation onto multiple devices.
-- If you run a simulation using CUDA GPUs with [`GPUNeighborFinder`](@ref), the [`optimize_cuda_launch_config!`](@ref) function can be used to automatically test several launch parameters for the CUDA kernels and select the most performant ones. This is done automatically when setting a system up from a file.
+- If you run a simulation on the GPU with [`GPUNeighborFinder`](@ref), the [`optimize_tile_launch_config!`](@ref) function can be used to automatically test several launch parameters for its tiled kernels and select the most performant ones. This is done automatically when setting a system up from a file.
 - Run a short [`simulate!`](@ref) call once to ensure JIT compilation. You can run it on `deepcopy(sys)` if you don't want to affect `sys`, though beware of side effects like writing out trajectory files and consider using `run_loggers=false`.
 - Make sure all arrays, such as coordinates and velocities, are concretely typed.
 - In general, using units doesn't slow things down as described in the [Units](@ref) section, but you could try running without units.

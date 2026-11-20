@@ -1021,7 +1021,7 @@ end
 
 update_vel(v, cm_v, vsf) = (vsf ? zero(v) : v - cm_v)
 
-# The CUDA extension has a fast 3D CUDA path for `remove_CM_motion!(sys)`
+# GPU backends with atomics use the kernels of `remove_CM_motion!(sys)` in gpu_tiles.jl
 function remove_CM_motion!(vels::AbstractGPUArray, sys)
     cm_momentum = mapreduce((v, m) -> v .* m, +, vels, masses(sys))
     cm_velocity = cm_momentum / sys.total_mass

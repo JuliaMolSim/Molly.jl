@@ -1,16 +1,17 @@
 using Molly
 using Molly: sorted_morton_seq!
-using CUDA
+using KernelAbstractions
 using StaticArrays
 
 # The stages of the tiled pairwise path of GPUNeighborFinder are timed one at a time, each
 #   followed by a synchronization, so the times include the launch overhead of each stage
+# This works with any GPU backend that supports the tiled kernels
 
-function gpu_stage_time_ms!(f::F) where {F}
-    CUDA.synchronize()
+function gpu_stage_time_ms!(f::F, backend) where {F}
+    KernelAbstractions.synchronize(backend)
     start_ns = time_ns()
     f()
-    CUDA.synchronize()
+    KernelAbstractions.synchronize(backend)
     return (time_ns() - start_ns) / 1.0e6
 end
 
@@ -41,27 +42,27 @@ end
 
 # Rebuild the Morton order, the exception data and the tile list of `buffers` from the
 #   coordinates of `sys`, timing each stage
-function profile_gpu_tile_rebuild!(sys::System{D, <:CuArray}, buffers) where D
+function profile_gpu_tile_rebuild!(sys::System{D}, buffers) where D
     N = length(sys.coords)
     nf = sys.neighbor_finder
-    morton_sort_ms = gpu_stage_time_ms!() do
+    morton_sort_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         sorted_morton_seq!(buffers, sys.coords, sys.boundary)
     end
-    compress_ms = gpu_stage_time_ms!() do
+    compress_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.refresh_tile_exceptions!(buffers, nf, Val(N))
         nf.initialized = true
         buffers.sparse_pair_generation = nf.cache_generation
     end
-    reorder_ms = gpu_stage_time_ms!() do
+    reorder_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.reorder_system_gpu!(buffers, sys)
     end
-    bounds_ms = gpu_stage_time_ms!() do
+    bounds_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.compute_block_bounds!(buffers, sys, N)
     end
-    tile_find_ms = gpu_stage_time_ms!() do
+    tile_find_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.find_interacting_tiles!(buffers, sys, cld(N, 32))
     end
-    prune_ms = gpu_stage_time_ms!() do
+    prune_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.prune_interacting_tiles!(buffers, sys, N)
     end
     Molly.throw_if_interacting_tiles_overflowed(buffers)
@@ -75,7 +76,7 @@ function profile_gpu_tile_rebuild!(sys::System{D, <:CuArray}, buffers) where D
     )
 end
 
-function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
+function profile_gpu_force_path!(sys::System{D, <:Any, T};
                                  step_n::Integer=0,
                                  needs_vir::Bool=false,
                                  buffers=Molly.init_buffers!(sys, 1)) where {D, T}
@@ -90,11 +91,11 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
     rebuild_times = profile_gpu_tile_rebuild!(sys, buffers)
     block_y = Molly.force_block_y(sys, buffers, pairwise_inters)
     maxregs = Molly.force_maxregs(sys)
-    force_kernel_ms = gpu_stage_time_ms!() do
+    force_kernel_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.launch_force_tiles!(buffers, sys, pairwise_inters, Val(needs_vir), step_n,
                                   block_y, maxregs)
     end
-    reverse_reorder_ms = gpu_stage_time_ms!() do
+    reverse_reorder_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.reverse_reorder_forces_gpu!(buffers, sys)
     end
 
@@ -113,7 +114,7 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
     )
 end
 
-function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
+function profile_gpu_energy_path!(sys::System{D, <:Any, T};
                                   step_n::Integer=0,
                                   buffers=Molly.init_buffers!(sys, 1, true)) where {D, T}
     pairwise_inters = neighbor_pairwise_inters(sys)
@@ -124,7 +125,7 @@ function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
 
     rebuild_times = profile_gpu_tile_rebuild!(sys, buffers)
     block_y = Molly.energy_block_y(sys, buffers, pairwise_inters)
-    energy_kernel_ms = gpu_stage_time_ms!() do
+    energy_kernel_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.launch_energy_tiles!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters,
                                    step_n, block_y)
     end

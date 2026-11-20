@@ -119,13 +119,60 @@ end
 
 #=
 Launch a KernelAbstractions kernel, as `kernel!(args...; ndrange=ndrange)` does.
-The CUDA extension has a faster method for kernels with a static workgroup size, which
-keeps the compiled kernel rather than looking it up at every launch. The kernels of a
-simulation step are small enough that the host time to launch them is often what limits
-the speed, so this is used for the kernels that run every step.
+The kernels of a simulation step are small enough that the host time to launch them is
+often what limits the speed, so this is used for the kernels that run every step. On GPU
+backends a kernel with a static workgroup size is launched as KernelAbstractions launches
+it, but keeping the compiled kernel rather than looking it up at every launch, see
+`cached_kernel_function`. The kernels for which `kernel_fastmath` is `true` are compiled
+with fast math on backends that support it, see `fastmath_backend`.
 =#
 @inline launch_kernel!(kernel!, args...; ndrange) = kernel!(args...; ndrange=ndrange)
 
+function launch_kernel!(obj::KernelAbstractions.Kernel{<:Any, <:KernelAbstractions.NDIteration.StaticSize},
+                        args...; ndrange)
+    backend = KernelAbstractions.backend(obj)
+    # The launches of the CPU backend run the workgroups that cover the ndrange without
+    #   bounds checks, which needs its own launch
+    is_gpu_backend(backend) || return obj(args...; ndrange=ndrange)
+    sizes = KernelAbstractions.sizes_only(obj)
+    skip, ndrange_, workgroupsize, iterspace = KernelAbstractions.launch_setup(sizes, ndrange,
+                                                                                nothing)
+    skip && return nothing
+    launch = @noinline KernelAbstractions.select_launch(sizes, workgroupsize, iterspace)
+    T = KernelAbstractions.narrow_index_type(backend)
+    # The common launch mode is specialized statically, as KernelAbstractions does
+    if launch === KernelAbstractions.NDLaunch{T}()
+        launch_ka_kernel!(obj, KernelAbstractions.NDLaunch{T}(), ndrange_, iterspace, args)
+    else
+        Base.inferencebarrier(launch_ka_kernel!)(obj, launch, ndrange_, iterspace, args)
+    end
+    return nothing
+end
+
+#=
+What launching the kernel does after the launch mode is chosen, see
+`KernelAbstractions.launch_kernel`, with the compiled kernel kept.
+=#
+@noinline function launch_ka_kernel!(obj, launch, ndrange, iterspace, args::Tuple)
+    backend = KernelAbstractions.backend(obj)
+    subgroups = KernelAbstractions.kernel_subgroups(obj)
+    ctx = KernelAbstractions.mkcontext(obj, ndrange, iterspace, launch; subgroups)
+    kernel_args, tt = KernelAbstractions.prepare_arguments(backend, obj.f, ctx, args)
+    kernel_backend = (kernel_fastmath(obj.f, args) ? fastmath_backend(backend) : backend)
+    kernel = cached_kernel_function(kernel_backend, obj.f,
+                                    KernelAbstractions.prepend(ctx, kernel_args),
+                                    Val(KernelAbstractions.compiler_options(obj)))
+    ctx, groups, items = KernelAbstractions.launch_geometry(KernelAbstractions.sizes_only(obj),
+                                launch, subgroups, ndrange, iterspace, ctx, nothing)
+    KI.launch(kernel, groups, items, KernelAbstractions.prepend(ctx, kernel_args))
+    return nothing
+end
+
+#=
+The backend to compile a kernel with fast math with, see `kernel_fastmath`, which is the
+same backend unless a backend extension defines a method for backends that support it.
+=#
+fastmath_backend(backend) = backend
 #=
 Work launched with `run_side_work!` can run on the device at the same time as the work
 launched after it, which the CUDA extension does with a second stream. `forces!` uses this
@@ -212,7 +259,8 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
     if isnothing(neighbors)
         error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
               "interactions used without a neighbor finder need use_neighbors=false and " *
-              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUNeighborFinder is only available on GPUs that support its tiled kernels, " *
+              "see Molly.supports_tiled_kernels, on other GPUs use " *
               "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
@@ -232,7 +280,7 @@ end
 Launch the pairwise forces of the interactions that use the neighbor list, possibly
 leaving work to `finish_pairwise_forces_gpu!`, which `gpu_forces!` calls once the specific
 forces are launched. Together they add the forces to `buffers.fs_mat` as
-`pairwise_forces_loop_gpu!` does. The CUDA tiled path uses this to wait for the check of
+`pairwise_forces_loop_gpu!` does. The tiled path uses this to wait for the check of
 its tile list as late as possible, so that the host launches the specific forces rather
 than waiting for the device to catch up.
 =#
@@ -566,10 +614,10 @@ end
 
 #=
 Whether a kernel may be compiled with fast math for arguments `args`, which back-ends that
-support it can read when launching it. As with the CUDA pairwise force kernel, and OpenMM,
-the specific force kernels are compiled with approximate division, square roots and
-reciprocal square roots in Float32, which changes the forces by about the rounding error of
-Float32.
+support it can read when launching it, see `fastmath_backend`. As with the tiled pairwise
+force kernel, and OpenMM, the specific force kernels are compiled on CUDA with approximate
+division, square roots and reciprocal square roots in Float32, which changes the forces by
+about the rounding error of Float32.
 =#
 kernel_fastmath(kernel_fn, args) = false
 
@@ -583,7 +631,8 @@ function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:Abs
     if isnothing(neighbors)
         error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
               "interactions used without a neighbor finder need use_neighbors=false and " *
-              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUNeighborFinder is only available on GPUs that support its tiled kernels, " *
+              "see Molly.supports_tiled_kernels, on other GPUs use " *
               "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
@@ -800,7 +849,7 @@ end
 
 #=
 The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
-    tile search of the CUDA pairwise kernels.
+    tile search of the tiled pairwise kernels.
 Coordinates in an orthorhombic box are used as they are.
 Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
     using the basis vectors. The brick holds one image of each point, as the triclinic cell

@@ -97,8 +97,13 @@ end
 @testset "ReaxFF energy conservation" begin
     data_dir = normpath(@__DIR__, "..", "..", "data")
 
-    for array_type in (CUDA.functional() ? (Array, CuArray) : (Array,))
-        device = (array_type == Array ? "CPU" : "GPU")
+    array_types = (
+        Array,
+        (CUDA.functional() ? (CuArray,) : ())...,
+        (AMDGPU.functional() ? (ROCArray,) : ())...,
+    )
+    for array_type in array_types
+        device = (array_type == Array ? "CPU" : "GPU $array_type")
 
         @testset "$device" begin
             float_type = Float64

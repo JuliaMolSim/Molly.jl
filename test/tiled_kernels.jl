@@ -1,9 +1,14 @@
 @testset "Tiled GPUNeighborFinder kernels" begin
     # The tiled kernels of GPUNeighborFinder are KernelAbstractions/KernelInterface kernels,
-    #   so they also run with `Array`s on the CPU backend of KernelAbstractions when it
-    #   supports sub-groups of 32 work-items
-    tiled_array_types = filter(AT -> Molly.supports_tiled_kernels(get_backend(AT{Float32}(undef, 0))),
+    #   so they run on every GPU backend that supports them and also with `Array`s on the
+    #   CPU backend of KernelAbstractions when it supports sub-groups of 32 work-items
+    tiled_array_types = filter(AT -> Molly.supports_tiled_kernels(Molly.array_type_backend(AT)),
                                array_list)
+    # The kernels for 64-wide sub-groups, which process a tile with each half of a sub-group,
+    #   are also valid with 32-wide sub-groups, so they are tested on GPUs along with the
+    #   kernels for the sub-group width of the backend (0); not on the CPU backend, where
+    #   compiling the kernels for a system takes minutes
+    sub_group_widths(AT) = (AT <: AbstractGPUArray ? (0, 2 * Molly.TILE_WIDTH) : (0,))
 
     # The kernels add the virial to slots, which `gpu_forces!` folds, and the energy to
     #   `n_energy_slots` entries
@@ -24,12 +29,13 @@
         return fs, from_device(buffers.virial_nounits), sum(from_device(pe_vec))
     end
 
-    for AT in tiled_array_types, (n_atoms, boundary) in (
+    for AT in tiled_array_types, width in sub_group_widths(AT), (n_atoms, boundary) in (
                 (20, CubicBoundary(3.0)),
                 (1000, CubicBoundary(3.0)),
                 (900, TriclinicBoundary(SVector(3.0, 0.0, 0.0), SVector(0.4, 3.0, 0.0),
                                         SVector(0.3, 0.5, 3.0))),
             )
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
         Random.seed!(n_atoms)
         r_cut = 1.0
         coords = place_atoms(n_atoms, boundary; min_dist=0.1)
@@ -66,6 +72,7 @@
         @test maximum(norm.(fs .- fs_ref)) < 1e-10 * maximum(norm.(fs_ref))
         @test isapprox(vir, vir_ref; rtol=1e-10)
         @test isapprox(pe, pe_ref; rtol=1e-10)
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = 0
     end
 
     # Several steps with the same buffers and a buffer distance, so that the displacement
@@ -87,8 +94,9 @@
         return fs, from_device(buffers.virial_nounits), sum(from_device(buffers.pe_vec_nounits))
     end
 
-    for AT in tiled_array_types, D in (3, 2)
+    for AT in tiled_array_types, width in sub_group_widths(AT), D in (3, 2)
         (D == 2 && AT == Array) && continue
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
         Random.seed!(D)
         n_atoms = 1000
         r_cut = 1.0
@@ -152,6 +160,59 @@
                 @test counts.n_builds == 2
             end
         end
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = 0
+    end
+
+    # A Float32 system on every GPU array type, including those without Float64 such as Metal
+    #   arrays, with both sub-group widths of the kernels
+    tiled_gpu_array_types_f32 = filter(AT -> AT <: AbstractGPUArray &&
+                            Molly.supports_tiled_kernels(Molly.array_type_backend(AT)),
+                        array_list_metal)
+    for AT in tiled_gpu_array_types_f32, width in sub_group_widths(AT)
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
+        Random.seed!(32)
+        n_atoms = 1000
+        r_cut = 1.0f0
+        boundary = CubicBoundary(3.0f0)
+        coords = place_atoms(n_atoms, boundary; min_dist=0.1f0)
+        atoms = [Atom(index=i, mass=10.0f0, charge=(isodd(i) ? 0.2f0 : -0.2f0), σ=0.2f0,
+                      ϵ=0.2f0) for i in 1:n_atoms]
+        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut),
+                                        weight_special=0.5f0),
+                           CoulombReactionField(dist_cutoff=r_cut, use_neighbors=true,
+                                                solvent_dielectric=78.3f0,
+                                                weight_special=0.5f0,
+                                                coulomb_const=138.935458f0))
+        sys_all = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                                                                dist_cutoff=r_cut),
+                         force_units=NoUnits, energy_units=NoUnits)
+        close_pairs = [(nb[1], nb[2]) for nb in find_neighbors(sys_all).list]
+        shuffle!(close_pairs)
+        n_exceptions = length(close_pairs) ÷ 4
+        excluded_pairs = close_pairs[1:n_exceptions]
+        special_pairs = close_pairs[(n_exceptions + 1):(2 * n_exceptions)]
+        cpu_sys = System(atoms=atoms, coords=coords, boundary=boundary,
+                         pairwise_inters=pairwise_inters,
+                         neighbor_finder=DistanceNeighborFinder(n_atoms=n_atoms,
+                            dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
+                            special_pairs=special_pairs),
+                         force_units=NoUnits, energy_units=NoUnits)
+        tiled_sys = System(atoms=to_device(atoms, AT), coords=to_device(coords, AT),
+                           boundary=boundary, pairwise_inters=pairwise_inters,
+                           neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
+                                dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
+                                special_pairs=special_pairs, array_type=AT),
+                           force_units=NoUnits, energy_units=NoUnits)
+
+        fs_ref, vir_ref = forces_virial(cpu_sys)
+        pe_ref = potential_energy(cpu_sys)
+        fs, vir, pe = tiled_forces_pe(tiled_sys)
+        @test maximum(norm.(fs .- fs_ref)) < 1e-5 * maximum(norm.(fs_ref))
+        @test isapprox(vir, vir_ref; rtol=1e-4)
+        @test isapprox(pe, pe_ref; rtol=1e-4)
+        Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = 0
     end
 
     # A Float32 system with the default Float64 `coulomb_const` and `solvent_dielectric` of

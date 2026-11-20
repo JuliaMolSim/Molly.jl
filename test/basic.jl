@@ -922,13 +922,13 @@ end
     dist_cutoff = 1.2u"nm"
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                  dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
-    cpu_launch_config = Molly.CUDALaunchConfig(force_block_y=8)
+    cpu_launch_config = Molly.TileLaunchConfig(force_block_y=8)
     sys_launch_cpu = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff;
                             dist_cutoff=0.5u"nm", dist_buffer=0.0u"nm",
                             launch_config=cpu_launch_config, autotune_launch=false)
-    @test Molly.cuda_launch_config(sys_launch_cpu) == cpu_launch_config
-    Molly.optimize_cuda_launch_config!(sys_launch_cpu)
-    @test Molly.cuda_launch_config(sys_launch_cpu) == cpu_launch_config
+    @test Molly.tile_launch_config(sys_launch_cpu) == cpu_launch_config
+    @test isnothing(optimize_tile_launch_config!(sys_launch_cpu))
+    @test Molly.tile_launch_config(sys_launch_cpu) == cpu_launch_config
     neighbors_ref = find_neighbors(sys)
     n_neighbors_ref = 4602420
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref

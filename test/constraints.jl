@@ -444,9 +444,10 @@ end
 end
 
 @testset "GPU constrained System constructor" begin
-    if CuArray in array_list
+    # Every GPU backend that supports the tiled kernels of GPUNeighborFinder
+    for AT in array_list_metal[2:end]
+        Molly.uses_gpu_neighbor_finder(AT) || continue
         T = Float32
-        AT = CuArray
         n_atoms = 2
         atom_mass = T(10.0)u"g/mol"
         bond_length = T(0.13)u"nm"

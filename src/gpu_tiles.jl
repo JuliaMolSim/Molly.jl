@@ -1,9 +1,11 @@
 # Portable tiled pairwise kernels used with GPUNeighborFinder
 #
-# These kernels use the sub-group (warp) operations of KernelInterface, so they run on any
-#   KernelAbstractions backend that supports sub-groups of 32 work-items with shuffles and
-#   forms them from consecutive work-items, such as CUDA and the POCL-based CPU backend of
-#   KernelAbstractions, see `supports_tiled_kernels`.
+# These kernels use the sub-group (warp, wavefront or SIMD-group) operations of
+#   KernelInterface, so they run on any KernelAbstractions backend that supports atomics and
+#   sub-groups of 32 or 64 work-items with shuffles and forms them from consecutive
+#   work-items, see `supports_tiled_kernels`. That includes the CUDA, AMDGPU, oneAPI and
+#   Metal backends, on devices where they report that, and the POCL-based CPU backend of
+#   KernelAbstractions, which runs them without a GPU.
 #
 # The pipeline generally follows these steps:
 # 1.  **Reordering**: Atoms are periodically reordered based on Morton (Z-order) curves
@@ -15,27 +17,31 @@
 #     within the interaction cutoff, using bounding box checks, and an exact atom-pair
 #     test then removes the tiles without a pair within the cutoff.
 # 4.  **Execution**: Specialized kernels iterate over the list of interacting tiles,
-#     with one sub-group of 32 work-items per tile.
+#     with one segment of 32 work-items of a sub-group per tile.
 # 5.  **Tracking**: With `auto_update`, the displacements of the atoms since the tile list
 #     was built are checked when the coordinates are reordered, and the list is only
 #     rebuilt when a pair within the cutoff could be missing from it.
 #
-# A tile is processed by one sub-group, and its atoms are indexed by the lane
-#   `KI.get_sub_group_local_id()` and the sub-group `KI.get_sub_group_id()`.
-# The kernels need a 1-D work-group of `32 * k` work-items to consist of `k` full
-#   sub-groups of 32 work-items, which `KI.supports_linear_subgroups` guarantees. Work-groups
-#   hold several tiles only on backends whose sub-groups can take different branches,
+# A tile is processed by a segment of 32 consecutive lanes of a sub-group, and its atoms are
+#   indexed by the lane in the segment `tile_lane` and the tile of the work-group by
+#   `group_tile`, see "Segments of sub-groups" below. With sub-groups of 32 work-items, as on
+#   NVIDIA, Intel and Apple GPUs and AMD RDNA GPUs, a segment is a sub-group. A sub-group of
+#   64 work-items, as the wavefronts of other AMD GPUs, holds two segments, which process
+#   different tiles.
+# The kernels need a 1-D work-group of `32 * k` work-items to consist of `k` segments,
+#   which `KI.supports_linear_subgroups` guarantees. Work-groups hold several tiles only on
+#   backends whose sub-groups can take different branches,
 #   `KI.supports_independent_subgroups`, otherwise they hold one.
 #
-# No work-item reads and writes local memory that another work-item of its sub-group writes
+# No work-item reads and writes local memory that another work-item of its segment writes
 #   in the same phase: the j atoms of a tile are staged in local memory once, published with
-#   `KI.sub_group_barrier()` and only read afterwards, and the forces on the j atoms are
-#   passed between lanes with shuffles. So the kernels do not rely on the work-items of a
-#   sub-group executing in lockstep, which is not guaranteed on GPUs with independent
-#   thread scheduling (NVIDIA from Volta on).
+#   `tile_barrier` and only read afterwards, and the forces on the j atoms are passed between
+#   lanes with shuffles. So the kernels do not rely on the work-items of a segment executing
+#   in lockstep, which is not guaranteed on GPUs with independent thread scheduling (NVIDIA
+#   from Volta on).
 
-# Atoms per block, which is also the sub-group width the kernels need, since a lane
-#   holds one atom of a block and the tile masks have a bit per lane
+# Atoms per block, which is also the width of the segments of the sub-groups that process
+#   the tiles, since a lane holds one atom of a block and the tile masks have a bit per lane
 const TILE_WIDTH = 32
 # Values stored in `interacting_tiles_type`: a tile is either free of exclusions and
 #   special pairs (0), mask-backed (1), or known to hold no in-cutoff atom pair at all
@@ -51,15 +57,30 @@ const DEFAULT_TILE_THREADS = (32, 8)
     supports_tiled_kernels(backend)
 
 Whether Molly's tiled pairwise kernels, used with [`GPUNeighborFinder`](@ref), can run on
-a KernelAbstractions backend: it has to support atomics and sub-groups of 32 work-items,
-formed from consecutive work-items, with shuffles.
+a KernelAbstractions backend: it has to support atomics and sub-groups formed from
+consecutive work-items with shuffles, which have to be 32 work-items wide, or 64
+work-items wide and able to diverge in segments of 32 work-items, see
+`supports_tile_sub_group_width`. This is what the backend reports for the active device.
 =#
 function supports_tiled_kernels(backend)
     KI.supports_atomics(backend) || return false
     KI.supports_subgroups(backend) || return false
     KI.supports_linear_subgroups(backend) || return false
-    KI.sub_group_size(backend) == TILE_WIDTH || return false
+    supports_tile_sub_group_width(backend) || return false
     return all(T -> KI.supports_shuffle(backend, T), (Int32, UInt32, Float32))
+end
+
+#=
+Whether the sub-groups of `backend` can process the tiles: either they are `TILE_WIDTH`
+wide, or twice as wide and can be partitioned into segments of `TILE_WIDTH` lanes that
+take different branches, `KI.supports_partitionable_subgroups`, so that a sub-group
+processes two tiles. Wider sub-groups are not supported, the votes of KernelInterface
+within segments need sub-groups of at most 64 work-items.
+=#
+function supports_tile_sub_group_width(backend)
+    width = KI.sub_group_size(backend)
+    width == TILE_WIDTH && return true
+    return width == 2 * TILE_WIDTH && KI.supports_partitionable_subgroups(backend)
 end
 
 # Throw an error if the tiled kernels can not run on `backend` with coordinates of float
@@ -75,12 +96,16 @@ function check_tiled_backend(backend, ::Type{T}) where T
                             "$backend does not, use GPUCellListNeighborFinder or " *
                             "DistanceNeighborFinder instead"))
     end
-    width = KI.sub_group_size(backend)
-    if width != TILE_WIDTH
-        # The tiles hold a bit per lane in UInt32 masks, so 64-wide sub-groups (e.g. AMD
-        #   wavefronts) would need two tiles per sub-group or UInt64 masks and 64-atom blocks
+    if !supports_tile_sub_group_width(backend)
+        # The tiles hold a bit per lane in UInt32 masks, so a sub-group processes one tile,
+        #   or two with a backend that lets the halves of 64-wide sub-groups diverge
+        width = KI.sub_group_size(backend)
         throw(ArgumentError("GPUNeighborFinder needs sub-groups of $TILE_WIDTH work-items, " *
-                            "$backend has sub-groups of $width work-items, use " *
+                            "or of $(2 * TILE_WIDTH) work-items whose segments of " *
+                            "$TILE_WIDTH work-items can diverge " *
+                            "(KernelInterface.supports_partitionable_subgroups), $backend " *
+                            "has sub-groups of $width work-items" *
+                            (width == 2 * TILE_WIDTH ? " that can not" : "") * ", use " *
                             "GPUCellListNeighborFinder or DistanceNeighborFinder instead"))
     end
     if !KI.supports_linear_subgroups(backend)
@@ -109,6 +134,81 @@ work-group barriers, a work-group holds one tile.
     return KI.supports_independent_subgroups(backend) ? Int(block_y) : 1
 end
 
+## Segments of sub-groups
+
+#=
+The kernels process a tile with a segment of `TILE_WIDTH` consecutive lanes of a sub-group.
+They take the sub-group width `W` of the backend as `Val(W)`, see `tile_sub_group_width`,
+and use the functions below for the lane of a work-item in its segment, the tile of the
+work-group that it processes and the sub-group operations within a segment.
+With `W == TILE_WIDTH` a segment is a sub-group and these are the sub-group operations of
+KernelInterface, so the kernels for 32-wide sub-groups are the same as without segments.
+Otherwise they are the operations with a `width`, which only need the work-items of a
+segment to execute them together on backends with `KI.supports_partitionable_subgroups`,
+so that the segments of a sub-group can process tiles that take different branches.
+=#
+
+#=
+The sub-group width that the tiled kernels are compiled for when it is not 0, rather than
+the width of the backend. The kernels for 64-wide sub-groups are also valid with 32-wide
+sub-groups, see `group_tile`, so this lets them be tested on any backend. Only for testing.
+=#
+const TILE_SUB_GROUP_WIDTH_OVERRIDE = Ref(0)
+
+#=
+`Val(W)` for the width `W` of the sub-groups of the tiled kernels on `backend`, which is
+`TILE_WIDTH` or twice that, see `supports_tile_sub_group_width`.
+=#
+@inline function tile_sub_group_width(backend)
+    width = TILE_SUB_GROUP_WIDTH_OVERRIDE[]
+    if width == 0
+        width = KI.sub_group_size(backend)
+    end
+    return width == TILE_WIDTH ? Val(TILE_WIDTH) : Val(2 * TILE_WIDTH)
+end
+
+# The lane of the work-item in its segment, from 1 to `TILE_WIDTH`, as the shuffles within a
+#   segment number them
+@inline tile_lane(::Val{TILE_WIDTH}) = KI.get_sub_group_local_id(Int32)
+@inline tile_lane(::Val{W}) where {W} =
+    ((KI.get_sub_group_local_id(Int32) - Int32(1)) & Int32(TILE_WIDTH - 1)) + Int32(1)
+
+# The segment of the work-item in its work-group, from 1 to the number of segments
+# As the sub-groups are formed from consecutive work-items of the 1-D work-group, this is
+#   the position of the work-item in the work-group divided by TILE_WIDTH, which also holds
+#   for sub-groups of TILE_WIDTH work-items, so that the kernels for wider sub-groups can be
+#   tested on GPUs with 32-wide sub-groups
+@inline group_tile(::Val{TILE_WIDTH}) = KI.get_sub_group_id(Int32)
+@inline group_tile(::Val{W}) where {W} =
+    ((KI.get_local_id(Int32).x - Int32(1)) >> 5) + Int32(1)
+
+# The sub-group operations within a segment, see `KI.shfl`, `KI.shfl_xor`,
+#   `KI.sub_group_any`, `KI.sub_group_reduce` and `KI.sub_group_barrier`
+@inline tile_shfl(val, lane, ::Val{TILE_WIDTH}) = KI.shfl(val, lane)
+@inline tile_shfl(val, lane, ::Val{W}) where {W} = KI.shfl(val, lane, TILE_WIDTH)
+
+@inline tile_shfl_xor(val, mask, ::Val{TILE_WIDTH}) = KI.shfl_xor(val, mask)
+@inline tile_shfl_xor(val, mask, ::Val{W}) where {W} = KI.shfl_xor(val, mask, TILE_WIDTH)
+
+@inline tile_any(pred, ::Val{TILE_WIDTH}) = KI.sub_group_any(pred)
+@inline tile_any(pred, ::Val{W}) where {W} = KI.sub_group_any(pred, TILE_WIDTH)
+
+@inline tile_reduce(op, val, ::Val{TILE_WIDTH}) = KI.sub_group_reduce(op, val)
+@inline tile_reduce(op, val, ::Val{W}) where {W} = KI.sub_group_reduce(op, val, TILE_WIDTH)
+
+@inline tile_barrier(::Val{TILE_WIDTH}) = KI.sub_group_barrier()
+@inline tile_barrier(::Val{W}) where {W} = KI.sub_group_barrier(TILE_WIDTH)
+
+# The sum over the lanes of a full segment, in every lane
+@inline function tile_sum(x, ::Val{W}) where W
+    offset = Int32(TILE_WIDTH ÷ 2)
+    while offset > Int32(0)
+        x += tile_shfl_xor(x, offset, Val(W))
+        offset >>= Int32(1)
+    end
+    return x
+end
+
 #=
     tile_kernel_config(backend, T, maxregs)
 
@@ -122,11 +222,61 @@ tile_kernel_config(backend, ::Type{T}, maxregs) where {T} = (backend, (;))
 
 #=
 The compiled KernelInterface kernel `f` for the host-side arguments `args` on `backend`,
-with the compiler options `options`. Backend extensions can keep the compiled kernel, which
-saves looking it up in the compilation cache at every launch.
+with the compiler options `options`. The kernels without options, which are the ones
+launched every step, are kept, see `cached_kernel_function`.
 =#
 function tile_kernel(backend, f::F, args::Tuple, options::NamedTuple) where F
     return KI.kernel_function(backend, f, KI.argument_types(backend, args); options...)
+end
+
+function tile_kernel(backend, f::F, args::Tuple, options::NamedTuple{()}) where F
+    return cached_kernel_function(backend, f, args, Val(options))
+end
+
+#=
+Finding the compiled kernel for a launch converts the arguments, builds a tuple type at run
+time and looks it up in the compilation cache under a lock. For the kernels launched every
+step that is often longer than the kernel takes to run, and the simulation step is limited
+by the host launching work. Those kernels are kept in a slot for each function, argument
+types on the host and compilation options instead, from `kernel_slot`, which is found
+when the calling code is compiled. The kernel is looked up again for another backend or
+context, see `kernel_cache_context`, or once methods have been defined, as the backend
+would then check whether it has to be compiled again.
+=#
+@generated kernel_slot(f, options, args...) = :($(Ref{Any}(nothing)))
+
+struct CachedKernel{B, C, K}
+    context::C
+    world::UInt
+    backend::B
+    kernel::K
+end
+
+#=
+What the compiled kernels on `backend` belong to, which is the active device by default.
+Backend extensions can return something that also changes when the device is reset, such
+as the CUDA context.
+=#
+kernel_cache_context(backend) = KI.device(backend)
+
+# The compiled kernel of `f(args...)` for `backend` with the compilation options `options`,
+#   which are given as the type of `Val(options)` to be part of the key of the slot
+# The context and the backend of the entry, whose types are not known here, are compared
+#   with `===`, which unlike `==` needs no dynamic dispatch at every launch
+function cached_kernel_function(backend, f::F, args::Tuple,
+                                ::Val{options}) where {F, options}
+    slot = kernel_slot(f, Val(options), args...)
+    entry = slot[]
+    context = kernel_cache_context(backend)
+    world = Base.get_world_counter()
+    if !(entry isa CachedKernel) || entry.context !== context || entry.world != world ||
+            entry.backend !== backend
+        tt = KI.argument_types(backend, args)
+        entry = CachedKernel(context, world, backend,
+                             KI.kernel_function(backend, f, tt; options...))
+        slot[] = entry
+    end
+    return entry.kernel
 end
 
 # Compile a KernelInterface kernel and launch it with `numgroups` work-groups of
@@ -197,17 +347,19 @@ end
 
 #=
 The local memory of the tiled kernels is sized at compile time, since KernelInterface has
-no dynamically sized local memory. Static local memory is limited to 48 KiB on CUDA.
-Other GPUs have at least 32 KiB (Apple GPUs), which the default `block_y` stays far below,
-but a larger `block_y` is only kept within the CUDA limit.
+no dynamically sized local memory. `max_tile_localmem(backend)` is the most that they use,
+32 KiB by default, which Apple GPUs have and other GPUs exceed. Backend extensions can
+allow more, e.g. the 48 KiB of static shared memory of CUDA. The default `block_y` stays
+far below either, but a larger `block_y` is only kept within the limit.
 =#
-const MAX_TILE_LOCALMEM = 48 * 1024
+max_tile_localmem(backend) = 32 * 1024
 
-# The largest block_y not above `block_y` for which the local memory fits and work-groups
-#   of `TILE_WIDTH * block_y` work-items are allowed, `max_items` being the largest
-#   work-group of the kernel
-function clamp_block_y(block_y::Integer, localmem_bytes, max_items::Integer=typemax(Int))
-    while block_y > 1 && (localmem_bytes(block_y) > MAX_TILE_LOCALMEM ||
+# The largest block_y not above `block_y` for which the local memory fits in
+#   `max_localmem` bytes and work-groups of `TILE_WIDTH * block_y` work-items are allowed,
+#   `max_items` being the largest work-group of the kernel
+function clamp_block_y(block_y::Integer, localmem_bytes, max_localmem::Integer,
+                       max_items::Integer=typemax(Int))
+    while block_y > 1 && (localmem_bytes(block_y) > max_localmem ||
                           TILE_WIDTH * block_y > max_items)
         block_y = prevpow(2, block_y - 1)
     end
@@ -215,47 +367,50 @@ function clamp_block_y(block_y::Integer, localmem_bytes, max_items::Integer=type
 end
 
 function force_block_y(sys, buffers, pairwise_inters)
-    config = cuda_launch_config(sys)
-    block_y_override = prefer_override(cuda_force_block_y(config),
-                                       env_override("MOLLY_CUDA_FORCE_BLOCK_Y"))
-    block_y_override === nothing || validate_block_y("MOLLY_CUDA_FORCE_BLOCK_Y", block_y_override)
+    config = tile_launch_config(sys)
+    block_y_override = prefer_override(config_force_block_y(config),
+                                       env_override("MOLLY_TILE_FORCE_BLOCK_Y"))
+    block_y_override === nothing || validate_block_y("MOLLY_TILE_FORCE_BLOCK_Y", block_y_override)
     block_y = something(block_y_override, DEFAULT_BLOCK_Y)
     D, T = length(eltype(sys.coords)), float_type(sys)
     uses_vel = any_uses_velocity(pairwise_inters)
     return clamp_block_y(block_y, by -> force_kernel_localmem(buffers, Val(D), T, uses_vel,
-                                                              by, pairwise_inters))
+                                                              by, pairwise_inters),
+                         max_tile_localmem(get_backend(sys.coords)))
 end
 
 function force_maxregs(sys)
-    config = cuda_launch_config(sys)
-    maxregs = prefer_override(cuda_force_maxregs(config), env_override("MOLLY_CUDA_FORCE_MAXREGS"))
+    config = tile_launch_config(sys)
+    maxregs = prefer_override(config_force_maxregs(config),
+                              env_override("MOLLY_TILE_FORCE_MAXREGS"))
     maxregs === nothing || maxregs > 0 ||
-        error("MOLLY_CUDA_FORCE_MAXREGS must be positive, got $(maxregs)")
+        error("MOLLY_TILE_FORCE_MAXREGS must be positive, got $(maxregs)")
     return maxregs
 end
 
 function energy_block_y(sys, buffers, pairwise_inters)
-    config = cuda_launch_config(sys)
-    block_y_override = prefer_override(cuda_energy_block_y(config),
-                                       env_override("MOLLY_CUDA_ENERGY_BLOCK_Y"))
-    block_y_override === nothing || validate_block_y("MOLLY_CUDA_ENERGY_BLOCK_Y", block_y_override)
+    config = tile_launch_config(sys)
+    block_y_override = prefer_override(config_energy_block_y(config),
+                                       env_override("MOLLY_TILE_ENERGY_BLOCK_Y"))
+    block_y_override === nothing || validate_block_y("MOLLY_TILE_ENERGY_BLOCK_Y", block_y_override)
     block_y = something(block_y_override, DEFAULT_BLOCK_Y)
     uses_vel = any_uses_velocity(pairwise_inters)
     return clamp_block_y(block_y, by -> energy_kernel_localmem(buffers, uses_vel, by,
-                                                               pairwise_inters))
+                                                               pairwise_inters),
+                         max_tile_localmem(get_backend(sys.coords)))
 end
 
 function tile_threads(sys)
-    config = cuda_launch_config(sys)
-    config_tile_threads = cuda_tile_threads(config)
-    threads_x = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_X") : config_tile_threads[1]
-    threads_y = config_tile_threads === nothing ? env_override("MOLLY_CUDA_TILE_THREADS_Y") : config_tile_threads[2]
+    config = tile_launch_config(sys)
+    config_threads = config_tile_threads(config)
+    threads_x = config_threads === nothing ? env_override("MOLLY_TILE_THREADS_X") : config_threads[1]
+    threads_y = config_threads === nothing ? env_override("MOLLY_TILE_THREADS_Y") : config_threads[2]
     if xor(threads_x === nothing, threads_y === nothing)
-        error("set both MOLLY_CUDA_TILE_THREADS_X and MOLLY_CUDA_TILE_THREADS_Y together")
+        error("set both MOLLY_TILE_THREADS_X and MOLLY_TILE_THREADS_Y together")
     end
     threads_x === nothing && return DEFAULT_TILE_THREADS
-    threads_x > 0 || error("MOLLY_CUDA_TILE_THREADS_X must be positive, got $(threads_x)")
-    threads_y > 0 || error("MOLLY_CUDA_TILE_THREADS_Y must be positive, got $(threads_y)")
+    threads_x > 0 || error("MOLLY_TILE_THREADS_X must be positive, got $(threads_x)")
+    threads_y > 0 || error("MOLLY_TILE_THREADS_Y must be positive, got $(threads_y)")
     # Clamp overrides to the work-group size limit, keeping x if possible
     max_threads = KI.max_work_group_size(get_backend(sys.coords))
     actual_x = min(threads_x, max_threads)
@@ -1310,30 +1465,32 @@ function launch_force_tiles!(buffers, sys::System{D, <:Any, T, TH}, pairwise_int
     kernel_backend, options = tile_kernel_config(backend, T, maxregs)
     uses_vel = any_uses_velocity(pairwise_inters)
     launch_force_tiles!(kernel_backend, options, buffers, sys, pairwise_inters, Val(needs_vir),
-                        step_n, Val(Int(block_y)), Val(uses_vel), inner, r_cut2_val)
+                        step_n, Val(Int(block_y)), tile_sub_group_width(backend), Val(uses_vel),
+                        inner, r_cut2_val)
     return buffers
 end
 
 function launch_force_tiles!(kernel_backend, options, buffers, sys::System{D, <:Any, T, TH},
                              pairwise_inters, ::Val{needs_vir}, step_n, ::Val{block_y},
-                             ::Val{uses_vel}, inner,
-                             ::Val{r_cut2}) where {D, T, TH, needs_vir, block_y, uses_vel, r_cut2}
+                             ::Val{W}, ::Val{uses_vel}, inner,
+                             ::Val{r_cut2}) where {D, T, TH, needs_vir, block_y, W, uses_vel,
+                                                   r_cut2}
     N = length(sys.coords)
     args = (buffers.fs_mat_reordered, buffers.virial_slots, buffers.coords_reordered,
             buffers.velocities_reordered, buffers.atoms_reordered, Val(N), Val(r_cut2),
             Val(sys.force_units), pairwise_inters, sys.boundary, step_n,
             tile_exceptions(buffers, sys.neighbor_finder), Val(needs_vir), Val(T), Val(TH),
-            Val(D), Val(block_y), Val(uses_vel), buffers.interacting_tiles_i,
+            Val(D), Val(block_y), Val(W), Val(uses_vel), buffers.interacting_tiles_i,
             buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow, inner)
     kernel = tile_kernel(kernel_backend, force_kernel!, args, options)
     # A kernel with many registers can allow fewer work-items than the requested tiles
     if TILE_WIDTH * block_y > KI.max_work_group_size(kernel)
-        by = clamp_block_y(block_y, _ -> 0, KI.max_work_group_size(kernel))
+        by = clamp_block_y(block_y, _ -> 0, typemax(Int), KI.max_work_group_size(kernel))
         return launch_force_tiles!(kernel_backend, options, buffers, sys, pairwise_inters,
-                                   Val(needs_vir), step_n, Val(Int(by)), Val(uses_vel), inner,
-                                   Val(r_cut2))
+                                   Val(needs_vir), step_n, Val(Int(by)), Val(W), Val(uses_vel),
+                                   inner, Val(r_cut2))
     end
     kernel(args...; numgroups=cld(buffers.num_pairs, block_y),
            workgroupsize=TILE_WIDTH * block_y)
@@ -1350,30 +1507,30 @@ function launch_energy_tiles!(pe_vec_nounits, buffers, sys::System{D, <:Any, T, 
     kernel_backend, options = tile_kernel_config(backend, T, nothing)
     uses_vel = any_uses_velocity(pairwise_inters)
     launch_energy_tiles!(kernel_backend, options, pe_vec_nounits, buffers, sys,
-                         pairwise_inters, step_n, Val(Int(block_y)), Val(uses_vel), inner,
-                         r_cut2_val)
+                         pairwise_inters, step_n, Val(Int(block_y)),
+                         tile_sub_group_width(backend), Val(uses_vel), inner, r_cut2_val)
     return pe_vec_nounits
 end
 
 function launch_energy_tiles!(kernel_backend, options, pe_vec_nounits, buffers,
                               sys::System{D, <:Any, T, TH}, pairwise_inters, step_n,
-                              ::Val{block_y}, ::Val{uses_vel}, inner,
-                              ::Val{r_cut2}) where {D, T, TH, block_y, uses_vel, r_cut2}
+                              ::Val{block_y}, ::Val{W}, ::Val{uses_vel}, inner,
+                              ::Val{r_cut2}) where {D, T, TH, block_y, W, uses_vel, r_cut2}
     N = length(sys.coords)
     args = (pe_vec_nounits, buffers.coords_reordered, buffers.velocities_reordered,
             buffers.atoms_reordered, Val(N), Val(r_cut2), Val(sys.energy_units),
             pairwise_inters, sys.boundary, step_n,
             tile_exceptions(buffers, sys.neighbor_finder), Val(T), Val(TH), Val(D),
-            Val(block_y), Val(uses_vel), buffers.interacting_tiles_i,
+            Val(block_y), Val(W), Val(uses_vel), buffers.interacting_tiles_i,
             buffers.interacting_tiles_j, buffers.interacting_tiles_type,
             buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
             buffers.interacting_tiles_overflow, inner)
     kernel = tile_kernel(kernel_backend, energy_kernel!, args, options)
     if TILE_WIDTH * block_y > KI.max_work_group_size(kernel)
-        by = clamp_block_y(block_y, _ -> 0, KI.max_work_group_size(kernel))
+        by = clamp_block_y(block_y, _ -> 0, typemax(Int), KI.max_work_group_size(kernel))
         return launch_energy_tiles!(kernel_backend, options, pe_vec_nounits, buffers, sys,
-                                    pairwise_inters, step_n, Val(Int(by)), Val(uses_vel),
-                                    inner, Val(r_cut2))
+                                    pairwise_inters, step_n, Val(Int(by)), Val(W),
+                                    Val(uses_vel), inner, Val(r_cut2))
     end
     kernel(args...; numgroups=cld(buffers.num_pairs, block_y),
            workgroupsize=TILE_WIDTH * block_y)
@@ -1411,8 +1568,8 @@ function prune_interacting_tiles!(buffers, sys, N::Int)
             buffers.num_interacting_tiles,
             buffers.coords_reordered, Val(N), Val(sys.neighbor_finder.dist_cutoff_2),
             Val(n_blocks), sys.boundary, tile_exceptions(buffers, sys.neighbor_finder),
-            Val(prune_y); numgroups=cld(buffers.num_pairs, prune_y),
-            workgroupsize=TILE_WIDTH * prune_y)
+            Val(prune_y), tile_sub_group_width(backend);
+            numgroups=cld(buffers.num_pairs, prune_y), workgroupsize=TILE_WIDTH * prune_y)
         compact_interacting_tiles!(buffers)
     end
     return buffers
@@ -1570,7 +1727,7 @@ const TILE_TREE_BLOCKS_PER_SQRT_TILE_TRICLINIC = 470
 const TILE_TREE_DEFAULT_TILES_PER_BLOCK = 100
 
 function use_tile_tree(sys, n_blocks, n_tiles_previous)
-    min_blocks = env_override("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS")
+    min_blocks = env_override("MOLLY_TILE_TREE_MIN_BLOCKS")
     if min_blocks === nothing
         tiles_per_block = (n_tiles_previous > 0 ? n_tiles_previous / n_blocks :
                                                   TILE_TREE_DEFAULT_TILES_PER_BLOCK)
@@ -1760,7 +1917,8 @@ function refresh_tile_exceptions!(buffers, nf::GPUNeighborFinder, ::Val{N}) wher
         buffers.excluded_pos, buffers.special_pos, buffers.block_exc_min,
         buffers.block_exc_max, nf.eligible.starts, nf.eligible.partners,
         nf.special.starts, nf.special.partners, buffers.morton_seq,
-        buffers.morton_seq_inv, Val(N), Val(n_blocks); ndrange=cld(N, n_items) * n_items)
+        buffers.morton_seq_inv, Val(N), Val(n_blocks), tile_sub_group_width(backend);
+        ndrange=cld(N, n_items) * n_items)
     return buffers
 end
 
@@ -1846,7 +2004,8 @@ end
 
 Compute the minimum and maximum coordinates for each 32-atom block, with one work-group
 of 32 work-items, a single sub-group, per block. The bounds are found with a sub-group
-reduction, which needs no local memory and no barrier.
+reduction, which needs no local memory and no barrier. With 64-wide sub-groups the
+sub-group of a work-group is partial, which the reduction takes into account.
 For a triclinic boundary the coordinates are first wrapped into the brick of the
 diagonal components of the basis vectors, see `morton_coord`.
 These bounds are used for fast bounding-box intersection tests during tile finding
@@ -1942,21 +2101,20 @@ end
 @inline min_max_block_op(a, b) = (min(a[1], b[1]), max(a[2], b[2]))
 
 #=
-One work-item per Morton position `p`, so that each sub-group covers one 32-atom block.
-The work-item converts the exception partners of the atom at `p` to Morton positions,
-writing each list entry once since each atom belongs to one position. The sub-group then
-reduces the lowest and highest block holding a partner of any atom in the block, which
-is `typemax(Int32)` and `0` for a block without exceptions.
+One work-item per Morton position `p`, so that each segment of a sub-group covers one
+32-atom block, see `tile_lane`. The work-item converts the exception partners of the atom
+at `p` to Morton positions, writing each list entry once since each atom belongs to one
+position. The segment then reduces the lowest and highest block holding a partner of any
+atom in the block, which is `typemax(Int32)` and `0` for a block without exceptions.
 =#
 @kernel unsafe_indices=true inbounds=true function tile_exceptions_kernel!(excluded_pos,
                     special_pos, block_exc_min, block_exc_max, @Const(excluded_starts),
                     @Const(excluded_partners), @Const(special_starts),
                     @Const(special_partners), @Const(morton_seq), @Const(morton_seq_inv),
-                    ::Val{N}, ::Val{n_blocks}) where {N, n_blocks}
-    lane = KI.get_sub_group_local_id(Int32)
-    sub_groups_per_group = KI.get_local_size(Int32).x ÷ Int32(TILE_WIDTH)
-    block_i = (@index(Group, Linear) - Int32(1)) * sub_groups_per_group +
-              KI.get_sub_group_id(Int32)
+                    ::Val{N}, ::Val{n_blocks}, ::Val{W}) where {N, n_blocks, W}
+    lane = tile_lane(Val(W))
+    tiles_per_group = KI.get_local_size(Int32).x ÷ Int32(TILE_WIDTH)
+    block_i = (@index(Group, Linear) - Int32(1)) * tiles_per_group + group_tile(Val(W))
     p = (block_i - Int32(1)) * Int32(TILE_WIDTH) + lane
     min_block = typemax(Int32)
     max_block = Int32(0)
@@ -1968,8 +2126,8 @@ is `typemax(Int32)` and `0` for a block without exceptions.
                     special_partners, morton_seq_inv, atom_i, min_block, max_block)
     end
 
-    # Every work-item of the sub-group takes part, including those past the last atom
-    min_block, max_block = KI.sub_group_reduce(min_max_block_op, (min_block, max_block))
+    # Every work-item of the segment takes part, including those past the last atom
+    min_block, max_block = tile_reduce(min_max_block_op, (min_block, max_block), Val(W))
 
     if lane == Int32(1) && block_i <= n_blocks
         block_exc_min[block_i] = min_block
@@ -2202,24 +2360,25 @@ reference point the first atom of block j, this gives the minimum image of every
 within the cutoff if the other atoms of block j are within `d` of it, with `d` plus the
 cutoff less than half the shortest side of the box. The nearer image of a pair beyond the
 cutoff can be missed, but the image used is then beyond the cutoff too.
-Returns whether this holds for the sub-group, `coords_j` being the atom of block j of this
+Returns whether this holds for the segment, `coords_j` being the atom of block j of this
 lane and `ref_j` the first one, and the image of atom i to use if so.
 The other boundaries use the minimum image of each pair.
-Called by every work-item of the sub-group.
+Called by every work-item of the segment, of a sub-group of width `W`.
 =#
 @inline function tile_single_image(coords_i, coords_j, ref_j,
                                    boundary::Union{CubicBoundary, RectangularBoundary},
-                                   ::Val{r_cut2}) where r_cut2
-    return tile_single_image(coords_i, coords_j, ref_j, boundary, sqrt(r_cut2))
+                                   ::Val{r_cut2}, ::Val{W}) where {r_cut2, W}
+    return tile_single_image(coords_i, coords_j, ref_j, boundary, sqrt(r_cut2), Val(W))
 end
 
 # As above for the cutoff `r_cut`
 @inline function tile_single_image(coords_i, coords_j, ref_j,
-                                   boundary::Union{CubicBoundary, RectangularBoundary}, r_cut)
+                                   boundary::Union{CubicBoundary, RectangularBoundary}, r_cut,
+                                   ::Val{W}) where W
     d2 = ustrip(sum(abs2, coords_j - ref_j))
-    offset = Int32(16)
+    offset = Int32(TILE_WIDTH ÷ 2)
     while offset > Int32(0)
-        d2 = max(d2, KI.shfl_xor(d2, offset))
+        d2 = max(d2, tile_shfl_xor(d2, offset, Val(W)))
         offset >>= Int32(1)
     end
     # A plain comparison rather than `minimum`, which handles NaN and signed zeros with
@@ -2230,7 +2389,7 @@ end
     return valid, image_closest(coords_i, ref_j, boundary)
 end
 
-@inline tile_single_image(coords_i, coords_j, ref_j, boundary, r_cut) = (false, coords_i)
+@inline tile_single_image(coords_i, coords_j, ref_j, boundary, r_cut, ::Val) = (false, coords_i)
 
 # The image of `c` closest to `p` in a rectangular box, which is `c` unless they are more
 #   than half a box side apart in a dimension
@@ -2276,9 +2435,10 @@ in-range pair at all get an empty mask and are marked `TILE_DEAD`, and are then 
 from the list by `compact_interacting_tiles!`.
 
 This only runs on a neighbor list rebuild, so its cost is amortised over the steps
-between rebuilds. Only full off-diagonal tiles (`i < j < n_blocks`) are
-analysed; the diagonal and the final partial block make up a vanishing fraction of the
-list and keep a fully populated mask.
+between rebuilds. Only full off-diagonal tiles (`i < j < n_blocks`) are analysed; the
+diagonal and the final partial block make up a vanishing fraction of the list and keep a
+fully populated mask. A segment of a sub-group of width `W` processes a tile, see
+`tile_lane`.
 
 Tiles that the block ranges in `find_interacting_blocks_kernel!` could not rule out as
 holding an exclusion or special pair are checked exactly here, and marked clean if
@@ -2287,17 +2447,18 @@ none of their atom pairs is an exception.
 function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_j,
                     interacting_tiles_type, interacting_tiles_diag, num_interacting_tiles,
                     coords_var, ::Val{N}, ::Val{r_cut2}, ::Val{n_blocks}, boundary,
-                    tile_exceptions, ::Val{block_y}) where {N, r_cut2, n_blocks, block_y}
+                    tile_exceptions, ::Val{block_y},
+                    ::Val{W}) where {N, r_cut2, n_blocks, block_y, W}
     coords = KernelAbstractions.constify(coords_var)
     tiles_i_ro = KernelAbstractions.constify(interacting_tiles_i)
     tiles_j_ro = KernelAbstractions.constify(interacting_tiles_j)
     num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
 
     a = Int32(1)
-    lane = KI.get_sub_group_local_id(Int32)
-    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + KI.get_sub_group_id(Int32)
+    lane = tile_lane(Val(W))
+    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + group_tile(Val(W))
 
-    # The tile is uniform across the sub-group, so it returns as a whole
+    # The tile is uniform across the segment, so it returns as a whole
     @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
         return nothing
@@ -2313,7 +2474,7 @@ function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_
     end
 
     # Read before the shuffles below, which every lane passes before lane 1 writes the
-    # type, so the value and the branch on it are the same for the whole sub-group
+    # type, so the value and the branch on it are the same for the whole segment
     @inbounds tile_type = interacting_tiles_type[idx]
     @inbounds coords_j = coords[(j - a) * Int32(32) + lane]
     i_0_tile = (i - a) * Int32(32)
@@ -2322,7 +2483,8 @@ function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_
     #   block i when that gives the minimum image of every pair within the cutoff, see
     #   `tile_single_image`
     @inbounds single_image, coords_j_image = tile_single_image(coords_j,
-                    coords[i_0_tile + lane], coords[i_0_tile + a], boundary, Val(r_cut2))
+                    coords[i_0_tile + lane], coords[i_0_tile + a], boundary, Val(r_cut2),
+                    Val(W))
     lane_mask = (single_image ?
         prune_lane_mask(coords, i_0_tile, coords_j, coords_j_image, lane, boundary,
                         Val(r_cut2), Val(true)) :
@@ -2330,9 +2492,9 @@ function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_
                         Val(r_cut2), Val(false)))
 
     # Butterfly OR-reduction, so that every lane gets the mask of the tile
-    offset = Int32(16)
+    offset = Int32(TILE_WIDTH ÷ 2)
     while offset > Int32(0)
-        lane_mask |= KI.shfl_xor(lane_mask, offset)
+        lane_mask |= tile_shfl_xor(lane_mask, offset, Val(W))
         offset >>= Int32(1)
     end
 
@@ -2341,7 +2503,7 @@ function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_
     if tile_type == UInt8(1) && lane_mask != UInt32(0)
         lane_has_exception = atom_has_partner_in_block(tile_exceptions,
                                                        (j - a) * Int32(32) + lane, i)
-        has_exception = KI.sub_group_any(lane_has_exception)
+        has_exception = tile_any(lane_has_exception, Val(W))
     end
 
     if lane == a
@@ -2365,16 +2527,6 @@ end
 @inline function add_pair_virial(vir::SMatrix{D, D, T}, f::SVector{D, T}, dr) where {D, T}
     dr_nounits = SVector{D, T}(ntuple(k -> T(ustrip(dr[k])), Val(D)))
     return vir + dr_nounits * transpose(f)
-end
-
-# The sum over the 32 lanes of a full sub-group, in every lane
-@inline function sub_group_sum(x)
-    offset = Int32(16)
-    while offset > Int32(0)
-        x += KI.shfl_xor(x, offset)
-        offset >>= Int32(1)
-    end
-    return x
 end
 
 # Add the components of `v` to column `idx` of `fs_mat` with atomics, unrolled so that `v`
@@ -2411,10 +2563,11 @@ the force on the j atom of the lane, which are returned.
 Only iterations marked as holding an in-range pair are walked. Bit b covers the pairs with
 `slot - lane == b (mod 32)`, so it selects the same slot permutation as `m == b`. Testing
 all 32 bits with a branch instead costs a loop header and a divergent branch per skipped
-iteration. The mask is uniform across the sub-group, so all lanes run the same iterations.
+iteration. The mask is uniform across the segment, so all lanes run the same iterations.
 The force on the j atom held by lane `slot` is calculated by lane `slot - m`, and passed to
 it with a shuffle, so that the lanes do not update a shared accumulator. The order in which
-the forces on a j atom are summed is the same as that of the iterations.
+the forces on a j atom are summed is the same as that of the iterations. The lanes are
+those of a segment of a sub-group of width `W`, see `tile_lane`.
 With `has_exceptions` the bitmasks of the tile give the excluded and special pairs, and
 otherwise there are none. With `single_image` the displacements are found from
 `coords_i_image`, see `tile_single_image`.
@@ -2424,12 +2577,12 @@ accumulators.
 =#
 @inline function tile_pair_forces(force_i, vir, fj, sh_stage, sh_vel, diag_mask,
                         eligible_bitmask, special_bitmask, ::Val{has_exceptions},
-                        ::Val{single_image}, lane, warpid, coords_i, coords_i_image, atoms_i,
+                        ::Val{single_image}, lane, segment, coords_i, coords_i_image, atoms_i,
                         vel_i, ::Type{A}, shuf_syms, ::Val{uses_vel}, inters_tuple, boundary,
                         step_n, ::Val{r_cut2}, refresh_inner, r_inner2, ::Val{force_units},
-                        ::Val{needs_vir}, ::Val{D},
-                        ::Type{T}) where {has_exceptions, single_image, A, uses_vel, r_cut2,
-                                          force_units, needs_vir, D, T}
+                        ::Val{needs_vir}, ::Val{D}, ::Type{T},
+                        ::Val{W}) where {has_exceptions, single_image, A, uses_vel, r_cut2,
+                                         force_units, needs_vir, D, T, W}
     a = Int32(1)
     w = Int32(TILE_WIDTH)
     inner_mask = UInt32(0)
@@ -2438,10 +2591,10 @@ accumulators.
         m = Int32(trailing_zeros(active))
         active &= active - UInt32(1)
         slot = ((lane - a + m) & Int32(31)) + a
-        js = sh_stage[slot, warpid]
+        js = sh_stage[slot, segment]
         coords_j = js.coords
         atoms_j = rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
-        vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
+        vel_j = uses_vel ? sh_vel[slot, segment] : vel_i
 
         dr = (single_image ? coords_j - coords_i_image : vector(coords_i, coords_j, boundary))
         r2 = sum(abs2, dr)
@@ -2456,11 +2609,11 @@ accumulators.
             condition = r2 <= r_cut2
             special = false
         end
-        if refresh_inner && KI.sub_group_any(eligible && r2 <= r_inner2)
+        if refresh_inner && tile_any(eligible && r2 <= r_inner2, Val(W))
             inner_mask |= UInt32(1) << m
         end
 
-        if KI.sub_group_any(condition)
+        if tile_any(condition, Val(W))
             f = condition ? sum_pairwise_forces_gpu(
                 inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                 special, coords_i, coords_j, boundary, vel_i, vel_j, step_n
@@ -2470,7 +2623,7 @@ accumulators.
             force_i += fi
             # Lane `src` evaluated the pair with the j atom of this lane
             src = ((lane - a - m) & Int32(31)) + a
-            fj += KI.shfl(fi, src)
+            fj += tile_shfl(fi, src, Val(W))
             if needs_vir
                 vir = add_pair_virial(vir, fi, dr)
             end
@@ -2493,7 +2646,7 @@ end
 #=
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
                   inters_tuple, boundary, step_n, tile_exceptions, needs_vir, T, TH, D,
-                  block_y, uses_vel, interacting_tiles_i, interacting_tiles_j,
+                  block_y, W, uses_vel, interacting_tiles_i, interacting_tiles_j,
                   interacting_tiles_type, interacting_tiles_diag, num_interacting_tiles,
                   interacting_tiles_overflow, inner)
 
@@ -2502,10 +2655,10 @@ by `find_interacting_blocks_kernel!`. This is a KernelInterface kernel, launched
 1-D work-groups of `32 * block_y` work-items.
 
 Execution model:
-- One sub-group of 32 work-items processes one tile of the compact list, so a
-  work-group processes `block_y` tiles at once. The lane
-  `KI.get_sub_group_local_id()` spans the atoms of a tile row, and the sub-group
-  `KI.get_sub_group_id()` selects the tile.
+- One segment of 32 work-items of a sub-group of width `W` processes one tile of the
+  compact list, so a work-group processes `block_y` tiles at once, see `tile_lane`. The
+  lane `tile_lane(Val(W))` spans the atoms of a tile row, and the segment
+  `group_tile(Val(W))` selects the tile.
 - The kernel keeps the `i`-atom contribution in registers and passes the `j`-atom
   contributions between lanes with shuffles, then atomically adds both to `fs_mat`.
 
@@ -2523,9 +2676,9 @@ handling.
 which are used for the full tiles, or found again from the masks of the list when they are
 stale.
 
-The lanes of a sub-group are not assumed to execute in lockstep: local memory is only
-written before a `KI.sub_group_barrier` and read after it, and the forces on the j atoms
-are passed with shuffles in control flow that is uniform over the sub-group.
+The lanes of a segment are not assumed to execute in lockstep: local memory is only
+written before a `tile_barrier` and read after it, and the forces on the j atoms are passed
+with shuffles in control flow that is uniform over the segment.
 =#
 function force_kernel!(
     fs_mat,
@@ -2545,11 +2698,12 @@ function force_kernel!(
     ::Val{TH},
     ::Val{D},
     ::Val{block_y},
+    ::Val{W},
     ::Val{uses_vel},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
     interacting_tiles_overflow, inner) where {N, r_cut2, A, force_units, needs_vir, T, TH, D,
-                                              block_y, uses_vel}
+                                              block_y, W, uses_vel}
 
     a = Int32(1)
     w = Int32(TILE_WIDTH)
@@ -2564,13 +2718,13 @@ function force_kernel!(
     num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
     interacting_tiles_overflow_ro = KernelAbstractions.constify(interacting_tiles_overflow)
 
-    lane = KI.get_sub_group_local_id(Int32)
-    warpid = KI.get_sub_group_id(Int32)
-    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + warpid
+    lane = tile_lane(Val(W))
+    segment = group_tile(Val(W))
+    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + segment
 
     # Local memory for the staged j-atom data (coords/atoms/velocities) of the full tiles.
     # The inner loop indexes the staged data by slot instead of rotating it around the
-    # sub-group with serial shuffles.
+    # segment with serial shuffles.
     # Only the Atom fields the active interactions actually read are staged (not the
     # full Atom).
     shuf_syms = resolved_atom_shuffle_syms(inters_tuple, A)
@@ -2580,7 +2734,7 @@ function force_kernel!(
     sh_vel = uses_vel ? KI.localmemory(eltype(velocities_var), Val((TILE_WIDTH, block_y))) :
                         nothing
 
-    # The conditions of these returns are uniform across the sub-group
+    # The conditions of these returns are uniform across the segment
     @inbounds if interacting_tiles_overflow_ro[1] != 0
         return nothing
     end
@@ -2633,19 +2787,20 @@ function force_kernel!(
         # Stage this tile's j-atom data into local memory once, then index it by slot
         # each iteration
         @inbounds coords_j_lane = coords[index_j]
-        @inbounds sh_stage[lane, warpid] = JStage(coords_j_lane,
+        @inbounds sh_stage[lane, segment] = JStage(coords_j_lane,
                                     atom_shuffle_payload(atoms[index_j], shuf_syms))
         if uses_vel
-            @inbounds sh_vel[lane, warpid] = velocities[index_j]
+            @inbounds sh_vel[lane, segment] = velocities[index_j]
         end
-        KI.sub_group_barrier()
+        tile_barrier(Val(W))
 
         # The displacements are found from the image of atom i closest to the first atom
         #   of block j when that gives the minimum image of every pair within the cutoff,
         #   or the inner cutoff when the inner masks are found, see `tile_single_image`
         single_image, coords_i_image = tile_single_image(coords_i, coords_j_lane,
-                                    @inbounds(sh_stage[a, warpid].coords), boundary,
-                                    single_image_cutoff(inner, refresh_inner, Val(r_cut2)))
+                                    @inbounds(sh_stage[a, segment].coords), boundary,
+                                    single_image_cutoff(inner, refresh_inner, Val(r_cut2)),
+                                    Val(W))
 
         fj = zero(SVector{D, T})
         r_inner2 = inner_sq_cutoff(inner, Val(r_cut2))
@@ -2655,17 +2810,17 @@ function force_kernel!(
             if single_image
                 force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
                             sh_vel, diag_mask, UInt32(0), UInt32(0), Val(false), Val(true),
-                            lane, warpid, coords_i, coords_i_image, atoms_i, vel_i, A,
+                            lane, segment, coords_i, coords_i_image, atoms_i, vel_i, A,
                             shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
                             Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                            Val(needs_vir), Val(D), T)
+                            Val(needs_vir), Val(D), T, Val(W))
             else
                 force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
                             sh_vel, diag_mask, UInt32(0), UInt32(0), Val(false), Val(false),
-                            lane, warpid, coords_i, coords_i_image, atoms_i, vel_i, A,
+                            lane, segment, coords_i, coords_i_image, atoms_i, vel_i, A,
                             shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
                             Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                            Val(needs_vir), Val(D), T)
+                            Val(needs_vir), Val(D), T, Val(W))
             end
         else # EXCLUDED
             # These tiles are few enough that the minimum image of each pair is used
@@ -2673,10 +2828,10 @@ function force_kernel!(
                                                         lane, n_blocks, r, Val(N))
             force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
                         sh_vel, diag_mask, eligible_bitmask, special_bitmask, Val(true),
-                        Val(false), lane, warpid, coords_i, coords_i_image, atoms_i, vel_i,
+                        Val(false), lane, segment, coords_i, coords_i_image, atoms_i, vel_i,
                         A, shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
                         Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                        Val(needs_vir), Val(D), T)
+                        Val(needs_vir), Val(D), T, Val(W))
         end
         if refresh_inner && lane == a
             store_inner_mask!(inner, idx, inner_mask)
@@ -2694,7 +2849,7 @@ function force_kernel!(
         eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
                                                     lane, n_blocks, r, Val(N))
 
-        # The trip count is uniform across the sub-group
+        # The trip count is uniform across the segment
         @inbounds for m in a:r
             idx_j = j_0_tile + m
             coords_j = coords[idx_j]
@@ -2708,7 +2863,7 @@ function force_kernel!(
 
             condition = (excl & 0x1) == true && r2 <= r_cut2
 
-            if KI.sub_group_any(condition)
+            if tile_any(condition, Val(W))
                 f = condition ? sum_pairwise_forces_gpu(
                     inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                     (spec & 0x1) == true, coords_i, coords_j, boundary, vel_i, vel_j, step_n
@@ -2716,8 +2871,8 @@ function force_kernel!(
 
                 fi = stripped_force(f, Val(D), T)
                 force_i += fi
-                # The force on atom j from the whole sub-group, added once
-                fj = sub_group_sum(fi)
+                # The force on atom j from the whole segment, added once
+                fj = tile_sum(fi, Val(W))
                 if lane == a
                     atomic_add_columns!(fs_mat, fj, idx_j)
                 end
@@ -2781,7 +2936,7 @@ function force_kernel!(
             end
             # Lanes `lane <= t` have no lane `lane - t`, they get the value of another lane
             #   which is not used
-            f_recv = KI.shfl(fi, ((lane - a - t) & Int32(31)) + a)
+            f_recv = tile_shfl(fi, ((lane - a - t) & Int32(31)) + a, Val(W))
             if lane > t
                 fj += f_recv
             end
@@ -2791,7 +2946,7 @@ function force_kernel!(
     end
 
     if needs_vir
-        vir = sub_group_sum(vir)
+        vir = tile_sum(vir, Val(W))
         if lane == a
             atomic_add_virial!(global_virial, vir, idx, TH)
         end
@@ -2806,11 +2961,10 @@ end
 
 # The energy of the pairs of a full tile, see `tile_pair_forces`
 @inline function tile_pair_energy(sum_E, sh_stage, sh_vel, diag_mask, eligible_bitmask,
-                        special_bitmask, ::Val{has_exceptions}, lane, warpid, coords_i,
+                        special_bitmask, ::Val{has_exceptions}, lane, segment, coords_i,
                         atoms_i, vel_i, ::Type{A}, shuf_syms, ::Val{uses_vel}, inters_tuple,
-                        boundary, step_n, ::Val{r_cut2},
-                        ::Val{energy_units}) where {has_exceptions, A, uses_vel, r_cut2,
-                                                    energy_units}
+                        boundary, step_n, ::Val{r_cut2}, ::Val{energy_units},
+                        ::Val{W}) where {has_exceptions, A, uses_vel, r_cut2, energy_units, W}
     a = Int32(1)
     w = Int32(TILE_WIDTH)
     active = diag_mask
@@ -2818,10 +2972,10 @@ end
         m = Int32(trailing_zeros(active))
         active &= active - UInt32(1)
         slot = ((lane - a + m) & Int32(31)) + a
-        js = sh_stage[slot, warpid]
+        js = sh_stage[slot, segment]
         coords_j = js.coords
         atoms_j = rebuild_shuffled_atom(A, atoms_i, js.atom_payload, shuf_syms)
-        vel_j = uses_vel ? sh_vel[slot, warpid] : vel_i
+        vel_j = uses_vel ? sh_vel[slot, segment] : vel_i
 
         dr = vector(coords_i, coords_j, boundary)
         r2 = sum(abs2, dr)
@@ -2835,7 +2989,7 @@ end
             special = false
         end
 
-        if KI.sub_group_any(condition)
+        if tile_any(condition, Val(W))
             pe = condition ? sum_pairwise_potentials_gpu(
                 inters_tuple, dr, atoms_i, atoms_j, Val(energy_units), special,
                 coords_i, coords_j, boundary, vel_i, vel_j, step_n,
@@ -2849,7 +3003,7 @@ end
 
 #=
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
-                   inters_tuple, boundary, step_n, tile_exceptions, T, TH, D, block_y,
+                   inters_tuple, boundary, step_n, tile_exceptions, T, TH, D, block_y, W,
                    uses_vel, interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                    interacting_tiles_diag, num_interacting_tiles, interacting_tiles_overflow,
                    inner)
@@ -2859,7 +3013,7 @@ tiles produced by `find_interacting_blocks_kernel!`.
 
 This mirrors `force_kernel!` structurally: the same compact tile list, the same
 four tile-shape cases, and the same CLEAN-vs-mask-backed fast path. The main
-difference is the reduction target: each sub-group sums its energy with shuffles
+difference is the reduction target: each segment sums its energy with shuffles
 before the final atomic add to the slot of its tile in `energy_nounits`, see
 `energy_slot`.
 
@@ -2883,11 +3037,12 @@ function energy_kernel!(
     ::Val{TH},
     ::Val{D},
     ::Val{block_y},
+    ::Val{W},
     ::Val{uses_vel},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
     interacting_tiles_diag, num_interacting_tiles,
     interacting_tiles_overflow, inner) where {N, r_cut2, A, energy_units, T, TH, D, block_y,
-                                              uses_vel}
+                                              W, uses_vel}
 
     a = Int32(1)
     w = Int32(TILE_WIDTH)
@@ -2902,9 +3057,9 @@ function energy_kernel!(
     num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
     interacting_tiles_overflow_ro = KernelAbstractions.constify(interacting_tiles_overflow)
 
-    lane = KI.get_sub_group_local_id(Int32)
-    warpid = KI.get_sub_group_id(Int32)
-    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + warpid
+    lane = tile_lane(Val(W))
+    segment = group_tile(Val(W))
+    idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + segment
 
     # Local memory for staging this tile's j-atom data, mirroring force_kernel!'s Part 1
     shuf_syms = resolved_atom_shuffle_syms(inters_tuple, A)
@@ -2958,25 +3113,25 @@ function energy_kernel!(
         @inbounds coords_i = coords[index_i]
         @inbounds vel_i = velocities[index_i]
         @inbounds atoms_i = atoms[index_i]
-        @inbounds sh_stage[lane, warpid] = JStage(coords[index_j],
+        @inbounds sh_stage[lane, segment] = JStage(coords[index_j],
                                     atom_shuffle_payload(atoms[index_j], shuf_syms))
         if uses_vel
-            @inbounds sh_vel[lane, warpid] = velocities[index_j]
+            @inbounds sh_vel[lane, segment] = velocities[index_j]
         end
-        KI.sub_group_barrier()
+        tile_barrier(Val(W))
 
         if type == UInt8(0) # CLEAN
             sum_E = tile_pair_energy(sum_E, sh_stage, sh_vel, diag_mask, typemax(UInt32),
-                        zero(UInt32), Val(false), lane, warpid, coords_i, atoms_i, vel_i, A,
+                        zero(UInt32), Val(false), lane, segment, coords_i, atoms_i, vel_i, A,
                         shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
-                        Val(r_cut2), Val(energy_units))
+                        Val(r_cut2), Val(energy_units), Val(W))
         else # EXCLUDED
             eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
                                                         lane, n_blocks, r, Val(N))
             sum_E = tile_pair_energy(sum_E, sh_stage, sh_vel, diag_mask, eligible_bitmask,
-                        special_bitmask, Val(true), lane, warpid, coords_i, atoms_i, vel_i,
+                        special_bitmask, Val(true), lane, segment, coords_i, atoms_i, vel_i,
                         A, shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
-                        Val(r_cut2), Val(energy_units))
+                        Val(r_cut2), Val(energy_units), Val(W))
         end
     elseif j == n_blocks && i < n_blocks
         @inbounds coords_i = coords[index_i]
@@ -3033,8 +3188,8 @@ function energy_kernel!(
         end
     end
 
-    # Sub-group reduction, every lane gets the sum
-    sum_E = sub_group_sum(sum_E)
+    # Segment reduction, every lane gets the sum
+    sum_E = tile_sum(sum_E, Val(W))
 
     if lane == a && sum_E != zero(T)
         Atomix.@atomic :monotonic energy_nounits[energy_slot(idx, length(energy_nounits))] += TH(sum_E)
@@ -3081,11 +3236,13 @@ That's why the calculations are done in the following order:
 ```
 
 This evaluates every atom pair twice and is therefore `O(N^2)`, without a virial.
-It is a KernelInterface kernel, launched with `n_blocks_i * n_blocks_j` 1-D work-groups.
+It is a KernelInterface kernel, launched with `n_blocks_i * n_blocks_j` 1-D work-groups,
+with a segment of a sub-group of width `W` per tile, see `tile_lane`.
 =#
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, velocities_var,
                                      atoms_var, boundary, inters, step_n, ::Val{D}, ::Val{F},
-                                     ::Val{n_blocks_i}) where {T, D, F, n_blocks_i}
+                                     ::Val{n_blocks_i},
+                                     ::Val{W}) where {T, D, F, n_blocks_i, W}
     coords = KernelAbstractions.constify(coords_var)
     velocities = KernelAbstractions.constify(velocities_var)
     atoms = KernelAbstractions.constify(atoms_var)
@@ -3095,16 +3252,16 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     group = KI.get_group_id(Int32).x - Int32(1)
     block_i = group % Int32(n_blocks_i)
     block_j = group ÷ Int32(n_blocks_i)
-    lane = KI.get_sub_group_local_id(Int32)
-    warpidx = KI.get_sub_group_id(Int32)
+    lane = tile_lane(Val(W))
+    segment = group_tile(Val(W))
     i_0_tile = block_i * w
     j_0_block = block_j * KI.get_local_size(Int32).x
-    j_0_tile = j_0_block + (warpidx - Int32(1)) * w
+    j_0_tile = j_0_block + (segment - Int32(1)) * w
     i = i_0_tile + lane
 
     force_i = zero(SVector{D, T})
 
-    # Uniform across the sub-group
+    # Uniform across the segment
     if i_0_tile + w > n_atoms || j_0_tile + w > n_atoms
         @inbounds if i <= n_atoms
             njs = min(w, n_atoms - j_0_tile)
@@ -3138,9 +3295,9 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
             f = sum_pairwise_forces_nonl(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
                                          boundary, vel_i, vel_j, step_n)
             force_i += -stripped_force(f, Val(D), T)
-            j = KI.shfl(j, src_lane)
-            coord_j = KI.shfl(coord_j, src_lane)
-            vel_j = KI.shfl(vel_j, src_lane)
+            j = tile_shfl(j, src_lane, Val(W))
+            coord_j = tile_shfl(coord_j, src_lane, Val(W))
+            vel_j = tile_shfl(vel_j, src_lane, Val(W))
         end
 
         atomic_add_columns!(forces, force_i, i)
@@ -3167,7 +3324,7 @@ function nonl_pairwise_forces!(buffers, sys::System{D, <:Any, T}, pairwise_inter
     kernel_backend, options = tile_kernel_config(backend, T, nothing)
     launch_tile_kernel!(kernel_backend, pairwise_force_kernel_nonl!,
         buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
-        step_n, Val(D), Val(sys.force_units), Val(n_blocks_i);
+        step_n, Val(D), Val(sys.force_units), Val(n_blocks_i), tile_sub_group_width(backend);
         numgroups=n_blocks_i * n_blocks_j, workgroupsize=n_threads, options=options)
     return buffers
 end

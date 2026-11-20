@@ -460,7 +460,7 @@ Molly.charge(a::AtomWithAccessors) = a.q
                                                       0.3u"nm", 0.2u"kJ * mol^-1", 1.0),
     )
 
-    # The narrowed list of atom fields read by the interactions on the CUDA path is only
+    # The narrowed list of atom fields read by the interactions on the tiled path is only
     #   used when every entry is a field of the atom type, otherwise every field is used
     inters_test = (LennardJones(), Coulomb())
     fields_test = Molly.combine_atom_fields(inters_test)
@@ -604,30 +604,29 @@ end
 
     @test_throws ArgumentError DisplacementsLogger(100, coords; n_steps_update=17)
 
-    if run_cuda_tests
-        sys_gpu = System(
-            atoms=CuArray(atoms),
-            coords=CuArray(coords),
-            velocities=CuArray(velocities),
+    # Every GPU backend with Float64 that supports the tiled kernels of GPUNeighborFinder
+    sys_gpus = [System(
+            atoms=AT(atoms),
+            coords=AT(coords),
+            velocities=AT(velocities),
             boundary=boundary,
             pairwise_inters=(LennardJones(),),
             neighbor_finder=GPUNeighborFinder(
                 n_atoms=n_atoms,
                 dist_cutoff=2.0u"nm",
-                array_type=CuArray,
+                array_type=AT,
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
-                disp=DisplacementsLogger(100, CuArray(coords)),
+                disp=DisplacementsLogger(100, AT(coords)),
             ),
-        )
-    end
+        ) for AT in array_list[2:end] if Molly.uses_gpu_neighbor_finder(AT)]
 
     for simulator in simulators
         simulate!(sys, simulator, n_steps; n_threads=1)
         @test all(isequal(0.0u"nm"), norm.(first(values(sys.loggers.disp))))
         @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
-        if run_cuda_tests
+        for sys_gpu in sys_gpus
             simulate!(sys_gpu, simulator, n_steps; n_threads=1)
             @test all(isequal(0.0u"nm"), norm.(first(values(sys_gpu.loggers.disp))))
             @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
@@ -712,18 +711,6 @@ end
             neighbor_finder = nothing
         end
 
-        if run_cuda_tests
-            if use_neighbors(inter)
-                neighbor_finder_gpu = GPUNeighborFinder(
-                    n_atoms=n_atoms,
-                    dist_cutoff=1.2u"nm",
-                    array_type=CuArray,
-                )
-            else
-                neighbor_finder_gpu = nothing
-            end
-        end
-
         atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
         coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
@@ -740,12 +727,24 @@ end
         E0 = potential_energy(sys)
         simulate!(sys, simulator, n_steps)
 
-        if run_cuda_tests
+        # Every GPU backend with Float64, those that support the tiled kernels of
+        #   GPUNeighborFinder for the interactions that use the neighbor list
+        for AT in array_list[2:end]
+            if use_neighbors(inter)
+                Molly.uses_gpu_neighbor_finder(AT) || continue
+                neighbor_finder_gpu = GPUNeighborFinder(
+                    n_atoms=n_atoms,
+                    dist_cutoff=1.2u"nm",
+                    array_type=AT,
+                )
+            else
+                neighbor_finder_gpu = nothing
+            end
             sys_gpu = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
-                velocities=CuArray(velocities),
+                velocities=AT(velocities),
                 pairwise_inters=(inter,),
                 neighbor_finder=neighbor_finder_gpu,
             )
