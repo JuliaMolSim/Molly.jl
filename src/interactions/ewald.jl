@@ -1578,8 +1578,7 @@ the above interactions.
 
 Only compatible with 3D systems.
 """
-@kwdef struct EwaldExclusion null::UInt8 = 0 end
-# Due to a CuArray error with empty structs (https://github.com/JuliaGPU/CUDA.jl/issues/3181)
+struct EwaldExclusion end
 
 Base.zero(::Type{EwaldExclusion}) = EwaldExclusion()
 Base.zero(e::EwaldExclusion) = zero(typeof(e))

@@ -29,8 +29,6 @@ function Molly.set_gpu_device!(gpu_id, ::Val{true})
     CUDA.device!(gpu_id)
 end
 
-const CUDA_CORE = isdefined(CUDA, :CUDACore) ? CUDACore : CUDA
-
 ## Compilation
 
 # Whether to compile the pairwise kernels with fast math
@@ -147,9 +145,9 @@ device address space, so that the host reads it without a copy once the event re
 after the check has completed.
 =#
 function Molly.check_result_arrays(::CUDABackend, ::Type{T}, n::Integer) where T
-    result = CuArray{T, 1, CUDA_CORE.HostMemory}(undef, n)
+    result = CuArray{T, 1, CUDACore.HostMemory}(undef, n)
     fill!(unsafe_wrap(Array, result), zero(T))
-    return result, unsafe_wrap(Array, result), CuEvent(CUDA_CORE.EVENT_DISABLE_TIMING)
+    return result, unsafe_wrap(Array, result), CuEvent(CUDACore.EVENT_DISABLE_TIMING)
 end
 
 function Molly.record_check!(::CUDABackend, event::CuEvent, scratch)
