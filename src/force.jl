@@ -408,7 +408,7 @@ end
 pre_coupling_ref() = Ref{Any}(nothing)
 constraint_scratch_ref() = Ref{Any}(nothing)
 
-struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
+struct BuffersCPU{F, A, V, VN, VC, KT, PT, VG}
     fs_nounits::F
     fs_chunks::A
     virial::V
@@ -426,12 +426,12 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT, FM}
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
-    fs_mat::FM
+    virtual_site_groups::VG
     validity::BufferValidity
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
-                    kin_tensor, pres_tensor, fs_mat)
+                    kin_tensor, pres_tensor, virtual_site_groups)
     constraint_virial = zero(virial)
     constraint_virial_nounits = zero(vir_nounits)
     constraint_virial_chunks = similar(vir_chunks)
@@ -444,24 +444,23 @@ function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      virtual_site_groups, BufferValidity())
 end
 
 function BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                     constraint_virial, constraint_virial_nounits,
-                    constraint_virial_chunks, kin_tensor, pres_tensor, fs_mat)
+                    constraint_virial_chunks, kin_tensor, pres_tensor,
+                    virtual_site_groups)
     return BuffersCPU(fs_nounits, fs_chunks, virial, vir_nounits, vir_chunks,
                       constraint_virial, constraint_virial_nounits,
                       constraint_virial_chunks, kin_tensor, pres_tensor,
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
-                      fs_mat, BufferValidity())
+                      virtual_site_groups, BufferValidity())
 end
 
 function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH}
-    # Allows propagation of uncertainties to tensors
-    TU = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     fs_nounits    = ustrip_vec.(zero(sys.coords))
     vir           = zeros(TH, D, D) .* sys.energy_units
     vir_nounits   = ustrip_vec.(zero(vir))
@@ -474,10 +473,9 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
     fs_chunks         = [zero(fs_nounits)  for _ in 1:n_copies]
     vir_chunks        = [zero(vir_nounits) for _ in 1:n_copies]
     constr_vir_chunks = [zero(vir_nounits) for _ in 1:n_copies]
-    # fs_mat is only used for virtual sites to do atomic addition
-    # Use an empty matrix if no virtual sites to keep this function type stable
-    n_fs_mat_cols = (length(sys.virtual_sites) > 0 ? length(sys) : 0)
-    fs_mat = zeros(TU, D, n_fs_mat_cols)
+    # The groups of virtual sites whose forces can be distributed in parallel, or nothing
+    #   for systems without a typed array of virtual sites
+    vs_groups = virtual_site_groups(sys.virtual_sites, length(sys))
     return BuffersCPU(
         fs_nounits, fs_chunks,
         vir, vir_nounits, vir_chunks,
@@ -487,7 +485,7 @@ function init_buffers!(sys::System{D, <:Any, <:Any, TH}, n_threads) where {D, TH
         pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
         constraint_scratch_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
         constraint_scratch_ref(),
-        fs_mat,
+        vs_groups,
         BufferValidity(),
     )
 end
@@ -1187,6 +1185,7 @@ end
                                              boundary, force_units, neighbors, pairwise_inters_nl,
                                              step_n, block_start, block_stop, sqdist_cutoff,
                                              ::Val{needs_vir}, ::Val{use_vel}) where {needs_vir, use_vel}
+    vir_block = virial_accumulator(vir_chunk, coords)
     @inbounds for ni in block_start:block_stop
         i, j, special = neighbors[ni]
         coord_i = coords[i]
@@ -1205,10 +1204,20 @@ end
 
         if needs_vir
             v = dr * transpose(f)
-            vir_chunk .+= ustrip.(v)
+            vir_block += ustrip.(v)
         end
     end
+    if needs_vir
+        vir_chunk .+= vir_block
+    end
     return nothing
+end
+
+virial_accumulator(::Nothing, coords) = nothing
+
+function virial_accumulator(vir_chunk::AbstractMatrix{TV},
+                            coords::AbstractVector{SVector{D, C}}) where {TV, D, C}
+    return zero(SMatrix{D, D, TV})
 end
 
 # Unclear virial contribution in periodic space as only one coordinate is available

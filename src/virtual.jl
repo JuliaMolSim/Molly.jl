@@ -296,182 +296,301 @@ Set the coordinates of virtual sites based on the coordinates of the atoms that 
 function place_virtual_sites!(sys, virtual_sites=sys.virtual_sites;
                               n_threads::Integer=Threads.nthreads())
     # Assumes that each virtual site is only defined once
-    n_vs = length(virtual_sites)
-    if n_vs > 0
-        backend = get_backend(sys.coords)
-        n_threads_dev = 256
-        kernel! = backend_kernel(place_virtual_sites_kernel!, backend, n_threads_dev)
-        kernel!(sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
-                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
+    if length(virtual_sites) > 0
+        place_virtual_sites_coords!(sys.coords, sys.boundary, virtual_sites, n_threads)
     end
     return sys
 end
 
-@kernel function place_virtual_sites_kernel!(coords, boundary, @Const(virtual_sites))
-    i = @index(Global, Linear)
-    if i <= length(virtual_sites)
-        vs = virtual_sites[i]
-        if vs.type == 1
-            vs_coord = coords[vs.atom_1]
-        elseif vs.type == 2
-            # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
-            # Only one absolute coordinate, r1, can be used, with others defined relatively
-            # This is why w1 + w2 must equal 1, which is assumed here and checked on creation
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
-        elseif vs.type == 3
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
-        elseif vs.type == 4
-            # Assumes 3D
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            cross_r12_r13 = cross(r12, r13) # Units L^2
-            vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
-                       vs.weight_cross * cross_r12_r13
-        else # vs.type == 5
-            # Assumes 3D
-            # The origin weights sum to 1 and the direction weights to 0, so the sums over the
-            #   atoms can use r1 and relative vectors and stay in one periodic image
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            w, p = vs.local_weights, vs.local_position
-            dx, dy, dz = local_axes(w[5] * r12 + w[6] * r13, w[8] * r12 + w[9] * r13)
-            vs_coord = coords[vs.atom_1] + w[2] * r12 + w[3] * r13 +
-                       p[1] * dx + p[2] * dy + p[3] * dz
-        end
-        coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
+# The number of chunks that `n_items` virtual sites are split into on the CPU, one per thread
+#   but with at least `vs_min_chunk` sites in each, since the work of a site is small
+const vs_min_chunk = 256
+
+vs_n_chunks(n_items, n_threads) = clamp(cld(n_items, vs_min_chunk), 1, max(n_threads, 1))
+
+@inline vs_chunk_range(chunk_i, n_chunks, n_items) =
+            (((chunk_i - 1) * n_items) ÷ n_chunks + 1):((chunk_i * n_items) ÷ n_chunks)
+
+function place_virtual_sites_coords!(coords, boundary, virtual_sites, n_threads)
+    for i in eachindex(virtual_sites)
+        place_virtual_site!(coords, boundary, virtual_sites[i])
     end
+    return coords
 end
 
-function distribute_forces!(fs, sys::System{D, <:Any, T}, buffers,
-                            virtual_sites=sys.virtual_sites;
-                            n_threads::Integer=Threads.nthreads()) where {D, T}
-    # Assumes that each virtual site is only defined once
+# Each virtual site only writes its own coordinates and only reads those of atoms that are
+#   not virtual sites, so the sites can be placed in parallel in any order
+function place_virtual_sites_coords!(coords, boundary,
+                                     virtual_sites::AbstractVector{<:VirtualSite}, n_threads)
     n_vs = length(virtual_sites)
-    if n_vs > 0
-        copy_forces_to_matrix!(buffers.fs_mat, fs, Val(D))
-        backend = get_backend(sys.coords)
-        n_threads_dev = 128
-        kernel! = backend_kernel(distribute_forces_kernel!, backend, n_threads_dev)
-        kernel!(buffers.fs_mat, sys.coords, sys.boundary, virtual_sites; ndrange=n_vs,
-                workgroupsize=backend_workgroupsize(backend, n_vs, n_threads))
-        copy_matrix_to_forces!(fs, buffers.fs_mat, sys.force_units, Val(D), Val(T))
-    end
-    return fs
-end
-
-function copy_matrix_to_forces!(fs, fs_mat, force_units, ::Val{D}, ::Val{T}) where {D, T}
-    fs_mat_flat = reshape(fs_mat, length(fs) * D)
-    fs .= reinterpret(SVector{D, T}, fs_mat_flat) .* force_units
-    return fs
-end
-
-function copy_matrix_to_forces!(fs::AbstractGPUArray, fs_mat, force_units, D::Val, T::Val)
-    return apply_force_units_gpu!(fs, fs_mat, force_units, D, T)
-end
-
-function copy_forces_to_matrix!(fs_mat::AbstractMatrix{T}, fs, ::Val{D}) where {T, D}
-    @inbounds for atom_i in eachindex(fs)
-        f = ustrip_vec(fs[atom_i])
-        for dim in 1:D
-            fs_mat[dim, atom_i] = f[dim]
+    n_chunks = vs_n_chunks(n_vs, n_threads)
+    @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+        for i in vs_chunk_range(chunk_i, n_chunks, n_vs)
+            place_virtual_site!(coords, boundary, virtual_sites[i])
         end
     end
-    return fs_mat
+    return coords
 end
 
-function copy_forces_to_matrix!(fs_mat::AbstractGPUArray{T, 2}, fs::AbstractGPUArray,
-                                ::Val{D}) where {T, D}
-    backend = get_backend(fs)
-    n_threads_gpu = gpu_threads_copy(length(fs))
-    kernel! = copy_forces_to_matrix_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, fs, Val(D); ndrange=length(fs))
-    return fs_mat
+function place_virtual_sites_coords!(coords::AbstractGPUArray, boundary,
+                                     virtual_sites::AbstractGPUVector{<:VirtualSite},
+                                     n_threads)
+    backend = get_backend(coords)
+    kernel! = place_virtual_sites_kernel!(backend, 128)
+    launch_kernel!(kernel!, coords, boundary, virtual_sites; ndrange=length(virtual_sites))
+    return coords
 end
 
-@kernel inbounds=true function copy_forces_to_matrix_kernel!(fs_mat, @Const(fs), ::Val{D}) where D
-    atom_i = @index(Global, Linear)
-    if atom_i <= length(fs)
-        f = ustrip_vec(fs[atom_i])
-        for dim in 1:D
-            fs_mat[dim, atom_i] = f[dim]
-        end
-    end
-end
-
-@kernel function distribute_forces_kernel!(fs_mat::AbstractMatrix{T}, @Const(coords),
-                        boundary::AbstractBoundary{D}, @Const(virtual_sites)) where {T, D}
+@kernel inbounds=true function place_virtual_sites_kernel!(coords, boundary,
+                                                           @Const(virtual_sites))
     i = @index(Global, Linear)
     if i <= length(virtual_sites)
-        vs = virtual_sites[i]
-        if vs.type == 1
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += f
-            end
-        elseif vs.type == 2
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
-            end
-        elseif vs.type == 3
-            for dim in 1:D
-                f = fs_mat[dim, vs.atom_ind]
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += vs.weight_1 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += vs.weight_2 * f
-                Atomix.@atomic fs_mat[dim, vs.atom_3] += vs.weight_3 * f
-            end
-        elseif vs.type == 4
-            # Assumes 3D
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind]) *
-                                                        unit(eltype(r12))
-            f2 = SVector(
-                vs.weight_12 * f[1] - vs.weight_cross * r13[3] * f[2] + vs.weight_cross * r13[2] * f[3],
-                vs.weight_cross * r13[3] * f[1] + vs.weight_12 * f[2] - vs.weight_cross * r13[1] * f[3],
-                -vs.weight_cross * r13[2] * f[1] + vs.weight_cross * r13[1] * f[2] + vs.weight_12 * f[3],
-            )
-            f3 = SVector(
-                vs.weight_13 * f[1] + vs.weight_cross * r12[3] * f[2] - vs.weight_cross * r12[2] * f[3],
-                -vs.weight_cross * r12[3] * f[1] + vs.weight_13 * f[2] + vs.weight_cross * r12[1] * f[3],
-                vs.weight_cross * r12[2] * f[1] - vs.weight_cross * r12[1] * f[2] + vs.weight_13 * f[3],
-            )
-            f1 = f - f2 - f3
-            for dim in 1:D
-                Atomix.@atomic fs_mat[dim, vs.atom_1] += ustrip(f1[dim])
-                Atomix.@atomic fs_mat[dim, vs.atom_2] += ustrip(f2[dim])
-                Atomix.@atomic fs_mat[dim, vs.atom_3] += ustrip(f3[dim])
-            end
-        elseif vs.type == 5
-            # Assumes 3D, the lengths are stripped to the unit of the coordinates so that the
-            #   derivatives below are in force units
-            r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
-            r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
-            lu = unit(eltype(r12))
-            w = vs.local_weights
-            xdir = ustrip.(lu, w[5] * r12 + w[6] * r13)
-            ydir = ustrip.(lu, w[8] * r12 + w[9] * r13)
-            p = ustrip.(lu, vs.local_position)
-            dx, dy, dz, inv_norm_x, inv_norm_z = local_axes(xdir, ydir)
-            f = SVector(fs_mat[1, vs.atom_ind], fs_mat[2, vs.atom_ind], fs_mat[3, vs.atom_ind])
-            for j in 1:3
-                atom_j = (j == 1 ? vs.atom_1 : (j == 2 ? vs.atom_2 : vs.atom_3))
-                f_j = local_coords_force(f, p, w[j], w[3 + j], w[6 + j], xdir, ydir, dx, dy, dz,
-                                         inv_norm_x, inv_norm_z)
-                for dim in 1:D
-                    Atomix.@atomic fs_mat[dim, atom_j] += f_j[dim]
+        place_virtual_site!(coords, boundary, virtual_sites[i])
+    end
+end
+
+@inline function place_virtual_site!(coords, boundary, vs)
+    if vs.type == 1
+        vs_coord = coords[vs.atom_1]
+    elseif vs.type == 2
+        # w1 r1 + w2 r2 can't be used here since r1 and r2 may be in different periodic images
+        # Only one absolute coordinate, r1, can be used, with others defined relatively
+        # This is why w1 + w2 must equal 1, which is assumed here and checked on creation
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        vs_coord = coords[vs.atom_1] + vs.weight_2 * r12
+    elseif vs.type == 3
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        vs_coord = coords[vs.atom_1] + vs.weight_2 * r12 + vs.weight_3 * r13
+    elseif vs.type == 4
+        # Assumes 3D
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        cross_r12_r13 = cross(r12, r13) # Units L^2
+        vs_coord = coords[vs.atom_1] + vs.weight_12 * r12 + vs.weight_13 * r13 +
+                   vs.weight_cross * cross_r12_r13
+    else # vs.type == 5
+        # Assumes 3D
+        # The origin weights sum to 1 and the direction weights to 0, so the sums over the
+        #   atoms can use r1 and relative vectors and stay in one periodic image
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        w, p = vs.local_weights, vs.local_position
+        dx, dy, dz = local_axes(w[5] * r12 + w[6] * r13, w[8] * r12 + w[9] * r13)
+        vs_coord = coords[vs.atom_1] + w[2] * r12 + w[3] * r13 +
+                   p[1] * dx + p[2] * dy + p[3] * dz
+    end
+    coords[vs.atom_ind] = wrap_coords(vs_coord, boundary)
+    return nothing
+end
+
+# The number of atoms that define a virtual site
+@inline n_virtual_site_atoms(vs) = (vs.type == 1 ? 1 : (vs.type == 2 ? 2 : 3))
+
+#=
+The order in which the forces on the virtual sites of a CPU system are distributed by
+threads. The sites are split into groups in which no two sites are defined by the same
+atom, by greedy coloring, so the sites of a group can add forces to the atoms defining
+them in parallel without races. The groups are found once by `init_buffers!` and stored in
+the buffers. For systems such as TIP4P water, where no atom defines more than one site,
+there is one group.
+`order` holds the indices of the virtual sites group by group, with group `g` from
+`group_starts[g]` to `group_starts[g + 1] - 1`, or is empty if the coloring needed more
+than 64 groups, in which case the sites are distributed serially. `virtual_sites` is the
+array of virtual sites the groups were found for.
+=#
+struct VirtualSiteGroups{V}
+    virtual_sites::V
+    order::Vector{Int}
+    group_starts::Vector{Int}
+end
+
+virtual_site_groups(virtual_sites, n_atoms) = nothing
+
+function virtual_site_groups(virtual_sites::AbstractVector{<:VirtualSite}, n_atoms)
+    n_vs = length(virtual_sites)
+    used_groups = zeros(UInt64, n_atoms) # Bit g is set if a site of group g uses the atom
+    site_groups = zeros(Int, n_vs)
+    n_groups = 0
+    for (vi, vs) in enumerate(virtual_sites)
+        atom_inds = (vs.atom_1, vs.atom_2, vs.atom_3)
+        n_atoms_vs = n_virtual_site_atoms(vs)
+        taken = zero(UInt64)
+        for k in 1:n_atoms_vs
+            taken |= used_groups[atom_inds[k]]
+        end
+        if taken == typemax(UInt64)
+            return VirtualSiteGroups(virtual_sites, Int[], Int[])
+        end
+        g = trailing_ones(taken) + 1
+        for k in 1:n_atoms_vs
+            used_groups[atom_inds[k]] |= (one(UInt64) << (g - 1))
+        end
+        site_groups[vi] = g
+        n_groups = max(n_groups, g)
+    end
+    group_starts = zeros(Int, n_groups + 1)
+    group_starts[1] = 1
+    for g in site_groups
+        group_starts[g + 1] += 1
+    end
+    cumsum!(group_starts, group_starts)
+    next_pos = group_starts[1:n_groups]
+    order = zeros(Int, n_vs)
+    for (vi, g) in enumerate(site_groups)
+        order[next_pos[g]] = vi
+        next_pos[g] += 1
+    end
+    return VirtualSiteGroups(virtual_sites, order, group_starts)
+end
+
+function distribute_forces!(fs, sys, buffers, virtual_sites=sys.virtual_sites;
+                            n_threads::Integer=Threads.nthreads())
+    # Assumes that each virtual site is only defined once
+    if length(virtual_sites) > 0
+        distribute_virtual_site_forces!(fs, sys.coords, sys.boundary, virtual_sites,
+                                        buffers, n_threads)
+    end
+    return fs
+end
+
+function distribute_virtual_site_forces!(fs, coords, boundary, virtual_sites, buffers,
+                                         n_threads)
+    for i in eachindex(virtual_sites)
+        distribute_virtual_site_force!(fs, coords, boundary, virtual_sites[i])
+    end
+    return fs
+end
+
+function distribute_virtual_site_forces!(fs, coords, boundary,
+                                         virtual_sites::AbstractVector{<:VirtualSite},
+                                         buffers, n_threads)
+    groups = (buffers isa BuffersCPU ? buffers.virtual_site_groups : nothing)
+    if n_threads == 1 || !(groups isa VirtualSiteGroups) ||
+                groups.virtual_sites !== virtual_sites || isempty(groups.order) ||
+                length(groups.order) != length(virtual_sites)
+        for i in eachindex(virtual_sites)
+            distribute_virtual_site_force!(fs, coords, boundary, virtual_sites[i])
+        end
+    else
+        order = groups.order
+        for g in 1:(length(groups.group_starts) - 1)
+            offset = groups.group_starts[g] - 1
+            n_vs_group = groups.group_starts[g + 1] - groups.group_starts[g]
+            n_chunks = vs_n_chunks(n_vs_group, n_threads)
+            @maybe_threads (n_chunks > 1) for chunk_i in 1:n_chunks
+                for oi in vs_chunk_range(chunk_i, n_chunks, n_vs_group)
+                    vs = virtual_sites[order[offset + oi]]
+                    distribute_virtual_site_force!(fs, coords, boundary, vs)
                 end
             end
         end
-        # Now the virtual site force has been distributed onto the other atoms,
-        #   it can be set to zero
-        for dim in 1:D
-            fs_mat[dim, vs.atom_ind] = zero(T)
+    end
+    return fs
+end
+
+# Move the force on a virtual site onto the atoms that define it and set it to zero
+@inline function distribute_virtual_site_force!(fs, coords, boundary, vs)
+    f = fs[vs.atom_ind]
+    f1, f2, f3 = virtual_site_atom_forces(vs, f, coords, boundary)
+    n_atoms_vs = n_virtual_site_atoms(vs)
+    fs[vs.atom_1] += f1
+    if n_atoms_vs >= 2
+        fs[vs.atom_2] += f2
+    end
+    if n_atoms_vs == 3
+        fs[vs.atom_3] += f3
+    end
+    fs[vs.atom_ind] = zero(f)
+    return nothing
+end
+
+#=
+On GPUs the forces are distributed in place with atomics, since sites defined by the same
+atom are distributed at the same time. `fs` is reinterpreted as numbers in the force units,
+since atomics do not work on unitful static vectors.
+=#
+function distribute_virtual_site_forces!(fs::AbstractGPUArray{SVector{D, F}}, coords,
+                                boundary, virtual_sites::AbstractGPUVector{<:VirtualSite},
+                                buffers, n_threads) where {D, F}
+    backend = get_backend(fs)
+    T = typeof(ustrip(zero(F)))
+    fs_flat = reinterpret(T, fs)
+    kernel! = distribute_forces_kernel!(backend, 128)
+    launch_kernel!(kernel!, fs_flat, coords, boundary, virtual_sites, Val(unit(F)), Val(D);
+                   ndrange=length(virtual_sites))
+    return fs
+end
+
+@kernel inbounds=true function distribute_forces_kernel!(fs_flat, @Const(coords), boundary,
+                                @Const(virtual_sites), ::Val{FU}, ::Val{D}) where {FU, D}
+    i = @index(Global, Linear)
+    if i <= length(virtual_sites)
+        vs = virtual_sites[i]
+        si = D * (vs.atom_ind - 1)
+        f = SVector{D}(ntuple(dim -> fs_flat[si + dim], Val(D))) * FU
+        f1, f2, f3 = virtual_site_atom_forces(vs, f, coords, boundary)
+        n_atoms_vs = n_virtual_site_atoms(vs)
+        atomic_add_force!(fs_flat, vs.atom_1, f1, Val(FU), Val(D))
+        if n_atoms_vs >= 2
+            atomic_add_force!(fs_flat, vs.atom_2, f2, Val(FU), Val(D))
         end
+        if n_atoms_vs == 3
+            atomic_add_force!(fs_flat, vs.atom_3, f3, Val(FU), Val(D))
+        end
+        for dim in 1:D
+            fs_flat[si + dim] = zero(eltype(fs_flat))
+        end
+    end
+end
+
+@inline function atomic_add_force!(fs_flat, atom_i, f, ::Val{FU}, ::Val{D}) where {FU, D}
+    ai = D * (atom_i - 1)
+    for dim in 1:D
+        Atomix.@atomic :monotonic fs_flat[ai + dim] += ustrip(FU, f[dim])
+    end
+    return nothing
+end
+
+#=
+The forces on the atoms defining virtual site `vs` from the force `f` on the site, with
+the third or second and third zero for sites defined by fewer atoms. The lengths are
+stripped to the unit of the coordinates so that the forces are in the units of `f`.
+=#
+@inline function virtual_site_atom_forces(vs, f, coords, boundary)
+    if vs.type == 1
+        return f, zero(f), zero(f)
+    elseif vs.type == 2
+        return vs.weight_1 * f, vs.weight_2 * f, zero(f)
+    elseif vs.type == 3
+        return vs.weight_1 * f, vs.weight_2 * f, vs.weight_3 * f
+    elseif vs.type == 4
+        # Assumes 3D, the derivative of r1 + w12 r12 + w13 r13 + wc (r12 × r13)
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        lu = unit(eltype(r12))
+        r12_s, r13_s = ustrip.(lu, r12), ustrip.(lu, r13)
+        wc = ustrip(inv(lu), vs.weight_cross)
+        f2 = vs.weight_12 * f + wc * cross(r13_s, f)
+        f3 = vs.weight_13 * f - wc * cross(r12_s, f)
+        return f - f2 - f3, f2, f3
+    else # vs.type == 5
+        # Assumes 3D
+        r12 = vector(coords[vs.atom_1], coords[vs.atom_2], boundary)
+        r13 = vector(coords[vs.atom_1], coords[vs.atom_3], boundary)
+        lu = unit(eltype(r12))
+        w = vs.local_weights
+        xdir = ustrip.(lu, w[5] * r12 + w[6] * r13)
+        ydir = ustrip.(lu, w[8] * r12 + w[9] * r13)
+        p = ustrip.(lu, vs.local_position)
+        dx, dy, dz, inv_norm_x, inv_norm_z = local_axes(xdir, ydir)
+        f1 = local_coords_force(f, p, w[1], w[4], w[7], xdir, ydir, dx, dy, dz,
+                                inv_norm_x, inv_norm_z)
+        f2 = local_coords_force(f, p, w[2], w[5], w[8], xdir, ydir, dx, dy, dz,
+                                inv_norm_x, inv_norm_z)
+        f3 = local_coords_force(f, p, w[3], w[6], w[9], xdir, ydir, dx, dy, dz,
+                                inv_norm_x, inv_norm_z)
+        return f1, f2, f3
     end
 end
 

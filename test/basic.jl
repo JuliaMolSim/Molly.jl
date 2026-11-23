@@ -2907,3 +2907,74 @@ end
                        -9.680706225998881u"kJ * mol^-1"; atol=1e-8u"kJ * mol^-1")
     end
 end
+
+@testset "Virtual sites in parallel" begin
+    # Molecules of three atoms that define a virtual site of each type, so that the sites
+    #   share atoms and their forces are distributed in groups, see `virtual_site_groups`
+    n_mols = 400
+    n_per_mol = 8
+    n_atoms = n_per_mol * n_mols
+    rng = Xoshiro(1)
+    boundary = CubicBoundary(6.0u"nm")
+    coords = SVector{3, typeof(1.0u"nm")}[]
+    virtual_sites = []
+    for mi in 1:n_mols
+        r1 = SVector{3}(rand(rng, 3) .* 6.0)u"nm"
+        r2 = r1 + SVector(0.1, 0.02, 0.0)u"nm"
+        r3 = r1 + SVector(-0.01, 0.1, 0.03)u"nm"
+        append!(coords, [r1, r2, r3, r1, r1, r1, r1, r1])
+        i = n_per_mol * (mi - 1)
+        append!(virtual_sites, [
+            ThreeParticleAverageSite(i + 4, i + 1, i + 2, i + 3, 0.6, 0.2, 0.2, 0.0u"nm^-1"),
+            OutOfPlaneSite(i + 5, i + 1, i + 2, i + 3, 0.3, 0.4, 2.0u"nm^-1"),
+            TwoParticleAverageSite(i + 6, i + 1, i + 3, 0.7, 0.3, 0.0u"nm^-1"),
+            OneParticleSite(i + 7, i + 2, 0.0u"nm^-1"),
+            LocalCoordinatesSite(i + 8, i + 1, i + 2, i + 3, (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0),
+                                 (-1.0, 0.0, 1.0), SVector(0.02, 0.03, 0.01)u"nm"),
+        ])
+    end
+    virtual_sites = [virtual_sites...]
+    @test isconcretetype(eltype(virtual_sites))
+    is_vs = [mod1(i, n_per_mol) > 3 for i in 1:n_atoms]
+    atoms = [Atom(mass=(is_vs[i] ? 0.0 : 10.0)u"g/mol") for i in 1:n_atoms]
+
+    # The sites of a molecule share atoms, apart from the two-particle and one-particle sites
+    groups = Molly.virtual_site_groups(virtual_sites, n_atoms)
+    n_groups = length(groups.group_starts) - 1
+    @test n_groups == 4
+    @test sort(groups.order) == eachindex(virtual_sites)
+    for g in 1:n_groups
+        group_inds = groups.order[groups.group_starts[g]:(groups.group_starts[g + 1] - 1)]
+        group_atoms = Int[]
+        for vs in virtual_sites[group_inds]
+            append!(group_atoms, (vs.atom_1, vs.atom_2, vs.atom_3)[1:Molly.n_virtual_site_atoms(vs)])
+        end
+        @test allunique(group_atoms)
+    end
+
+    fs_start = [SVector{3}(randn(rng, 3))u"kJ * mol^-1 * nm^-1" for _ in 1:n_atoms]
+    coords_ref, fs_ref = nothing, nothing
+    for AT in array_list, n_threads in n_threads_list
+        AT != Array && n_threads > 1 && continue
+        sys = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
+            boundary=boundary,
+            virtual_sites=to_device(virtual_sites, AT),
+        )
+        place_virtual_sites!(sys; n_threads=n_threads)
+        buffers = Molly.init_buffers!(sys, n_threads)
+        fs = to_device(fs_start, AT)
+        Molly.distribute_forces!(fs, sys, buffers; n_threads=n_threads)
+        coords_out, fs_out = from_device(sys.coords), from_device(fs)
+        if isnothing(coords_ref)
+            coords_ref, fs_ref = coords_out, fs_out
+            @test all(iszero, fs_out[is_vs])
+            # Moving the forces onto the atoms that define the sites keeps the total force
+            @test norm(sum(fs_out) - sum(fs_start)) < 1e-9u"kJ * mol^-1 * nm^-1"
+        else
+            @test maximum(norm.(coords_out .- coords_ref)) < 1e-12u"nm"
+            @test maximum(norm.(fs_out .- fs_ref)) < 1e-9u"kJ * mol^-1 * nm^-1"
+        end
+    end
+end
