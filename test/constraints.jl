@@ -1856,6 +1856,187 @@ end
     @test allocs == 0
 end
 
+# Randomly oriented rigid waters, some of which cross the boundary, and positions after an
+#   unconstrained step
+function settle_water_box(T, n_w; dOH=T(0.09572), angle=T(deg2rad(104.52)), box=T(1.2),
+                          step=T(0.005))
+    rng = Xoshiro(7)
+    boundary = CubicBoundary(box)
+    coords, masses_val = SVector{3, T}[], T[]
+    acs = AngleConstraint{T, Int}[]
+    for w in 1:n_w
+        O = SVector{3, T}(rand(rng, T, 3) .* box)
+        u = normalize(randn(rng, SVector{3, T}))
+        v = normalize(cross(u, randn(rng, SVector{3, T})))
+        h1 = O + dOH * u
+        h2 = O + dOH * (cos(angle) * u + sin(angle) * v)
+        push!(coords, wrap_coords(h1, boundary), O, wrap_coords(h2, boundary))
+        push!(masses_val, T(1.008), T(15.999), T(1.008))
+        push!(acs, AngleConstraint(3w - 2, 3w - 1, 3w, angle, dOH, dOH))
+    end
+    unconstrained = [wrap_coords(c + step * randn(rng, SVector{3, T}), boundary)
+                     for c in coords]
+    velocities = [randn(rng, SVector{3, T}) for _ in coords]
+    return boundary, coords, unconstrained, velocities, masses_val, acs
+end
+
+@testset "SETTLE" begin
+    function settle_system(ca, coords, velocities, masses_val, boundary, AT)
+        atoms = [Atom(mass=m, σ=zero(m), ϵ=zero(m)) for m in masses_val]
+        return System(atoms=to_device(atoms, AT), coords=to_device(copy(coords), AT),
+                      velocities=to_device(copy(velocities), AT), boundary=boundary,
+                      constraints=(ca,), force_units=NoUnits, energy_units=NoUnits)
+    end
+
+    n_w = 100
+    dt = 0.002
+    for T in (Float64, Float32)
+        boundary, old, unconstrained, vels, masses_val, acs = settle_water_box(T, n_w)
+        settle = SETTLE(masses=masses_val, angle_constraints=acs, dist_tolerance=T(1e-5),
+                        vel_tolerance=T(1e-4))
+        @test length(settle.clusters) == n_w
+        @test Molly.n_dof_lost(3, settle.clusters) == 3 * n_w
+        @test Molly.constrained_atom_inds(settle) == collect(1:(3 * n_w))
+        @test length(Molly.constrained_atom_pairs(settle)) == 3 * n_w
+
+        # Reference from SHAKE/RATTLE converged as far as the precision allows
+        shake = SHAKE_RATTLE(n_atoms=3 * n_w, angle_constraints=acs,
+                             dist_tolerance=T(T == Float64 ? 1e-13 : 1e-6),
+                             vel_tolerance=T(1e-4), max_iters=500)
+        sys_ref = settle_system(shake, unconstrained, vels, masses_val, boundary, Array)
+        buffers_ref = Molly.init_buffers!(sys_ref, 1)
+        Molly.clear_constraint_virial!(buffers_ref, sys_ref, 1)
+        Molly.apply_position_constraints!(sys_ref, sys_ref.constraints[1], old;
+                    context=shake_position_context(buffers_ref; virial_scale=inv(T(dt)^2)))
+        Molly.apply_velocity_constraints!(sys_ref)
+        virial_ref = copy(buffers_ref.constraint_virial_nounits)
+
+        coords_cpu, vels_cpu = nothing, nothing
+        for AT in array_list
+            sys = settle_system(settle, unconstrained, vels, masses_val, boundary, AT)
+            @test sys.constraints[1] isa SETTLE
+            buffers = Molly.init_buffers!(sys, 1)
+            Molly.clear_constraint_virial!(buffers, sys, 1)
+            Molly.apply_position_constraints!(sys, sys.constraints[1], to_device(old, AT);
+                        context=shake_position_context(buffers; virial_scale=inv(T(dt)^2)))
+            Molly.apply_velocity_constraints!(sys)
+            @test check_position_constraints(sys)
+            @test check_velocity_constraints(sys)
+
+            coords = from_device(sys.coords)
+            velocities = from_device(sys.velocities)
+            x_tol = (T == Float64 ? 1e-10 : 1e-5)
+            @test maximum(norm.(vector.(coords, sys_ref.coords, (boundary,)))) < x_tol
+            @test maximum(norm.(velocities .- sys_ref.velocities)) <
+                  (T == Float64 ? 1e-8 : 1e-3)
+            @test from_device(buffers.constraint_virial_nounits) ≈ virial_ref rtol=T(1e-3)
+
+            # Each molecule is corrected without changing its momentum, and the bond lengths
+            #   are satisfied to around machine precision
+            mom = maximum(norm(sum(masses_val[a] * vector(unconstrained[a], coords[a], boundary)
+                                   for a in 3w-2:3w)) for w in 1:n_w)
+            @test mom < 100 * eps(T)
+            dist_err = maximum(abs(norm(vector(coords[i], coords[j], boundary)) - d)
+                               for ac in acs for (i, j, d) in ((ac.i, ac.j, ac.dist_ij),
+                                    (ac.j, ac.k, ac.dist_jk), (ac.i, ac.k, ac.dist_ik)))
+            @test dist_err < 100 * eps(T)
+
+            if AT == Array
+                coords_cpu, vels_cpu = coords, velocities
+            else
+                @test maximum(norm.(vector.(coords, coords_cpu, (boundary,)))) < 10 * eps(T)
+                @test maximum(norm.(velocities .- vels_cpu)) < (T == Float64 ? 1e-10 : 1e-4)
+            end
+        end
+
+        # The result does not depend on the number of threads
+        results = map((1, 4)) do n_threads
+            sys = settle_system(settle, unconstrained, vels, masses_val, boundary, Array)
+            Molly.apply_position_constraints!(sys, old; n_threads=n_threads)
+            Molly.apply_velocity_constraints!(sys; n_threads=n_threads)
+            (sys.coords, sys.velocities)
+        end
+        @test results[1] == results[2]
+    end
+
+    # Errors
+    boundary, old, unconstrained, vels, masses_val, acs = settle_water_box(Float64, 3)
+    @test_throws ArgumentError SETTLE(masses=masses_val, angle_constraints=AngleConstraint[])
+    @test_throws ArgumentError SETTLE(masses=masses_val,
+            angle_constraints=[AngleConstraint(1, 2, 3, deg2rad(104.52), 0.09572, 0.1)])
+    @test_throws ArgumentError SETTLE(masses=[1.008, 15.999, 2.016],
+            angle_constraints=[AngleConstraint(1, 2, 3, deg2rad(104.52), 0.09572, 0.09572)])
+    @test_throws ArgumentError SETTLE(masses=masses_val,
+            angle_constraints=[acs[1], AngleConstraint(3, 4, 5, deg2rad(104.52), 0.09572, 0.09572)])
+
+    # A badly distorted molecule gives a warning rather than an error
+    settle = SETTLE(masses=masses_val, angle_constraints=acs)
+    sys = settle_system(settle, unconstrained, vels, masses_val, boundary, Array)
+    # Move a hydrogen far out of the old plane of the molecule
+    plane_normal = normalize(cross(vector(old[2], old[1], boundary), vector(old[2], old[3], boundary)))
+    sys.coords[1] = wrap_coords(old[1] + 0.3 * plane_normal, boundary)
+    coords_distorted = copy(sys.coords)
+    @test_logs (:warn, r"too distorted") Molly.apply_position_constraints!(sys, old)
+    @test iszero(sys.constraints[1].error_flag[1])
+    sys.coords .= coords_distorted
+    @test_throws ErrorException Molly.apply_position_constraints!(sys, old; strictness=:error)
+end
+
+@testset "SETTLE setup" begin
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
+    simulator = VelocityVerlet(dt=0.002u"ps")
+    for AT in array_list
+        systems = map((nothing, SetupSETTLE(constraint_algorithm=SetupSHAKE_RATTLE()),
+                       SetupSHAKE_RATTLE())) do constraint_algorithm
+            kwargs = isnothing(constraint_algorithm) ? (;) : (; constraint_algorithm)
+            System(
+                joinpath(data_dir, "6mrr_equil.pdb"),
+                ff;
+                array_type=AT,
+                nonbonded_method=DistanceCutoff(1.0u"nm"),
+                constraints=:hbonds,
+                rigid_water=true,
+                kwargs...,
+            )
+        end
+        sys_default, sys_settle_shake, sys_shake = systems
+        # SETTLE is used for rigid water by default
+        @test sys_default.constraints[1] isa SETTLE
+        @test sys_default.constraints[2] isa LINCS
+        @test sys_settle_shake.constraints[1] isa SETTLE
+        @test sys_settle_shake.constraints[2] isa SHAKE_RATTLE
+        @test length(sys_default.constraints[1].clusters) ==
+              length(sys_shake.constraints[1].angle_clusters)
+        @test isempty(sys_settle_shake.constraints[2].angle_clusters)
+        @test sys_default.df == sys_shake.df == sys_settle_shake.df
+
+        for sys in (sys_default, sys_settle_shake)
+            random_velocities!(sys, 300.0u"K")
+            simulate!(sys, simulator, 20)
+            @test check_constraints(sys, sys.constraints[1])
+        end
+        # LINCS with the default settings does not reach the tolerance of the check
+        @test check_constraints(sys_settle_shake)
+
+        if AT == Array
+            sys_32 = System(sys_default; float_type=Float32)
+            @test sys_32.constraints[1] isa SETTLE
+            @test eltype(sys_32.constraints[1].clusters.dist12) == typeof(1.0f0u"nm")
+            simulate!(sys_32, VelocityVerlet(dt=0.002f0u"ps"), 10)
+            @test check_position_constraints(sys_32, sys_32.constraints[1])
+        end
+    end
+
+    # Molecules that SETTLE can not solve are given to the other algorithm
+    masses_val = [1.008, 15.999, 12.011]
+    acs = [AngleConstraint(1, 2, 3, deg2rad(108.0), 0.0945, 0.1410)]
+    algos = Molly.build_constraint_algorithms(Float64, [], acs, nothing, true, :warn,
+                                              masses_val, SetupSETTLE())
+    @test length(algos) == 1
+    @test only(algos) isa LINCS
+    @test_throws ArgumentError SetupSETTLE(constraint_algorithm=SetupSETTLE())
+end
+
 @testset "Minimization with constraints" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     pe_cpu_nocons, pe_cpu_cons = 0.0u"kJ/mol", 0.0u"kJ/mol"

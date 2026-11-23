@@ -490,7 +490,8 @@
     end
 
     # Constraints
-    for (algo_name, algo) in ("SHAKE" => SetupSHAKE_RATTLE(), "LINCS" => SetupLINCS())
+    for (algo_name, algo) in ("SHAKE" => SetupSHAKE_RATTLE(), "LINCS" => SetupLINCS(),
+                             "SETTLE" => SetupSETTLE())
         sys = jet_protein(; constraints=:hbonds, rigid_water=true, constraint_algorithm=algo)
         coord_storage = copy(sys.coords)
         vel_storage = copy(sys.velocities)

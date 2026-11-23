@@ -421,7 +421,9 @@ This can can be an instance of [`SetupCoulombReactionField`](@ref) (reaction fie
 Setting `exclusion_correction=true` also applies the reaction field to the excluded and special pairs and to each atom with itself, using the [`CoulombReactionFieldExclusion`](@ref) specific interaction.
 For a system set up without files, [`Molly.reaction_field_exclusions`](@ref) gives this list of interactions.
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
-[`SHAKE_RATTLE`](@ref) (`constraint_algorithm=SetupSHAKE_RATTLE()`) only supports clusters of constraints around a central atom, such as `:hbonds` and rigid water, so use the default [`SetupLINCS`](@ref) with `:allbonds`.
+By default (`constraint_algorithm=SetupSETTLE()`), rigid water is constrained with [`SETTLE`](@ref) and the other constraints with [`LINCS`](@ref), as in GROMACS and OpenMM.
+The algorithm for the other constraints can be changed with for example `SetupSETTLE(constraint_algorithm=SetupSHAKE_RATTLE())`, and giving [`SetupLINCS`](@ref) or [`SetupSHAKE_RATTLE`](@ref) directly uses that algorithm for every constraint including rigid water.
+[`SHAKE_RATTLE`](@ref) only supports clusters of constraints around a central atom, such as `:hbonds` and rigid water, so use LINCS with `:allbonds`.
 Neither algorithm supports angle constraints that share atoms with other constraints, so `:hangles` currently fails for proteins and most small molecules.
 Note that `rigid_water` defaults to `false`, whereas OpenMM makes water rigid by default, so set `rigid_water=true` to reproduce OpenMM behavior.
 Hydrogen mass repartitioning can be used by setting for example `hydrogen_mass=2`, and is applied before constraints are generated.
@@ -1972,7 +1974,7 @@ The oscillatory behavior is due to the harmonic bond interactions.
 
 ## Constraints
 
-Molly implements SHAKE/RATTLE (see [`SHAKE_RATTLE`](@ref)) and LINCS (see [`LINCS`](@ref)) to perform constrained molecular dynamics.
+Molly implements SHAKE/RATTLE (see [`SHAKE_RATTLE`](@ref)), LINCS (see [`LINCS`](@ref)) and SETTLE (see [`SETTLE`](@ref)) to perform constrained molecular dynamics.
 These methods are useful for maintaining bond lengths and angles during a simulation, often allowing the use of longer time steps and therefore more efficient use of computing resources.
 
 ### SHAKE/RATTLE
@@ -1997,11 +1999,18 @@ SHAKE was originally derived for the Verlet integration scheme ([Ryckaert et al.
 LINCS (LINear Constraint Solver) is a non-iterative constraint algorithm that uses matrix expansion to approximate the inverse of the constraint coupling matrix ([Hess et al. 1997](https://doi.org/10.1002/(SICI)1096-987X(199709)18:12<1463::AID-JCC4>3.0.CO;2-H)).
 It is typically faster than SHAKE/RATTLE for large systems.
 The implementation in Molly includes explicit velocity constraints.
-The key parameters controlling accuracy are `n_rec`, the order of the matrix expansion for coupling matrix inversion (default 4), and `n_iter`, the number of outer correction iterations for rotational lengthening (default 1).
+The key parameters controlling accuracy are `n_rec`, the order of the matrix expansion for coupling matrix inversion (default 8), and `n_iter`, the number of outer correction iterations for rotational lengthening (default 4).
 Higher values of either improve accuracy at the cost of performance.
 
 !!! note
     LINCS requires that angle constraints are isolated: none of their atoms may participate in distance constraints or in other angle constraints. This is because internally angle constraints are treated as a triangle of distance constraints, so interactions with other constraints may violate the constrained angle.
+
+### SETTLE
+
+SETTLE solves the position and velocity constraints of rigid three-site molecules, such as rigid water, analytically ([Miyamoto and Kollman 1992](https://doi.org/10.1002/jcc.540130805)).
+The constraints are satisfied to machine precision, without iteration or a tolerance, and each molecule is independent, so it is fast on both CPU and GPU.
+It requires the two distances to the central atom to be equal, the masses of the two other atoms to be equal, and the molecules not to share atoms with other constraints.
+Constraints of other molecules are handled by a second constraint algorithm in the `constraints` tuple of the [`System`](@ref).
 
 Currently, constraints are supported by the following simulators:
 - [`VelocityVerlet`](@ref)
@@ -2053,11 +2062,19 @@ lincs = LINCS(
     dist_constraints=dist_constraints,
     angle_constraints=angle_constraints,
 )
-# LINCS with 2 distance and 1 angle constraints (n_rec=4, n_iter=1) (implicitly 5 distance constraints)
+# LINCS with 2 distance and 1 angle constraints (n_rec=8, n_iter=4, iter_vel_correction=false) (implicitly 5 distance constraints)
 ```
 `constraints=(lincs,)` can then be given when setting up a [`System`](@ref).
 
-The [`DistanceConstraint`](@ref)s, [`AngleConstraint`](@ref)s and masses given to [`SHAKE_RATTLE`](@ref) and [`LINCS`](@ref) should always be on the CPU, even for a GPU system.
+Rigid water can be constrained with SETTLE, and the remaining constraints with another algorithm:
+```julia
+settle = SETTLE(masses=masses, angle_constraints=angle_constraints)
+# SETTLE with 1 rigid molecules
+shake = SHAKE_RATTLE(n_atoms=6, dist_constraints=dist_constraints)
+```
+`constraints=(settle, shake)` can then be given when setting up a [`System`](@ref).
+
+The [`DistanceConstraint`](@ref)s, [`AngleConstraint`](@ref)s and masses given to [`SHAKE_RATTLE`](@ref), [`LINCS`](@ref) and [`SETTLE`](@ref) should always be on the CPU, even for a GPU system.
 The [`System`](@ref) constructor moves the constraint data to the device of the system, so no manual transfer is required.
 
 See [this example](@ref "Constrained dynamics") for more.

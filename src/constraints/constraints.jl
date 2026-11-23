@@ -274,6 +274,13 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     end
 end
 
+# The constraint algorithms set up from files, as a tuple since some setups give more than one
+function build_constraint_algorithms(T, dist_constraints, angle_constraints, atoms_data,
+                                     units, strictness, masses, ca)
+    return (build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
+                                       units, strictness, masses, ca),)
+end
+
 # Extended for GPU elsewhere
 move_constraints_to_device(constraint_algo, ::Type) = constraint_algo
 
