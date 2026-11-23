@@ -154,6 +154,18 @@ function constraint_lists(ca::LINCS)
     return dist_constraints, angle_constraints
 end
 
+constraint_lists(ca::SETTLE) = (DistanceConstraint[], settle_angle_constraints(ca))
+
+function rebuild_constraints(ca::SETTLE, dist_constraints, angle_constraints, masses)
+    if !isnothing(dist_constraints) && length(dist_constraints) > 0
+        throw(ArgumentError("SETTLE can only hold rigid three-site molecules, but merging the " *
+                            "systems gives distance constraints for it"))
+    end
+    return SETTLE(masses=masses, angle_constraints=angle_constraints,
+                  dist_tolerance=ca.dist_tolerance, vel_tolerance=ca.vel_tolerance,
+                  gpu_block_size=ca.gpu_block_size)
+end
+
 function rebuild_constraints(ca::SHAKE_RATTLE, dist_constraints, angle_constraints, masses)
     return SHAKE_RATTLE(n_atoms=length(masses), dist_tolerance=ca.dist_tolerance,
                         vel_tolerance=ca.vel_tolerance, dist_constraints=dist_constraints,
@@ -1058,37 +1070,37 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
                         acos((c.dist_ij^2 + c.dist_jk^2 - c.dist_ik^2) / (2 * c.dist_ij * c.dist_jk)),
                         c.dist_ij, c.dist_jk)
     angle_pairs(c) = (Set([c.i, c.j]), Set([c.j, c.k]), Set([c.i, c.k]))
-    for ca in sysA.constraints
+    # The algorithms are paired by position, so that each one only gets the constraints of
+    #   system B that the same algorithm holds, e.g. SETTLE only gets rigid molecules
+    for (ca, caB) in zip(sysA.constraints, sysB.constraints)
         dist_cs, angle_cs = constraint_lists(ca)
         dist_cs = [DistanceConstraint(map_A(c.i), map_A(c.j), c.dist) for c in dist_cs]
         angle_cs = [remap_angle_constraint(c, map_A) for c in angle_cs]
         constrained = Set(Set([c.i, c.j]) for c in dist_cs)
         foreach(c -> push!(constrained, angle_pairs(c)...), angle_cs)
-        for caB in sysB.constraints
-            dist_csB, angle_csB = constraint_lists(caB)
-            for c in dist_csB
-                i, j = map_B_real(c.i), map_B_real(c.j)
-                if !(Set([i, j]) in constrained)
-                    push!(dist_cs, DistanceConstraint(i, j, c.dist))
-                    push!(constrained, Set([i, j]))
-                end
+        dist_csB, angle_csB = constraint_lists(caB)
+        for c in dist_csB
+            i, j = map_B_real(c.i), map_B_real(c.j)
+            if !(Set([i, j]) in constrained)
+                push!(dist_cs, DistanceConstraint(i, j, c.dist))
+                push!(constrained, Set([i, j]))
             end
-            # An angle constraint of system B stays one when none of its three pairs is
-            #   constrained already, which is what LINCS needs. A pair of a core atom that is
-            #   constrained in system A makes the triangle coupled, so there it falls back to three
-            #   distance constraints, as GROMACS represents `h-angles` and as LINCS does internally.
-            for c in angle_csB
-                cB = remap_angle_constraint(c, map_B_real)
-                if !any(p in constrained for p in angle_pairs(cB))
-                    push!(angle_cs, cB)
-                    foreach(p -> push!(constrained, p), angle_pairs(cB))
-                    continue
-                end
-                for dc in to_distance_constraints(cB)
-                    if !(Set([dc.i, dc.j]) in constrained)
-                        push!(dist_cs, dc)
-                        push!(constrained, Set([dc.i, dc.j]))
-                    end
+        end
+        # An angle constraint of system B stays one when none of its three pairs is
+        #   constrained already, which is what LINCS needs. A pair of a core atom that is
+        #   constrained in system A makes the triangle coupled, so there it falls back to three
+        #   distance constraints, as GROMACS represents `h-angles` and as LINCS does internally.
+        for c in angle_csB
+            cB = remap_angle_constraint(c, map_B_real)
+            if !any(p in constrained for p in angle_pairs(cB))
+                push!(angle_cs, cB)
+                foreach(p -> push!(constrained, p), angle_pairs(cB))
+                continue
+            end
+            for dc in to_distance_constraints(cB)
+                if !(Set([dc.i, dc.j]) in constrained)
+                    push!(dist_cs, dc)
+                    push!(constrained, Set([dc.i, dc.j]))
                 end
             end
         end
