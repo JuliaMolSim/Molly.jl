@@ -81,7 +81,9 @@ function convert_struct(c::SystemConversion, x::X) where X
     if !isstructtype(X) || n == 0
         return x
     end
-    fields = ntuple(i -> convert_component(c, getfield(x, i)), Val(n))
+    keep = unconverted_fields(X)
+    fields = ntuple(i -> fieldname(X, i) in keep ? getfield(x, i) :
+                         convert_component(c, getfield(x, i)), Val(n))
     if all(i -> fields[i] === getfield(x, i), 1:n)
         return x
     end
@@ -114,6 +116,10 @@ end
 function replace_fields(x::X, new_fields::NamedTuple) where X
     return X.name.wrapper((get(new_fields, f, getfield(x, f)) for f in fieldnames(X))...)
 end
+
+# The fields of a struct whose type does not follow the float type of the system, such as a
+# particle count kept in Float64: the default constructor requires that field's own type
+unconverted_fields(::Type) = ()
 
 function convert_component(c::SystemConversion, at::Atom)
     return Atom(at.index, at.atom_type, convert_component(c, at.mass),

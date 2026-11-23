@@ -93,7 +93,6 @@ function PMFDeconvolution(state::TSSState{T};
 end
 
 function collect_tss_pmf_deconvolution_sample(::Nothing,
-                                               state,
                                                estimator,
                                                active_state;
                                                window_offset = 0)
@@ -140,20 +139,6 @@ function collect_tss_pmf_deconvolution_sample(
         window_offset = window_offset,
     )
     return PMFDeconvolutionSample(value, log_bin_weights, zero(T))
-end
-
-function collect_tss_pmf_deconvolution_sample(
-    deconv::PMFDeconvolution{<:TSSPMFDeconvolutionBackend},
-    state::TSSState,
-    estimator::TSSLocalEstimator,
-    active_state;
-    window_offset = 0)
-    return collect_tss_pmf_deconvolution_sample(
-        deconv,
-        estimator,
-        active_state;
-        window_offset = window_offset,
-    )
 end
 
 function tss_pmf_uses_epoch_history(estimator::TSSLocalEstimator)

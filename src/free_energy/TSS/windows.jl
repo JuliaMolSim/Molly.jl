@@ -131,6 +131,7 @@ mutable struct WindowedTSSStats{T}
     replica_visited_states::Vector{Vector{Int}}
     replica_sampled_next_states::Vector{Vector{Int}}
     replica_max_abs_delta_f::Vector{Vector{T}}
+    worker_occupancy::Vector{Vector{Int}} # Replicas per worker per cycle, multi-GPU runs only
 end
 
 function Base.show(io::IO, stats::WindowedTSSStats)
@@ -161,6 +162,7 @@ function WindowedTSSStats(::Type{FT}) where {FT}
         Vector{Int}[],
         Vector{Int}[],
         Vector{FT}[],
+        Vector{Int}[],
     )
 end
 
@@ -199,7 +201,7 @@ Base.show(io::IO, ::MIME"text/plain", coupling::WindowedTSSCoupling) = show(io, 
 """
     TSSState(thermo_states; graph=nothing, first_state=1, first_window=nothing,
              gamma=nothing, initial_f=nothing, ETA=2.0, dens_reg=1e-6,
-             reuse_neighbors=true, history_forgetting=nothing,
+             reuse_neighbors=true, build_λ_systems=true, history_forgetting=nothing,
              adaptive_gamma=nothing, global_visit_control=true,
              visit_control_tolerance=1e-8,
              visit_control_max_iterations=1000,
@@ -215,6 +217,14 @@ The state owns the active thermodynamic state, local window estimators,
 visit-control coupling state, and diagnostic histories.
 Loggers are attached by [`TSSSimulation`](@ref), not by `TSSState`.
 History-dependent general interactions such as [`Metadynamics`](@ref) are not supported.
+
+- `reuse_neighbors::Bool=true`: Whether the λ systems share an explicit neighbor list when
+    evaluating state energies. Generally improves performance. The master system is a single
+    system with a nearly dense eligible matrix, so it has no list to share and always keeps
+    the neighbor finder of its device.
+- `build_λ_systems::Bool=true`: Whether to build the λ systems of the partition here. They
+    hold most of the memory of a TSS run, so a host that evaluates no energy itself, as in a
+    multi-GPU run, can pass `false` and leave them to the worker processes.
 """
 mutable struct TSSState{T, ES, AS, G, W, E}
     state_space::ES # Shared ExtendedStateSpace among windows
@@ -789,6 +799,7 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           ETA::Real = 2.0,
                           dens_reg::Real = 1e-6,
                           reuse_neighbors::Bool = true,
+                          build_λ_systems::Bool = true,
                           history_forgetting = nothing,
                           adaptive_gamma = nothing,
                           global_visit_control::Bool = true,
@@ -798,7 +809,8 @@ function TSSState(thermo_states::AbstractVector{<:ThermoState};
                           pi_regularization::Real = 1e-3)
 
     check_thermo_states_history_inters(thermo_states, "TSS")
-    state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors)
+    state_space = ExtendedStateSpace(thermo_states; reuse_neighbors = reuse_neighbors,
+                                     build_λ_systems = build_λ_systems)
     K = n_states(state_space)
     explicit_graph = !isnothing(graph)
     if isnothing(graph)

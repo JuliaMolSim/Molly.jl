@@ -1890,7 +1890,9 @@ be used per replica.
 - `initial_step::Int=0`: Absolute MD step for a new or resumed replica simulation.
 - `data::DA=nothing`: Arbitrary data associated with the replica system.
 - `reuse_neighbors::Bool=true`: Whether to reuse the active system's neighbor list when calculating
-    energies for perturbed state differences. Generally improves performance.
+    energies for perturbed state differences. Generally improves performance. It applies to the λ
+    systems, which share one eligible matrix; the master system has a nearly dense eligible matrix
+    and nothing to share, so it always keeps the neighbor finder of its device.
 """
 mutable struct ReplicaSystem{D, AT, T, TH, P, B, I, C, V, BO, NF, RL, SPI, SSI, SGI, EL, DA} <: AtomsBase.AbstractSystem{D}
     partition::P

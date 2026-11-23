@@ -617,6 +617,9 @@ mutable struct DExpDispersionCorrectionλ{F, EC, C, T, L, S, E, SCH, P}
     n_eff::Float64
 end
 
+# As for `LJDispersionCorrectionλ`, `n_eff` is kept in Float64
+unconverted_fields(::Type{<:DExpDispersionCorrectionλ}) = (:n_eff,)
+
 # α and β share their keys with the pairwise interaction, so they are injected with it
 parameter_prefix(::Union{DExpDispersionCorrection, DExpDispersionCorrectionλ}) = "inter_DEXP_"
 parameter_fields(::Type{<:Union{DExpDispersionCorrection, DExpDispersionCorrectionλ}}) =
