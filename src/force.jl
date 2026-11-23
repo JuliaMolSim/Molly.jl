@@ -1604,8 +1604,9 @@ function gpu_forces_concurrent!(fs,
     # Giving the specific and general interactions a queue each was slower, as the pairwise
     #   force kernel then shares the device with more work at once
     side = side_work_start(get_backend(sys.coords))
+    # The unwrap plan may have been last used on the main stream, e.g. by the barostat
     shared = (sys.coords, sys.velocities, sys.atoms, buffers.fs_mat, buffers.virial_slots,
-              fs)
+              fs, unwrap_plan_arrays(sys.topology)...)
     with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
         # The kernels using the neighbor list are launched first as they take the longest
         if length(pis_nl) > 0

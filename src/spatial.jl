@@ -1421,6 +1421,17 @@ function molecule_unwrap_plan(topology::MolecularTopology,
     return plan
 end
 
+# The device arrays of the unwrap plan cached in `topology`, none if there is no plan
+function unwrap_plan_arrays(topology)
+    plan = (isnothing(topology) ? nothing : topology.unwrap_cache[])
+    if !(plan isa MoleculeUnwrapPlan)
+        return ()
+    end
+    return (plan.parents, plan.atom_molecule_inds, plan.molecule_atom_counts, plan.frac,
+            plan.shifts_1, plan.shifts_2, plan.ancestors_1, plan.ancestors_2,
+            plan.center_sums)
+end
+
 @inline wrap_frac01(v) = v .- floor.(v)
 
 # The box matrix without units, in the length unit of the coordinates
