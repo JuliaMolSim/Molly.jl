@@ -1421,9 +1421,12 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     return constraints, bonds, angles
 end
 
-function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, virtual_sites,
                                    hydrogen_mass, units, T)
     atoms_cpu = from_device(atoms)
+    # Virtual sites have no element and zero mass, so is_heavy_atom does not count them as heavy,
+    #   but they are not hydrogens and keep their zero mass
+    vs_inds = Set(vs.atom_ind for vs in from_device(virtual_sites))
     modified_masses = mass.(atoms_cpu)
     if units
         if dimension(hydrogen_mass) == NoDims
@@ -1440,7 +1443,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
     end
 
     for i in eachindex(atoms_cpu)
-        if !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+        if !(i in vs_inds) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
             mass_change = new_h_mass - modified_masses[i]
             modified_masses[i] = new_h_mass
 
@@ -1514,7 +1517,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
 
     if hydrogen_mass != false # false, number or unitful mass
         atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds_all.is, bonds_all.js,
-                                          hydrogen_mass, units, T)
+                                          virtual_sites, hydrogen_mass, units, T)
     end
 
     masses = mass.(from_device(atoms))
