@@ -741,6 +741,25 @@ end
     @test_throws Molly.ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
 end
 
+@testset "Hydrogen mass repartitioning with virtual sites" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+    sys_ref = System(joinpath(data_dir, "tip4pew.pdb"), ff;
+                     nonbonded_method=SetupCoulombReactionField())
+    sys_hmr = System(joinpath(data_dir, "tip4pew.pdb"), ff;
+                     nonbonded_method=SetupCoulombReactionField(), hydrogen_mass=3)
+    masses_ref, masses_hmr = mass.(sys_ref.atoms), mass.(sys_hmr.atoms)
+    vs_inds = [vs.atom_ind for vs in sys_hmr.virtual_sites]
+    h_inds = findall(ad -> ad.element == "H", sys_hmr.atoms_data)
+    o_inds = findall(ad -> ad.element == "O", sys_hmr.atoms_data)
+
+    @test length(vs_inds) == length(o_inds) > 0
+    @test all(iszero, masses_hmr[vs_inds])
+    @test all(m -> m ≈ 3.0u"g/mol", masses_hmr[h_inds])
+    @test all(masses_hmr[o_inds] .≈ masses_ref[o_inds] .- 2 .* (3.0u"g/mol" .- masses_ref[h_inds[1]]))
+    @test sum(masses_hmr) ≈ sum(masses_ref)
+    @test potential_energy(sys_hmr) ≈ potential_energy(sys_ref)
+end
+
 @testset "Double exponential force field setup" begin
     ff = MolecularForceField(
         joinpath(ff_dir, "ethanol_garnet.xml");
