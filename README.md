@@ -50,7 +50,6 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Optimal GPU performance - currently we are ~5x slower than OpenMM on CUDA GPUs.
 - Protein preparation - solvent box, add hydrogens etc.
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.
