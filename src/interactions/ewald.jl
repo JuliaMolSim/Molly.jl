@@ -878,8 +878,10 @@ end
 
 @inline function spread_charge_inner!(charge_grid, grid_indices, bsplines_θ,
                               mesh_dims, order, atoms, scheduler, i, ::Val{T},
-                              ::Val{atomic}) where {T, atomic}
+                              ::Val{atomic}, skip_zero::Bool=false) where {T, atomic}
     q = effective_charge(scheduler, atoms[i], Val(T))
+    # Uncharged atoms, such as the oxygen of 4-site water models, add nothing to the grid
+    skip_zero && iszero(q) && return charge_grid
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
     @inbounds for ix in 0:(order-1)
@@ -907,6 +909,9 @@ end
 @inline function spread_charge_slice!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order,
                                       atoms, scheduler, i, iz, ::Val{T}) where T
     q = effective_charge(scheduler, atoms[i], Val(T))
+    # Uncharged atoms, such as the oxygen of 4-site water models, add nothing to the grid; the
+    #   reverse rule of the Enzyme extension does not differentiate this function
+    iszero(q) && return charge_grid
     nx, ny, nz = mesh_dims[1], mesh_dims[2], mesh_dims[3]
     @inbounds begin
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
@@ -925,13 +930,19 @@ end
     return charge_grid
 end
 
+#=
+With `skip_zero` uncharged atoms are skipped, which is only done when the calculation does
+not have to be differentiable with Enzyme, since the gradient with respect to a charge of
+zero is not zero.
+=#
 function spread_charge!(charge_grid::Array{T, 3}, buffer, grid_indices, bsplines_θ,
-                        mesh_dims, order, atoms, scheduler, n_threads) where T
+                        mesh_dims, order, atoms, scheduler, n_threads,
+                        skip_zero::Bool=false) where T
     if n_threads == 1
         charge_grid .= zero(T)
         for i in eachindex(atoms)
             spread_charge_inner!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
-                                 order, atoms, scheduler, i, Val(T), Val(false))
+                                 order, atoms, scheduler, i, Val(T), Val(false), skip_zero)
         end
         return charge_grid
     end
@@ -939,7 +950,8 @@ function spread_charge!(charge_grid::Array{T, 3}, buffer, grid_indices, bsplines
         buffer[chunk_i] .= zero(T)
         for i in chunk_i:n_threads:length(atoms)
             spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
-                                 mesh_dims, order, atoms, scheduler, i, Val(T), Val(false))
+                                 mesh_dims, order, atoms, scheduler, i, Val(T), Val(false),
+                                 skip_zero)
         end
     end
     return reduce_charge_grids!(charge_grid, buffer, Val(n_threads))
@@ -964,7 +976,8 @@ function reduce_charge_grids!(charge_grid::Array{T, 3}, buffer,
 end
 
 function spread_charge!(charge_grid::AbstractArray{T, 3}, buffer, grid_indices,
-                        bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads) where T
+                        bsplines_θ, mesh_dims, order, atoms, scheduler, n_threads,
+                        skip_zero::Bool=false) where T
     # Allow Enzyme rule
     spread_charge_gpu!(charge_grid, grid_indices, bsplines_θ, mesh_dims, order, atoms,
                        scheduler, Val(T))
@@ -1274,11 +1287,13 @@ end
 
 @inline function interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            scheduler, ::Val{T}, i) where T
+                            scheduler, ::Val{T}, i, skip_zero::Bool=false) where T
     nx, ny, nz = mesh_dims
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
         q = effective_charge(scheduler, atoms[i], Val(T))
+        # Uncharged atoms have no reciprocal space force
+        skip_zero && iszero(q) && return Fs
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
         for ix in 0:(order-1)
             xbase = wrap_grid_index(x0index + ix, nx) * ny * nz
@@ -1311,12 +1326,12 @@ end
 
 function interpolate_force!(Fs, charge_grid::Array{T, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            scheduler, n_threads) where T
+                            scheduler, n_threads, skip_zero::Bool=false) where T
     @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
         for i in chunk_i:n_threads:length(atoms)
             interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
                         bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                        scheduler, Val(T), i)
+                        scheduler, Val(T), i, skip_zero)
         end
     end
     return Fs
@@ -1333,6 +1348,9 @@ end
     fx, fy, fz = zero(T), zero(T), zero(T)
     @inbounds begin
         q = effective_charge(scheduler, atoms[i], Val(T))
+        # Uncharged atoms have no reciprocal space force; the reverse rule of the Enzyme
+        #   extension does not differentiate this function
+        iszero(q) && return Fs_flat
         x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
         zindex = wrap_grid_index(z0index + iz, nz)
         tz, dtz = bsplines_θ[2*order+iz+1, i], bsplines_dθ[2*order+iz+1, i]
@@ -1363,7 +1381,7 @@ end
 
 function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                            scheduler, n_threads) where T
+                            scheduler, n_threads, skip_zero::Bool=false) where T
     backend = get_backend(Fs)
     n_threads_gpu = 128
     force_units = unit(zero(eltype(eltype(Fs))))
@@ -1433,7 +1451,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
         update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order, n_thr)
         spread_charge!(inter.charge_grid, inter.charge_grid_buffer, grid_indices,
                        bsplines_θ, mesh_dims, order, atoms, inter.scheduler,
-                       n_spread_threads(n_thr))
+                       n_spread_threads(n_thr), !inter.grad_safe)
     end
     grad_safe_fft!(inter.charge_grid, inter.recip_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.recip_grid,
@@ -1445,7 +1463,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
         grad_safe_bfft!(inter.charge_grid, inter.recip_grid, inter.bfft_plan)
         interpolate_force!(Fs, inter.charge_grid, grid_indices, bsplines_θ,
                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                           inter.scheduler, n_thr)
+                           inter.scheduler, n_thr, !inter.grad_safe)
     end
 
     if needs_pe || needs_vir
