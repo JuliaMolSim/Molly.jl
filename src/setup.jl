@@ -1358,7 +1358,7 @@ function check_constraint_topology(dist_constraints, angle_constraints, constrai
                 throw(ArgumentError("constraints=:$constraints_type gives a chain of " *
                     "constraints through atoms $(dc.i) and $(dc.j), but SHAKE_RATTLE only " *
                     "supports clusters of constraints around a central atom, such as with " *
-                    "constraints=:hbonds, so use constraint_algorithm=SetupLINCS() instead"))
+                    "constraints=:hbonds, so use constraint_algorithm=SetupSETTLE() instead"))
             end
         end
     end

@@ -2009,7 +2009,7 @@ Higher values of either improve accuracy at the cost of performance.
 
 SETTLE solves the position and velocity constraints of rigid three-site molecules, such as rigid water, analytically ([Miyamoto and Kollman 1992](https://doi.org/10.1002/jcc.540130805)).
 The constraints are satisfied to machine precision, without iteration or a tolerance, and each molecule is independent, so it is fast on both CPU and GPU.
-It requires the two distances to the central atom to be equal, the masses of the two other atoms to be equal, and the molecules not to share atoms with other constraints.
+It requires the two distances to the central atom to be equal, the masses of the two other atoms to be equal, the angle to be at most 150°, and the molecules not to share atoms with other constraints.
 Constraints of other molecules are handled by a second constraint algorithm in the `constraints` tuple of the [`System`](@ref).
 
 Currently, constraints are supported by the following simulators:

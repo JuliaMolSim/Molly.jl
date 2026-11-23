@@ -884,7 +884,6 @@ sysb_solv = System(
         dist_buffer=FT(0.2) * u"nm",
         nonbonded_method=SetupPME(),
         constraints=:hbonds,
-        constraint_algorithm=SetupLINCS(),
         rigid_water=true,
         hydrogen_mass=3
     )
@@ -900,7 +899,6 @@ sysb_vac = System(
         neighbor_finder_type=DistanceNeighborFinder,
         nonbonded_method=DistanceCutoff(FT(Inf) * u"nm"),
         constraints=:hbonds,
-        constraint_algorithm=SetupLINCS(),
         rigid_water=true,
         hydrogen_mass=3
     )
@@ -1336,7 +1334,6 @@ function setup_alchemical_awh(pdb_file, solute_indices; is_vacuum = false,
         neighbor_finder_type = neighbor_finder_type,
         nonbonded_method = nonbonded_method,
         constraints = :hbonds,
-        constraint_algorithm = SetupLINCS(),
         rigid_water = true,
         hydrogen_mass = 3,
     )
@@ -1882,7 +1879,6 @@ function setup_alchemical_tss(pdb_file, solute_indices; is_vacuum = false,
         neighbor_finder_type = neighbor_finder_type,
         nonbonded_method = nonbonded_method,
         constraints = :hbonds,
-        constraint_algorithm = SetupLINCS(),
         rigid_water = true,
         hydrogen_mass = 3,
     )
@@ -2288,7 +2284,6 @@ function setup_alchemical_hremd(pdb_file, solute_indices, traj_prefix; is_vacuum
         neighbor_finder_type = neighbor_finder_type,
         nonbonded_method = nonbonded_method,
         constraints = :hbonds,
-        constraint_algorithm = SetupLINCS(),
         rigid_water = true,
         hydrogen_mass = 3,
     )

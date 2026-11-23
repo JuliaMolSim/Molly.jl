@@ -1968,8 +1968,10 @@ end
             angle_constraints=[AngleConstraint(1, 2, 3, deg2rad(104.52), 0.09572, 0.09572)])
     @test_throws ArgumentError SETTLE(masses=masses_val,
             angle_constraints=[acs[1], AngleConstraint(3, 4, 5, deg2rad(104.52), 0.09572, 0.09572)])
+    @test_throws ArgumentError SETTLE(masses=masses_val,
+            angle_constraints=[AngleConstraint(1, 2, 3, deg2rad(160.0), 0.09572, 0.09572)])
 
-    # A badly distorted molecule gives a warning rather than an error
+    # A badly distorted molecule gives a warning and is left at its unconstrained positions
     settle = SETTLE(masses=masses_val, angle_constraints=acs)
     sys = settle_system(settle, unconstrained, vels, masses_val, boundary, Array)
     # Move a hydrogen far out of the old plane of the molecule
@@ -1977,6 +1979,7 @@ end
     sys.coords[1] = wrap_coords(old[1] + 0.3 * plane_normal, boundary)
     coords_distorted = copy(sys.coords)
     @test_logs (:warn, r"too distorted") Molly.apply_position_constraints!(sys, old)
+    @test sys.coords[1:3] == coords_distorted[1:3]
     @test iszero(sys.constraints[1].error_flag[1])
     sys.coords .= coords_distorted
     @test_throws ErrorException Molly.apply_position_constraints!(sys, old; strictness=:error)
@@ -2033,6 +2036,11 @@ end
     algos = Molly.build_constraint_algorithms(Float64, [], acs, nothing, true, :warn,
                                               masses_val, SetupSETTLE())
     @test length(algos) == 1
+    @test only(algos) isa LINCS
+    # Near-linear triangles too, with a warning
+    acs = [AngleConstraint(1, 2, 3, deg2rad(160.0), 0.09572, 0.09572)]
+    algos = @test_logs (:warn, r"near-linear") Molly.build_constraint_algorithms(
+            Float64, [], acs, nothing, true, :warn, [1.008, 15.999, 1.008], SetupSETTLE())
     @test only(algos) isa LINCS
     @test_throws ArgumentError SetupSETTLE(constraint_algorithm=SetupSETTLE())
 end

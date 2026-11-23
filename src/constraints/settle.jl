@@ -16,8 +16,11 @@ center of mass explicitly to reduce energy drift.
 
 Each [`AngleConstraint`](@ref) is one molecule, with the central atom `j` (oxygen for water)
 and two equivalent atoms `i` and `k` (hydrogens for water).
-A molecule that is too distorted to be settled gives a warning, or an error with
-`strictness=:error`.
+The angle of each constraint must be at most 150°: in flatter triangles a normal time step
+can move the atoms out of plane by more than the height of the triangle, which SETTLE can
+not solve.
+A molecule that is too distorted to be settled is left at its unconstrained positions and
+gives a warning, or an error with `strictness=:error`.
 Other constraints in the same system should be given to a separate constraint algorithm,
 such as [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), in the `constraints` tuple of the
 [`System`](@ref).
@@ -41,10 +44,18 @@ struct SETTLE{C, D, V, F}
     error_flag::F # Set when a molecule is too distorted to be settled
 end
 
+# Largest angle in degrees of a triangle given to SETTLE, see the SETTLE docstring
+const settle_max_angle = 150
+
+settle_angle(ac::AngleConstraint) = acosd(clamp(
+    (ac.dist_ij^2 + ac.dist_jk^2 - ac.dist_ik^2) / (2 * ac.dist_ij * ac.dist_jk), -1, 1))
+
+settle_near_linear(ac::AngleConstraint) = settle_angle(ac) > settle_max_angle
+
 # Whether an angle constraint is a rigid triangle that SETTLE can solve
 function settle_compatible(ac::AngleConstraint, masses)
     return isapprox(ac.dist_ij, ac.dist_jk; rtol=1e-6) &&
-           isapprox(masses[ac.i], masses[ac.k]; rtol=1e-6)
+           isapprox(masses[ac.i], masses[ac.k]; rtol=1e-6) && !settle_near_linear(ac)
 end
 
 function SETTLE(; masses,
@@ -78,6 +89,11 @@ function SETTLE(; masses,
             throw(ArgumentError("SETTLE requires equal masses for the non-central atoms, found " *
                                 "$(masses[ac.i]) and $(masses[ac.k]) for atoms $(ac.i) and $(ac.k)"))
         end
+        if settle_near_linear(ac)
+            throw(ArgumentError("SETTLE requires angles of at most $(settle_max_angle)°, found " *
+                                "$(round(settle_angle(ac); digits=2))° for atoms " *
+                                "$(ac.i)/$(ac.j)/$(ac.k)"))
+        end
     end
 
     clusters = StructArray(AngleClusterData(ac) for ac in angle_constraints)
@@ -96,8 +112,9 @@ Set up constraints using the SETTLE algorithm for rigid three-site molecules suc
 rigid water.
 
 Passed to the [`System`](@ref) constructor from files, where angle constraints that
-[`SETTLE`](@ref) can solve (equal distances to the central atom and equal masses of the
-other two atoms, such as with `rigid_water=true`) are given to [`SETTLE`](@ref).
+[`SETTLE`](@ref) can solve (equal distances to the central atom, equal masses of the
+other two atoms and an angle of at most 150°, such as with `rigid_water=true`) are given to
+[`SETTLE`](@ref).
 The remaining constraints are set up with `constraint_algorithm`, which can be
 [`SetupLINCS`](@ref) or [`SetupSHAKE_RATTLE`](@ref).
 See [`SETTLE`](@ref) for the other argument descriptions.
@@ -125,6 +142,14 @@ function build_constraint_algorithms(T, dist_constraints, angle_constraints, ato
                                      units, strictness, masses, ca::SetupSETTLE)
     settle_acs = [ac for ac in angle_constraints if settle_compatible(ac, masses)]
     other_acs  = [ac for ac in angle_constraints if !settle_compatible(ac, masses)]
+    n_near_linear = count(settle_near_linear, angle_constraints)
+    if n_near_linear > 0
+        report_issue("$n_near_linear angle constraints have angles above " *
+                     "$(settle_max_angle)°, which SETTLE can not solve reliably, so they are " *
+                     "given to $(nameof(typeof(ca.constraint_algorithm))); near-linear angle " *
+                     "constraints are poorly conditioned and that algorithm may not satisfy " *
+                     "them either", strictness)
+    end
     algos = ()
     if length(settle_acs) > 0
         settle = SETTLE(
@@ -243,11 +268,12 @@ mass without computing the center of mass itself, which reduces energy drift.
     # Rotations ψ and ϕ from the Z' coordinates, eqs. A8-A10
     sinphi = a1z / ra
     cosphi2 = 1 - sinphi^2
-    distorted = cosphi2 <= almost_zero
+    # Negated comparisons also catch NaN
+    distorted = !(cosphi2 > almost_zero)
     cosphi = sqrt(max(cosphi2, almost_zero))
     sinpsi = (b1z - c1z) / (2 * rc * cosphi)
     cospsi2 = 1 - sinpsi^2
-    distorted |= cospsi2 <= almost_zero
+    distorted |= !(cospsi2 > almost_zero)
     cospsi = sqrt(max(cospsi2, almost_zero))
 
     # Eq. A3
@@ -264,7 +290,7 @@ mass without computing the center of mass itself, which reduces energy drift.
     γ = b0x * b1y - b1x * b0y + c0x * c1y - c1x * c0y
     α2β2 = α^2 + β^2
     disc = α2β2 - γ^2
-    distorted |= disc < zero(disc)
+    distorted |= !(disc >= zero(disc)) | !(α2β2 > zero(α2β2))
     sinthe = (α * γ - β * sqrt(max(disc, zero(disc)))) / α2β2
     costhe = sqrt(max(1 - sinthe^2, zero(FT)))
 
@@ -273,12 +299,13 @@ mass without computing the center of mass itself, which reduces energy drift.
     b3 = ex * (b2x * costhe - b2y * sinthe)  + ey * (b2x * sinthe + b2y * costhe) + ez * b1z
     c3 = ex * (-b2x * costhe - c2y * sinthe) + ey * (-b2x * sinthe + c2y * costhe) + ez * c1z
 
-    r_t2[k1] = r_t2_k1 + (a3 - a1)
-    r_t2[k2] = r_t2_k2 + (b3 - b1)
-    r_t2[k3] = r_t2_k3 + (c3 - c1)
-
+    # A distorted molecule is left at its unconstrained positions
     if distorted
         error_flag[1] = Int32(1)
+    else
+        r_t2[k1] = r_t2_k1 + (a3 - a1)
+        r_t2[k2] = r_t2_k2 + (b3 - b1)
+        r_t2[k3] = r_t2_k3 + (c3 - c1)
     end
     return nothing
 end
@@ -295,12 +322,12 @@ end
 end
 
 function check_settle_error!(s::SETTLE, strictness)
-    flag = (s.error_flag isa AbstractGPUArray ? Array(s.error_flag)[1] : s.error_flag[1])
-    if !iszero(flag)
+    if !iszero(only(from_device(s.error_flag)))
         fill!(s.error_flag, zero(Int32))
-        report_issue("SETTLE found a molecule that is too distorted to be settled, the " *
-                     "constraints will not be satisfied; this usually means the simulation " *
-                     "is unstable", strictness; maxlog=1)
+        report_issue("SETTLE found one or more molecules too distorted to be settled, " *
+                     "which usually means the simulation is unstable; these molecules " *
+                     "were left at their unconstrained positions, so their constraints " *
+                     "are not satisfied", strictness; maxlog=1)
     end
     return nothing
 end
