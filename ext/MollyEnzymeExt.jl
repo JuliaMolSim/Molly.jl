@@ -82,7 +82,6 @@ EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
 EnzymeRules.inactive(::typeof(read_frame!), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.kabsch_rotation_nograd), args...) = nothing
-EnzymeRules.inactive(::typeof(Molly.launch_kernel_inactive!), args...) = nothing
 
 # With the whole-function rules below, the GPU buffers are pure scratch: the rules
 # recompute every cotangent from the system and the incoming seed and never read a buffer
@@ -1600,6 +1599,93 @@ function EnzymeRules.reverse(config::RevConfig,
     end
     return (nothing, nothing, nothing, nothing, nothing, nothing,
             dpis, nothing, nothing, nothing)
+end
+
+# The sparse matrix-vector product y = H * x of charge equilibration on the CPU, see
+#   `Molly.sparse_mat_mul!`. H is symmetric, so the cotangent of x is H times the cotangent
+#   of y, which is the primal kernel again. y is overwritten, so its cotangent is consumed.
+@kernel function sparse_mat_mul_csr_rev_nonzero!(dH_nonzero, @Const(rowptr), @Const(colidx),
+                                                 @Const(x), @Const(dy))
+    ti = @index(Global, Linear)
+    @inbounds begin
+        dy_ti = dy[ti]
+        @simd for idx in rowptr[ti]:(rowptr[ti + 1] - 1)
+            dH_nonzero[idx] += dy_ti * x[colidx[idx]]
+        end
+    end
+end
+
+const CPUKernel = KernelAbstractions.Kernel{<:KernelAbstractions.CPU}
+
+# A copy of an argument for the reverse pass, needed only if Enzyme reports that it may be
+#   overwritten between the passes
+function tape_copy(arg, overwritten::Bool, needed::Bool)
+    return (overwritten && needed) ? copy(arg.val) : nothing
+end
+tape_value(copied, arg) = isnothing(copied) ? arg.val : copied
+
+function EnzymeRules.augmented_primal(config::RevConfig,
+                                      func::Const{typeof(Molly.sparse_mat_mul!)},
+                                      ::Type{RT}, smm_kernel!::Const{<:CPUKernel},
+                                      ndrange::Const, workgroupsize::Const, y::Annotation,
+                                      H_diag::Annotation, H_nonzero::Annotation,
+                                      rowptr::Annotation, colidx::Annotation,
+                                      x::Annotation) where RT
+    EnzymeRules.width(config) == 1 ||
+        error("batched differentiation of the charge equilibration matrix product is " *
+              "not supported")
+    func.val(smm_kernel!.val, ndrange.val, workgroupsize.val, y.val, H_diag.val,
+             H_nonzero.val, rowptr.val, colidx.val, x.val)
+    # The derivative with respect to x needs H, those with respect to H need x
+    active = !isnothing(whole_shadow(y))
+    need_H = active && !isnothing(whole_shadow(x))
+    need_x = active && !(isnothing(whole_shadow(H_diag)) &&
+                         isnothing(whole_shadow(H_nonzero)))
+    ow = EnzymeRules.overwritten(config)   # the first entry is for the function
+    tape = (
+        tape_copy(H_diag   , ow[6] , need_H),
+        tape_copy(H_nonzero, ow[7] , need_H),
+        tape_copy(rowptr   , ow[8] , need_H || need_x),
+        tape_copy(colidx   , ow[9] , need_H || need_x),
+        tape_copy(x        , ow[10], need_x),
+    )
+    return EnzymeRules.AugmentedReturn{EnzymeRules.primal_type(config, RT),
+                                       EnzymeRules.shadow_type(config, RT),
+                                       typeof(tape)}(nothing, nothing, tape)
+end
+
+function EnzymeRules.reverse(config::RevConfig, func::Const{typeof(Molly.sparse_mat_mul!)},
+                             ::Type{RT}, tape, smm_kernel!::Const{<:CPUKernel},
+                             ndrange::Const, workgroupsize::Const, y::Annotation,
+                             H_diag::Annotation, H_nonzero::Annotation,
+                             rowptr::Annotation, colidx::Annotation,
+                             x::Annotation) where RT
+    dy = whole_shadow(y)
+    if !isnothing(dy)
+        H_diag_t, H_nonzero_t, rowptr_t, colidx_t, x_t = tape
+        rowptr_v, colidx_v = tape_value(rowptr_t, rowptr), tape_value(colidx_t, colidx)
+        dx = whole_shadow(x)
+        if !isnothing(dx)
+            H_dy = similar(dy)
+            func.val(smm_kernel!.val, ndrange.val, workgroupsize.val, H_dy,
+                     tape_value(H_diag_t, H_diag), tape_value(H_nonzero_t, H_nonzero),
+                     rowptr_v, colidx_v, dy)
+            dx .+= H_dy
+        end
+        x_v = tape_value(x_t, x)
+        dH_diag = whole_shadow(H_diag)
+        if !isnothing(dH_diag)
+            dH_diag .+= dy .* x_v
+        end
+        dH_nonzero = whole_shadow(H_nonzero)
+        if !isnothing(dH_nonzero)
+            kernel! = sparse_mat_mul_csr_rev_nonzero!(get_backend(dH_nonzero))
+            kernel!(dH_nonzero, rowptr_v, colidx_v, x_v, dy; ndrange=length(dy),
+                    workgroupsize=workgroupsize.val)
+        end
+        dy .= zero(eltype(dy))
+    end
+    return (nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 end

@@ -1583,6 +1583,16 @@ function write_force_rij(
     end
 end
 
+#=
+`inter.device_params` holds arrays as well as inline parameter structs. Reading one of the
+structs from it can copy all of `device_params` to the stack, with the slots of the arrays
+in the copy filled with a byte pattern, and a kernel launch that takes the struct then gets
+a pointer into that copy, the type of which Enzyme can not deduce. These functions are not
+inlined, so they return a copy of the struct alone.
+=#
+@noinline reaxff_general_parameters(inter) = inter.device_params.general_parameters
+@noinline reaxff_taper_parameters(inter) = inter.device_params.taper_parameters
+
 @inline function reaxff_workgroupsize(backend, ndrange, n_threads)
     if is_gpu_backend(backend)
         return ndrange <= 50_000 ? 32 : 128
@@ -1609,7 +1619,7 @@ end
     end
 end
 
-@kernel function resolve_forces_kernel(
+@kernel_and_item function resolve_forces_kernel(
     fill_pos,
     nbrs,
     coords,
@@ -1625,7 +1635,7 @@ end
 )
     group = @index(Group, Linear)
 
-    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
         @inbounds begin
             max_nbrs = size(nbrs, 1)
         
@@ -1689,8 +1699,10 @@ function resolve_forces!(
         dBOππ′_dr = inter.state.dBOππ′_dr
     )
 
-    kernel = resolve_forces_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        resolve_forces_kernel,
+        backend,
+        reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
         fill_pos,
         nbrs,
         sys.coords,
@@ -1702,8 +1714,7 @@ function resolve_forces!(
         reaxff_kernel_forces(inter, backend),
         derivatives,
         reaxff_chunk(backend, length(nbrs), n_threads),
-        length(nbrs);
-        reaxff_chunked_launch(backend, length(nbrs), n_threads)...
+        length(nbrs),
     )
 end
 
@@ -2084,7 +2095,7 @@ end
 end
 
 
-@kernel function bond_kernel(
+@kernel_and_item function bond_kernel(
     nbrs_list,
     bond_pair_indices,
     n_bond_pairs,
@@ -2195,7 +2206,7 @@ end
 end
 
 
-@kernel function bond_correction_kernel(
+@kernel_and_item function bond_correction_kernel(
     atid,
     fill_pos,
     nbrs,
@@ -2350,7 +2361,7 @@ function bonds!(
     reverse_nbrs = inter.state.reverse_nbrs
     fill_pos = inter.state.fill_pos
     odgp = inter.device_params.off_diagonal_parameters
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
 
     coordn′ = inter.state.coordn
     BO′     = inter.state.BO
@@ -2368,7 +2379,9 @@ function bonds!(
     bo_cutoff  = inter.device_params.global_parameters.bo_cutoff
 
     # assume unit-less coords has units of nm
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", one(T) * inter.sys_coord_unit))) : T(10.0)
+    # the field type of `sys_coord_unit` is not concrete, so the type is asserted for the
+    #   kernel launches to be inferred
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", one(T) * inter.sys_coord_unit))) : T(10.0))::T
 
     bond_dist_cutoff_sq = inter.device_params.global_parameters.bond_dist_cutoff^2
 
@@ -2398,8 +2411,11 @@ function bonds!(
         bond_pair_indices = inter.state.bond_pair_indices
     end
 
-    b_kernel = bond_kernel(backend)
-    b_kernel(
+    launch_item_kernel!(
+        bond_kernel,
+        backend,
+        length(neighbors),
+        reaxff_workgroupsize(backend, length(neighbors), n_threads),
         neighbors.list,
         bond_pair_indices,
         inter.state.n_bond_pairs,
@@ -2422,9 +2438,7 @@ function bonds!(
         atmp,
         odgp,
         bond_dist_cutoff_sq,
-        inter.smoothness_correction;
-        ndrange=length(neighbors),
-        workgroupsize=reaxff_workgroupsize(backend, length(neighbors), n_threads)
+        inter.smoothness_correction,
     )
     synchronize(backend)
 
@@ -2465,8 +2479,11 @@ function bonds!(
     pair_energies = inter.state.thread_atom_energies_1
     fill!(pair_energies, zero(T))
 
-    bc_kernel = bond_correction_kernel(backend)
-    bc_kernel(
+    launch_item_kernel!(
+        bond_correction_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atid,
         fill_pos,
         nbrs,
@@ -2498,9 +2515,7 @@ function bonds!(
         BO′_ππ,
         Δ′,
         Δ′_boc,
-        inter.smoothness_correction;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        inter.smoothness_correction,
     )
 
     Δ       = inter.state.Δ        
@@ -2531,7 +2546,7 @@ function bonds!(
 end
 
 
-@kernel function lone_pairs_kernel(
+@kernel_and_item function lone_pairs_kernel(
     atmp,
     atid,
     Δ_e,
@@ -2604,7 +2619,7 @@ function lone_pairs!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where T
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     atmp = inter.device_params.atom_parameters
     atid = inter.state.sys_atid 
 
@@ -2620,8 +2635,11 @@ function lone_pairs!(
     atom_energies = inter.state.thread_atom_energies_1
     fill!(atom_energies, zero(T))
 
-    kernel = lone_pairs_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        lone_pairs_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atmp,
         atid,
         Δ_e,
@@ -2631,9 +2649,7 @@ function lone_pairs!(
         Δ_lp,
         dn_lp_dΔi,
         S_dE_dΔ,
-        atom_energies;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        atom_energies,
     )
 
     if backend isa KernelAbstractions.CPU
@@ -2650,7 +2666,7 @@ function lone_pairs!(
 end
 
 
-@kernel function ovun_kernel(
+@kernel_and_item function ovun_kernel(
     fill_pos,
     nbrs,
     bndp,
@@ -2808,7 +2824,7 @@ function over_under_coordination!(
     atid = inter.state.sys_atid 
     bndp = inter.device_params.bond_parameters
     atmp = inter.device_params.atom_parameters
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     n_atoms = inter.state.n_atoms
     fill_pos = inter.state.fill_pos
 
@@ -2832,8 +2848,11 @@ function over_under_coordination!(
 
     reverse_nbrs = inter.state.reverse_nbrs
 
-    kernel = ovun_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        ovun_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         fill_pos,
         nbrs,
         bndp,
@@ -2852,9 +2871,7 @@ function over_under_coordination!(
         dn_lp_dΔi,
         S_dE_dΔ,
         overcoordination_energies,
-        undercoordination_energies;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        undercoordination_energies,
     )
 
     if is_gpu_backend(backend)
@@ -2900,7 +2917,7 @@ end
 
 # identifies all valid angles with defined angle parameters and which satisfy bond order constraints
 # writes j, idx_i, idx_k, angle parameter index for each valid angle
-@kernel function construct_valid_angles!(
+@kernel_and_item function construct_valid_angles!(
     valid_angles,
     n_valid_angles,
     fill_pos,
@@ -2918,7 +2935,7 @@ end
 ) where {smoothness_correction}
     group = @index(Group, Linear)
 
-    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
         @inbounds begin
             max_nbrs = size(nbrs, 1)
 
@@ -3361,7 +3378,7 @@ function valence_angles!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where T
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     atmp = inter.device_params.atom_parameters
     atid = inter.state.sys_atid
     angp = inter.device_params.angle_parameters
@@ -3396,7 +3413,7 @@ function valence_angles!(
 
     deg_to_rad = T(3.14159265 / 180.0)
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     angle_args = nothing
     if backend isa KernelAbstractions.CPU
@@ -3431,9 +3448,11 @@ function valence_angles!(
 
     fill!(inter.state.n_valid_angles, 0)
 
-    valid_angles_kernel! = construct_valid_angles!(backend)
     if !isempty(nbrs)
-        valid_angles_kernel!(
+        launch_item_kernel!(
+            construct_valid_angles!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_angles,
             inter.state.n_valid_angles,
             fill_pos,
@@ -3447,8 +3466,7 @@ function valence_angles!(
             inter.smoothness_correction,
             angle_args,
             reaxff_chunk(backend, length(nbrs), n_threads),
-            length(nbrs);
-            reaxff_chunked_launch(backend, length(nbrs), n_threads)...
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -3462,7 +3480,10 @@ function valence_angles!(
         new_size = max(n_valid_angles, 2 * size(inter.state.valid_angles, 2))
         inter.state.valid_angles = similar(inter.state.valid_angles, 4, new_size)
         fill!(inter.state.n_valid_angles, 0)
-        valid_angles_kernel!(
+        launch_item_kernel!(
+            construct_valid_angles!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_angles,
             inter.state.n_valid_angles,
             fill_pos,
@@ -3476,8 +3497,7 @@ function valence_angles!(
             inter.smoothness_correction,
             angle_args,
             reaxff_chunk(backend, length(nbrs), n_threads),
-            length(nbrs);
-            reaxff_chunked_launch(backend, length(nbrs), n_threads)...
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -3588,7 +3608,7 @@ end
 
 # identifies all valid torsions with defined torsion parameters and which satisfy bond order constraints
 # writes j, idx_k, idx_i, idx_l into valid_torsions for each valid i-j-k-l torsion
-@kernel function construct_valid_torsions!(
+@kernel_and_item function construct_valid_torsions!(
     valid_torsions,
     n_valid_torsions,
     fill_pos,
@@ -3604,7 +3624,7 @@ end
 ) where {smoothness_correction}
     group = @index(Group, Linear)
 
-    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
         @inbounds begin
             max_nbrs = size(nbrs, 1)
 
@@ -4004,7 +4024,7 @@ function torsions!(
     nbrs = inter.state.nbrs
     fill_pos = inter.state.fill_pos
 
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     torp = inter.device_params.torsion_parameters
 
     Δ_angle = inter.state.Δ_angle
@@ -4024,7 +4044,7 @@ function torsions!(
     fill!(torsion_energies, zero(T))
     fill!(conj_energies, zero(T))
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     torsion_args = nothing
     if backend isa KernelAbstractions.CPU
@@ -4054,9 +4074,11 @@ function torsions!(
     fill!(inter.state.n_valid_torsions, 0)
 
     # this continues counting even when capacity of valid_torsions is reached => reports exact required size
-    valid_torsions_kernel! = construct_valid_torsions!(backend)
     if !isempty(nbrs)
-        valid_torsions_kernel!(
+        launch_item_kernel!(
+            construct_valid_torsions!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_torsions,
             inter.state.n_valid_torsions,
             fill_pos,
@@ -4068,8 +4090,7 @@ function torsions!(
             inter.smoothness_correction,
             torsion_args,
             reaxff_chunk(backend, length(nbrs), n_threads),
-            length(nbrs);
-            reaxff_chunked_launch(backend, length(nbrs), n_threads)...
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4084,7 +4105,10 @@ function torsions!(
         new_size = max(n_valid_torsions, 2 * size(inter.state.valid_torsions, 2))
         inter.state.valid_torsions = similar(inter.state.valid_torsions, 4, new_size)
         fill!(inter.state.n_valid_torsions, 0)
-        valid_torsions_kernel!(
+        launch_item_kernel!(
+            construct_valid_torsions!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_torsions,
             inter.state.n_valid_torsions,
             fill_pos,
@@ -4096,8 +4120,7 @@ function torsions!(
             inter.smoothness_correction,
             torsion_args,
             reaxff_chunk(backend, length(nbrs), n_threads),
-            length(nbrs);
-            reaxff_chunked_launch(backend, length(nbrs), n_threads)...
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4149,7 +4172,7 @@ function torsions!(
 end
 
 
-@kernel function corrections_kernel(
+@kernel_and_item function corrections_kernel(
     atid,
     genp,
     C_id,
@@ -4284,7 +4307,7 @@ function corrections!(
     atid = inter.state.sys_atid
     BO = inter.state.BO
     Δ = inter.state.Δ
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     n_atoms = inter.state.n_atoms
     coordn = inter.state.coordn
 
@@ -4304,8 +4327,11 @@ function corrections!(
     fill!(c2_energies, zero(T))
     fill!(trip_energies, zero(T))
 
-    kernel = corrections_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        corrections_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atid,
         genp,
         C_id,
@@ -4322,9 +4348,7 @@ function corrections!(
         coordn,
         c2_energies,
         trip_energies,
-        inter.smoothness_correction;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        inter.smoothness_correction,
     )
 
     if is_gpu_backend(backend)
@@ -4342,7 +4366,7 @@ end
 
 # identifies all valid hydrogen bonds and which satisfy bond order constraints
 # writes j, k, idx_i into valid_hbonds for each valid i-j --- k hydrogen bond
-@kernel function construct_valid_hbonds!(
+@kernel_and_item function construct_valid_hbonds!(
     valid_hbonds,
     n_valid_hbonds,
     far_nbrs_list,
@@ -4622,7 +4646,7 @@ function hydrogen_bonds!(
     hbond_bo_cutoff = inter.device_params.global_parameters.hbond_bo_cutoff
     hbond_dist_cutoff = inter.device_params.global_parameters.hbond_dist_cutoff
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     hb_energies = inter.state.thread_atom_energies_1
     fill!(hb_energies, zero(T))
@@ -4641,9 +4665,11 @@ function hydrogen_bonds!(
     fill!(inter.state.n_valid_hbonds, 0)
 
     # this continues counting even when capacity of valid hbonds is reached => reports exact required size
-    valid_hbonds_kernel! = construct_valid_hbonds!(backend)
     if length(far_nbrs) > 0
-        valid_hbonds_kernel!(
+        launch_item_kernel!(
+            construct_valid_hbonds!,
+            backend,
+            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
             inter.state.valid_hbonds,
             inter.state.n_valid_hbonds,
             far_nbrs.list,
@@ -4662,8 +4688,7 @@ function hydrogen_bonds!(
             h_bond_acceptors,
             hbond_args,
             reaxff_chunk(backend, length(far_nbrs), n_threads),
-            length(far_nbrs);
-            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...
+            length(far_nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4678,7 +4703,10 @@ function hydrogen_bonds!(
         new_size = max(n_valid_hbonds, 2 * size(inter.state.valid_hbonds, 2))
         inter.state.valid_hbonds = similar(inter.state.valid_hbonds, 3, new_size)
         fill!(inter.state.n_valid_hbonds, 0)
-        valid_hbonds_kernel!(
+        launch_item_kernel!(
+            construct_valid_hbonds!,
+            backend,
+            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
             inter.state.valid_hbonds,
             inter.state.n_valid_hbonds,
             far_nbrs.list,
@@ -4697,8 +4725,7 @@ function hydrogen_bonds!(
             h_bond_acceptors,
             hbond_args,
             reaxff_chunk(backend, length(far_nbrs), n_threads),
-            length(far_nbrs);
-            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...
+            length(far_nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4746,7 +4773,7 @@ function hydrogen_bonds!(
 end
 
 
-@kernel function non_bonded_kernel(
+@kernel_and_item function non_bonded_kernel(
     far_nbrs_list,
     coords,
     boundary,
@@ -4766,6 +4793,8 @@ end
     n_items,
 ) where T
     group = @index(Group, Linear)
+    vdW_sum = zero(T)
+    coulomb_sum = zero(T)
 
     for ti in chunk_items(@index(Global, Linear), chunk, n_items)
         @inbounds begin
@@ -4817,7 +4846,11 @@ end
                 vdW_tm2 = D_ij * (vdW_exp1 - T(2.0) * vdW_exp2)
                 vdW_engy = Tap * vdW_tm2
     
-                Atomix.@atomic vdW_energies[i] += vdW_engy
+                if chunk isa Val{1}
+                    Atomix.@atomic vdW_energies[i] += vdW_engy
+                else
+                    vdW_sum += vdW_engy
+                end
     
                 vdW_prd1 = r_vdW_inv * df13_drij
     
@@ -4832,7 +4865,11 @@ end
                 coulomb_inv = inv(cbrt(denom_sum))
     
                 coulomb_engy = Tap * C * q_prod * coulomb_inv
-                Atomix.@atomic coulomb_energies[i] += coulomb_engy
+                if chunk isa Val{1}
+                    Atomix.@atomic coulomb_energies[i] += coulomb_engy
+                else
+                    coulomb_sum += coulomb_engy
+                end
     
                 dE_coulomb_drij = C * q_prod * coulomb_inv * (
                                     dTap -
@@ -4845,6 +4882,14 @@ end
                 add_force!(forces, -tot_dE_drij, j, group)
             end
         end
+    end
+
+    # On the CPU only the sums of the energies are used, so each chunk adds its sums once
+    #   rather than with an atomic add for each pair, which threads contend on
+    if !(chunk isa Val{1})
+        slot = mod1(group, length(vdW_energies))
+        Atomix.@atomic vdW_energies[slot] += vdW_sum
+        Atomix.@atomic coulomb_energies[slot] += coulomb_sum
     end
 end
 
@@ -4865,8 +4910,8 @@ function non_bonded!(
     n_threads::Integer=Threads.nthreads(),
 ) where T
 
-    tp = inter.device_params.taper_parameters
-    genp = inter.device_params.general_parameters
+    tp = reaxff_taper_parameters(inter)
+    genp = reaxff_general_parameters(inter)
     odgp = inter.device_params.off_diagonal_parameters
     atid = inter.state.sys_atid
     upper_taper_radius = inter.device_params.general_parameters.upper_taper_radius
@@ -4879,7 +4924,7 @@ function non_bonded!(
 
     C = T(332.06371)    # legacy constant
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     vdW_energies = inter.state.thread_atom_energies_1
     coulomb_energies = inter.state.thread_atom_energies_2
@@ -4890,8 +4935,10 @@ function non_bonded!(
         synchronize(backend)
     end
 
-    nb_kernel = non_bonded_kernel(backend)
-    nb_kernel(
+    launch_item_kernel!(
+        non_bonded_kernel,
+        backend,
+        reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
         far_nbrs.list,
         sys.coords,
         sys.boundary,
@@ -4908,8 +4955,7 @@ function non_bonded!(
         coulomb_energies,
         upper_taper_radius,
         reaxff_chunk(backend, length(far_nbrs), n_threads),
-        length(far_nbrs);
-        reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...
+        length(far_nbrs),
     )
 
     if backend isa KernelAbstractions.CPU

@@ -173,6 +173,156 @@ The backend to compile a kernel with fast math with, see `kernel_fastmath`, whic
 same backend unless a backend extension defines a method for backends that support it.
 =#
 fastmath_backend(backend) = backend
+
+#=
+    @kernel_and_item function name(args...) ... end
+
+Define the KernelAbstractions kernel `name` as `@kernel` does, and a function that runs one
+work-item of it as plain Julia code, which `item_kernel(name)` returns, with
+`@index(Global, Linear)` the work-item and `@index(Group, Linear)` its work-group. Other
+macros of KernelAbstractions are not supported, so kernels with `@localmem` or
+`@synchronize` can not be defined this way. Kernels defined this way are launched with
+`launch_item_kernel!`, which runs them as Julia code on the CPU backend.
+=#
+macro kernel_and_item(ex)
+    if !(ex isa Expr && ex.head === :function && length(ex.args) == 2)
+        error("@kernel_and_item expects a function definition")
+    end
+    sig, body = ex.args
+    where_params = []
+    call = sig
+    while call.head === :where
+        where_params = vcat(call.args[2:end], where_params)
+        call = call.args[1]
+    end
+    name = call.args[1]
+    if any(a -> a isa Expr && a.head in (:parameters, :kw, :...), call.args[2:end])
+        error("@kernel_and_item does not support keyword, default or varargs arguments")
+    end
+    # Unnamed arguments such as `::Val{N}` need a name to be passed on
+    item_args = map(call.args[2:end]) do a
+        if a isa Expr && a.head === :macrocall && a.args[1] === Symbol("@Const")
+            a = a.args[end]
+        end
+        if a isa Expr && a.head === :(::) && length(a.args) == 1
+            return Expr(:(::), gensym(:arg), a.args[1])
+        end
+        return a
+    end
+    global_index, group_index = gensym(:global_index), gensym(:group_index)
+    function item_body(x)
+        if x isa Expr && x.head === :macrocall
+            macro_name, macro_args = x.args[1], filter(a -> !(a isa LineNumberNode), x.args[2:end])
+            if macro_name === Symbol("@index") && macro_args == [:Global, :Linear]
+                return global_index
+            elseif macro_name === Symbol("@index") && macro_args == [:Group, :Linear]
+                return group_index
+            elseif macro_name in (Symbol("@index"), Symbol("@localmem"), Symbol("@private"),
+                        Symbol("@synchronize"), Symbol("@uniform"), Symbol("@groupsize"),
+                        Symbol("@ndrange"), Symbol("@print"), Symbol("@context"))
+                error("@kernel_and_item does not support $macro_name",
+                      macro_name === Symbol("@index") ? " other than (Global, Linear) and " *
+                      "(Group, Linear)" : "")
+            end
+        end
+        return x isa Expr ? Expr(x.head, map(item_body, x.args)...) : x
+    end
+    item_name = Symbol(rstrip(string(name), '!'), "_item!")
+    item_call = Expr(:call, item_name, global_index, group_index, item_args...)
+    item_sig = isempty(where_params) ? item_call : Expr(:where, item_call, where_params...)
+    item_def = Expr(:function, item_sig, Expr(:block, item_body(body), :(return nothing)))
+    return esc(quote
+        $(Expr(:macrocall, Symbol("@kernel"), __source__, ex))
+
+        @inline $item_def
+
+        item_kernel(::typeof($name)) = $item_name
+    end)
+end
+
+# The per-item function of a kernel defined with `@kernel_and_item`
+function item_kernel end
+
+#=
+Launch the kernel that `kernel_fn`, defined with `@kernel_and_item`, makes for `backend`
+with `args` over `ndrange`, with `workgroupsize` `nothing`, an integer or a tuple.
+On GPU backends this is the KernelAbstractions launch. On the CPU backend the work-items
+run as Julia code on Julia threads rather than through PoCL, a work-group to a task with
+its work-items in order, for two reasons:
+- PoCL's math library is slower than Julia's, `exp` takes 2.6 times and `cbrt` 4 times as
+  long, which made the ReaxFF non-bonded kernel 1.7 times slower than as Julia code.
+- Enzyme differentiates the Julia code directly. KernelAbstractions 0.10 differentiates
+  PoCL kernels in device code, which does not support `Active` arguments, the scalars and
+  parameter structs that most of these kernels take. KernelAbstractions 0.9 supported them
+  on its CPU backend.
+A chunked launch, of one work-item per work-group with each work-item a contiguous chunk of
+the items (see `chunk_items`), runs one chunk to a task. Kernels where PoCL can vectorise
+across the work-items of a work-group, such as the sparse matrix-vector product of charge
+equilibration, are better defined with `@kernel` and launched through PoCL.
+=#
+function launch_item_kernel!(kernel_fn::F, backend, ndrange, workgroupsize,
+                             args::Vararg{Any, N}) where {F, N}
+    if backend isa KernelAbstractions.CPU
+        item! = item_kernel(kernel_fn)
+        if is_chunked_launch(workgroupsize)
+            # The range is made here, as Enzyme could not deduce the type of the
+            #   `1:n_chunks` made next to the `@threads` closure that holds active arguments
+            launch_chunked_cpu!(item!, Base.OneTo(Int(ndrange)), args)
+        else
+            wgs = cpu_group_size(workgroupsize, ndrange)
+            n_groups = cld(ndrange, wgs)
+            tasks = Base.OneTo(min(n_groups, Threads.nthreads()))
+            launch_groups_cpu!(item!, tasks, n_groups, wgs, Int(ndrange), args)
+        end
+    else
+        kernel_fn(backend)(args...; ndrange=ndrange, workgroupsize=workgroupsize)
+    end
+    return nothing
+end
+
+is_chunked_launch(workgroupsize::Integer) = isone(workgroupsize)
+is_chunked_launch(workgroupsize) = false
+
+cpu_group_size(workgroupsize::Integer, ndrange) = Int(workgroupsize)
+cpu_group_size(workgroupsize::Tuple{Integer}, ndrange) = Int(only(workgroupsize))
+cpu_group_size(::Nothing, ndrange) = max(cld(ndrange, Threads.nthreads()), 1)
+
+# Each work-item, a chunk of the items, is also its own work-group, so the slots that the
+#   chunked kernels accumulate into belong to one task
+function launch_chunked_cpu!(item!::I, chunks::AbstractUnitRange, args::Tuple) where I
+    if length(chunks) == 1
+        item!(1, 1, args...)
+    else
+        Threads.@threads for chunk_i in chunks
+            item!(chunk_i, chunk_i, args...)
+        end
+    end
+    return nothing
+end
+
+function launch_groups_cpu!(item!::I, tasks::AbstractUnitRange, n_groups::Int, wgs::Int,
+                            ndrange::Int, args::Tuple) where I
+    n_tasks = length(tasks)
+    if n_tasks == 1
+        run_groups_cpu!(item!, 1, n_groups, wgs, ndrange, args)
+    else
+        Threads.@threads for t in tasks
+            run_groups_cpu!(item!, (t - 1) * n_groups ÷ n_tasks + 1, t * n_groups ÷ n_tasks,
+                            wgs, ndrange, args)
+        end
+    end
+    return nothing
+end
+
+@inline function run_groups_cpu!(item!::I, g_start, g_end, wgs, ndrange, args::Tuple) where I
+    for g in g_start:g_end
+        for i in ((g - 1) * wgs + 1):min(g * wgs, ndrange)
+            item!(i, g, args...)
+        end
+    end
+    return nothing
+end
+
 #=
 Work launched with `run_side_work!` can run on the device at the same time as the work
 launched after it, which the CUDA extension does with a second stream. `forces!` uses this

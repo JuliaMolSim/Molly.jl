@@ -2634,14 +2634,37 @@ no more work-groups than the buffers have slots. PoCL, the CPU backend of Kernel
 0.10, runs each work-group on one of its threads, but it treats the work-items of a work-group
 as independent and can vectorize across them, so updates of the same element by two
 work-items of one work-group would race. It also limits the size of a work-group, so a launch
-with one work-item per item can have more work-groups than there are slots. On GPUs, which
-accumulate with atomics instead, `chunk` is `Val(1)` and each work-item handles one item.
+with one work-item per item can have more work-groups than there are slots. Kernels defined
+with `@kernel_and_item` run these chunked launches as Julia code on Julia threads instead,
+one chunk to a task, see `launch_item_kernel!`. On GPUs, which accumulate with atomics
+instead, `chunk` is `Val(1)` and each work-item handles one item.
 =#
 @inline chunk_items(i, ::Val{1}, n_items) = i:i
 @inline chunk_items(i, chunk::Integer, n_items) = ((i - 1) * chunk + 1):min(i * chunk, n_items)
 
 # The size of the chunks that split `n_items` items into at most `n_slots` chunks
 @inline cpu_chunk_size(n_items, n_slots) = max(cld(n_items, max(n_slots, 1)), 1)
+
+#=
+The items of the work-item `i` of a chunked kernel whose items are the entries of a matrix
+with a column per atom, such as the bonded neighbors `nbrs`, so that the items of atom `j`
+are `(j - 1) * max_nbrs + 1` to `j * max_nbrs`. The atoms of a system are not equally
+expensive, for example the atoms of a protein come before the water, so on the CPU the
+atoms are dealt to the chunks in turn in blocks of `ATOM_CHUNK_BLOCK` atoms rather than
+in one contiguous range per chunk. On GPUs, where `chunk` is `Val(1)`, this is
+`chunk_items`.
+=#
+const ATOM_CHUNK_BLOCK = 32
+
+@inline atom_chunk_items(i, chunk::Val{1}, n_items, max_nbrs) = chunk_items(i, chunk, n_items)
+
+@inline function atom_chunk_items(i, chunk::Integer, n_items, max_nbrs)
+    n_chunks = cld(n_items, chunk)
+    block = ATOM_CHUNK_BLOCK * max_nbrs
+    n_blocks = cld(n_items, block)
+    return (ti for b in i:n_chunks:n_blocks
+               for ti in ((b - 1) * block + 1):min(b * block, n_items))
+end
 
 function default_strictness()
     if haskey(ENV, "MOLLY_STRICTNESS")

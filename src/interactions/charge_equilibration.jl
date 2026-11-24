@@ -262,7 +262,7 @@ end
 # count number of entries in each row
 # not cumulative sum yet
 # on the CPU `row_counts` has a column per work-group, see `chunk_items`
-@kernel function count_QEq_csr_rows!(
+@kernel_and_item function count_QEq_csr_rows!(
     row_counts,
     neighbors,
     chunk,
@@ -309,7 +309,7 @@ end
 
 # updates both symmetric off-diagonal CSR values for every neighbor pair
 # on the CPU `write_ptr` has a column per work-group, see `chunk_items`
-@kernel function update_csr_values!(
+@kernel_and_item function update_csr_values!(
     H_nonzero,
     colidx,
     write_ptr,
@@ -483,7 +483,49 @@ function sparse_mat_mul_kernel(backend, n_atoms)
     end
 end
 
+#=
+Calculate `y = H * x` with a kernel and `ndrange` from `sparse_mat_mul_kernel`. `H` has the
+diagonal `H_diag` and the off-diagonal entries `H_nonzero` in CSR format. Each neighbor
+pair is in both of its rows with the same value (see `update_csr_values!`), so `H` is
+symmetric, which the Enzyme rule for the CPU in ext/MollyEnzymeExt.jl uses.
+=#
+function sparse_mat_mul!(smm_kernel!::K, ndrange, workgroupsize, y, H_diag, H_nonzero,
+                         rowptr, colidx, x) where K
+    smm_kernel!(y, H_diag, H_nonzero, rowptr, colidx, x; ndrange=ndrange,
+                workgroupsize=workgroupsize)
+    return nothing
+end
+
 const QEQ_THREADS_PER_GROUP = 256
+
+#=
+Launch one of the kernels of the conjugate gradient solver that work on vectors of the
+atoms, the reductions and the direction update. On the CPU these run as the plain Julia
+functions that `qeq_cpu_kernel` returns, on the calling thread. They take time
+proportional to the number of atoms, so a loop costs about as much as launching a kernel,
+and Enzyme differentiates them directly. Through PoCL, Enzyme gives wrong gradients for
+the work-group reductions with `@localmem` and `@synchronize`, or fails to compile them
+with a call to `calloc` (KernelAbstractions 0.10.8 with #991), and KernelAbstractions
+does not support the `Active` arguments `rz` and `β`.
+`workgroupsize` is `Val(size)` for kernels with a static workgroup size.
+=#
+function launch_qeq_kernel!(kernel_fn::F, backend, ndrange, workgroupsize,
+                            args::Vararg{Any, N}) where {F, N}
+    if is_gpu_backend(backend)
+        launch_qeq_gpu!(kernel_fn, backend, ndrange, workgroupsize, args)
+    else
+        qeq_cpu_kernel(kernel_fn)(args...)
+    end
+    return nothing
+end
+
+function qeq_cpu_kernel end
+
+launch_qeq_gpu!(kernel_fn, backend, ndrange, ::Val{S}, args) where {S} =
+    kernel_fn(backend, S)(args...; ndrange=ndrange)
+
+launch_qeq_gpu!(kernel_fn, backend, ndrange, workgroupsize, args) =
+    kernel_fn(backend)(args...; ndrange=ndrange, workgroupsize=workgroupsize)
 
 # sums the target and predicted charges into the slots 1 and 2 of the EEMState scalar buffer
 # allows the neutrality correction to remain entirely on the gpu
@@ -523,6 +565,21 @@ const QEQ_THREADS_PER_GROUP = 256
         Atomix.@atomic buffers[2] += q_predicted_partial_sums[1]
     end
 end
+
+# the CPU version of `charge_sums!`, see `launch_qeq_kernel!`
+function charge_sums_cpu!(buffers, q_target, q_predicted)
+    sum_target = zero(eltype(q_target))
+    sum_predicted = zero(eltype(q_predicted))
+    @inbounds for ti in eachindex(q_target)
+        sum_target += q_target[ti]
+        sum_predicted += q_predicted[ti]
+    end
+    buffers[1] += sum_target
+    buffers[2] += sum_predicted
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(charge_sums!)) = charge_sums_cpu!
 
 # apply a uniform charge shift so the predicted charges have the same net charge as the target charges
 @kernel function correct_predicted_charge!(
@@ -580,6 +637,19 @@ end
     end
 end
 
+function initial_residual_sum_cpu!(r, mχ, Hq, buffers)
+    sum_r = zero(eltype(r))
+    @inbounds for ti in eachindex(r)
+        val = mχ[ti] - Hq[ti]
+        r[ti] = val
+        sum_r += val
+    end
+    buffers[3] += sum_r
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(initial_residual_sum!)) = initial_residual_sum_cpu!
+
 
 # projects the residual vector r to the zero-sum subspace using projection operator P = I - (1/N)I(I^T)
 # then preconditions this initial projected residual using a Jacobi preconditioner: M^(-1)*r
@@ -626,6 +696,23 @@ end
     end
 end
 
+function project_precondition_reduce_cpu!(r, z, buffers, H_diag_inv)
+    n_atoms = length(r)
+    r_shift = buffers[3] / n_atoms
+    sum_z = zero(eltype(r))
+    @inbounds for ti in eachindex(r)
+        projected_residual = r[ti] - r_shift
+        r[ti] = projected_residual
+        preconditioned_residual = projected_residual * H_diag_inv[ti]
+        z[ti] = preconditioned_residual
+        sum_z += preconditioned_residual
+    end
+    buffers[1] += sum_z
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(project_precondition_reduce!)) = project_precondition_reduce_cpu!
+
 
 # project initial preconditioned residual and set initial search direction to initial projected preconditioned residual
 # calculate the scalar product dot(r, z) and store into buffers slot 2
@@ -671,6 +758,22 @@ end
     end
 end
 
+function initialize_direction_reduce_cpu!(r, z, d, buffers)
+    n_atoms = length(r)
+    z_shift = buffers[1] / n_atoms
+    rz = zero(eltype(r))
+    @inbounds for ti in eachindex(r)
+        z_value = z[ti] - z_shift
+        z[ti] = z_value
+        d[ti] = z_value
+        rz += r[ti] * z_value
+    end
+    buffers[2] += rz
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(initialize_direction_reduce!)) = initialize_direction_reduce_cpu!
+
 # computes the dot product dot(a, b) and accumulates into buffers slot 4
 @kernel unsafe_indices=true function reduce_dot!(
     buffers,
@@ -699,6 +802,17 @@ end
         Atomix.@atomic buffers[4] += partial_sums[1]
     end
 end
+
+function reduce_dot_cpu!(buffers, a, b)
+    ab = zero(eltype(a))
+    @inbounds for ti in eachindex(a)
+        ab += a[ti] * b[ti]
+    end
+    buffers[4] += ab
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(reduce_dot!)) = reduce_dot_cpu!
 
 
 # validate dHd, then update charges and residual if the curvature is valid
@@ -758,6 +872,27 @@ end
     end
 end
 
+function update_charge_residual_reduce_cpu!(q, r, d, Hd, buffers, rz)
+    dHd = buffers[4]
+    valid_curvature = isfinite(dHd) && dHd > zero(dHd)
+    sum_r = zero(eltype(q))
+    @inbounds for ti in eachindex(q)
+        if valid_curvature
+            α = rz / dHd
+            q[ti] += α * d[ti]
+            r[ti] -= α * Hd[ti]
+        end
+        sum_r += r[ti]
+    end
+    if !valid_curvature
+        buffers[5] = one(eltype(q))
+    end
+    buffers[3] += sum_r
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(update_charge_residual_reduce!)) = update_charge_residual_reduce_cpu!
+
 
 # project z to zero sum and reduce dot(r, z) into buffers slot 2
 @kernel unsafe_indices=true function shift_z_reduce_rz!(
@@ -805,6 +940,25 @@ end
     end
 end
 
+function shift_z_reduce_rz_cpu!(r, z, buffers)
+    n_atoms = length(r)
+    if buffers[5] != zero(eltype(r))
+        buffers[2] += eltype(r)(NaN)
+        return nothing
+    end
+    z_shift = buffers[1] / n_atoms
+    rz = zero(eltype(r))
+    @inbounds for ti in eachindex(r)
+        z_value = z[ti] - z_shift
+        z[ti] = z_value
+        rz += r[ti] * z_value
+    end
+    buffers[2] += rz
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(shift_z_reduce_rz!)) = shift_z_reduce_rz_cpu!
+
 
 # calculate the next search direction using d = z + βd
 @kernel function update_direction!(
@@ -816,6 +970,16 @@ end
 
     @inbounds d[ti] = z[ti] + β * d[ti]
 end
+
+function update_direction_cpu!(d, z, β)
+    @inbounds for ti in eachindex(d)
+        d[ti] = z[ti] + β * d[ti]
+    end
+    return nothing
+end
+
+qeq_cpu_kernel(::typeof(update_direction!)) = update_direction_cpu!
+
 
 
 # rounds atom count up to whole number of reduction workgroups
@@ -894,26 +1058,51 @@ function shift_history!(
 end
 
 
-@kernel function create_csr_cursors_cpu!(
-    rowptr,
-    row_counts,
-    cursors,
-)
-    offset = 1
+#=
+Turn the counts of the entries of each row in each work-group's column of `cursors` into
+the positions where each work-group writes its entries, with `rowptr` the start of each
+row and `row_counts` the cumulative counts. This is plain Julia on Julia threads, as a
+single work-item kernel was slow: it reads `cursors` along rows, a stride of `n_atoms`.
+Here each task takes a block of rows and reads the columns in order.
+=#
+function create_csr_cursors_cpu!(rowptr, row_counts, cursors, n_tasks)
+    n_atoms = length(row_counts)
+    n_blocks = clamp(n_tasks, 1, n_atoms)
+    block_rows(b) = ((b - 1) * n_atoms ÷ n_blocks + 1):(b * n_atoms ÷ n_blocks)
 
-    @inbounds for i in eachindex(row_counts)
-        rowptr[i] = offset
-
-        for group in axes(cursors, 2)
-            count = cursors[i, group]
-            cursors[i, group] = offset
-            offset += count
+    # number of entries in each row
+    Threads.@threads for b in 1:n_blocks
+        rows = block_rows(b)
+        @inbounds begin
+            row_counts[rows] .= 0
+            for group in axes(cursors, 2), i in rows
+                row_counts[i] += cursors[i, group]
+            end
         end
-
-        row_counts[i] = offset - 1
     end
 
+    offset = 1
+    @inbounds for i in 1:n_atoms
+        rowptr[i] = offset
+        offset += row_counts[i]
+        row_counts[i] = rowptr[i]   # where the next entry of row i goes
+    end
     rowptr[end] = offset
+
+    Threads.@threads for b in 1:n_blocks
+        rows = block_rows(b)
+        @inbounds begin
+            for group in axes(cursors, 2), i in rows
+                count = cursors[i, group]
+                cursors[i, group] = row_counts[i]
+                row_counts[i] += count
+            end
+            # cumulative counts, the end of each row
+            row_counts[rows] .-= 1
+        end
+    end
+
+    return nothing
 end
 
 
@@ -928,24 +1117,18 @@ function prepare_QEq_csr_cpu!(state, neighbors, n_slots, chunk)
     cursors = reshape(state.write_ptr, n_atoms, n_slots)
     fill!(cursors, 0)
 
-    count_csr_kernel! = count_QEq_csr_rows!(backend)
-    count_csr_kernel!(
+    launch_item_kernel!(
+        count_QEq_csr_rows!,
+        backend,
+        cld(n_pairs, chunk),
+        1,
         cursors,
         neighbors.list,
         chunk,
-        n_pairs;
-        ndrange=cld(n_pairs, chunk),
-        workgroupsize=1,
+        n_pairs,
     )
 
-    create_cursors_kernel! = create_csr_cursors_cpu!(backend)
-    create_cursors_kernel!(
-        state.rowptr,
-        state.row_counts,
-        cursors;
-        ndrange=1,
-        workgroupsize=1,
-    )
+    create_csr_cursors_cpu!(state.rowptr, state.row_counts, cursors, n_slots)
 
     return nothing
 end
@@ -998,14 +1181,15 @@ function charge_equilibration!(
             fill!(eem.state.row_counts, 0)
 
             if n_pairs > 0
-                count_csr_kernel! = count_QEq_csr_rows!(backend)
-                count_csr_kernel!(
+                launch_item_kernel!(
+                    count_QEq_csr_rows!,
+                    backend,
+                    n_pairs,
+                    pair_workgroupsize,
                     eem.state.row_counts,
                     neighbors.list,
                     Val(1),
-                    n_pairs;
-                    ndrange=n_pairs,
-                    workgroupsize=pair_workgroupsize
+                    n_pairs,
                 )
             end
         end
@@ -1030,11 +1214,14 @@ function charge_equilibration!(
 
     if n_pairs > 0
         # recalculate hij values every call since coordinates may have changed
-        update_csr_kernel! = update_csr_values!(backend)
         if cpu_rebuild
             # the same chunks as the counts, so that each work-group fills the entries that
             #   its column of the cursors counted
-            update_csr_kernel!(
+            launch_item_kernel!(
+                update_csr_values!,
+                backend,
+                cld(n_pairs, pair_chunk),
+                1,
                 eem.state.H_nonzero,
                 eem.state.colidx,
                 reshape(eem.state.write_ptr, n_atoms, :),
@@ -1045,12 +1232,14 @@ function charge_equilibration!(
                 sys.boundary,
                 conversion_factor,
                 pair_chunk,
-                n_pairs;
-                ndrange=cld(n_pairs, pair_chunk),
-                workgroupsize=1
+                n_pairs,
             )
         else
-            update_csr_kernel!(
+            launch_item_kernel!(
+                update_csr_values!,
+                backend,
+                n_pairs,
+                pair_workgroupsize,
                 eem.state.H_nonzero,
                 eem.state.colidx,
                 eem.state.write_ptr,
@@ -1061,9 +1250,7 @@ function charge_equilibration!(
                 sys.boundary,
                 conversion_factor,
                 Val(1),
-                n_pairs;
-                ndrange=n_pairs,
-                workgroupsize=pair_workgroupsize
+                n_pairs,
             )
         end
     end
@@ -1075,7 +1262,8 @@ function charge_equilibration!(
         group_size = max(group_size, nextpow(2, backend_workgroupsize(backend, n_atoms, n_threads)))
     end
     reduction_ndrange = qeq_reduction_ndrange(n_atoms, group_size)
-    reduction_workgroup_size = (group_size,)
+    # part of the type of the reduction kernels, which use `@localmem`
+    reduction_workgroup_size = Val((group_size,))
 
     # predict next time step's charges using charge history only if new MD step
     if step_n != eem.state.last_history_step
@@ -1093,12 +1281,14 @@ function charge_equilibration!(
 
         # correct any extrapolation roundoff to preserve net charge
         fill!(eem.state.buffers, zero(QT))
-        charge_sums_kernel! = charge_sums!(backend, reduction_workgroup_size)
-        charge_sums_kernel!(
+        launch_qeq_kernel!(
+            charge_sums!,
+            backend,
+            reduction_ndrange,
+            reduction_workgroup_size,
             eem.state.buffers,
             eem.state.q_backup,
-            eem.state.q;
-            ndrange=reduction_ndrange
+            eem.state.q,
         )
 
         correct_charge_kernel! = correct_predicted_charge!(backend)
@@ -1120,46 +1310,53 @@ function charge_equilibration!(
         matvec_workgroupsize = backend_workgroupsize(backend, n_atoms, n_threads)
     end
     
-    smm_kernel!(
+    sparse_mat_mul!(
+        smm_kernel!,
+        smm_kernel_ndrange,     # global range might be (32, 13200) but workgroup size is (32, 8)
+        matvec_workgroupsize,
         eem.state.Hq,
         eem.state.H_diag,
         eem.state.H_nonzero,
         eem.state.rowptr,
         eem.state.colidx,
-        eem.state.q;
-        ndrange=smm_kernel_ndrange,     # global range might be (32, 13200) but workgroup size is (32, 8)
-        workgroupsize=matvec_workgroupsize
+        eem.state.q,
     )
 
     # calculate initial unprojected residual r_0 = -χ - Hq and its sum
-    residual_kernel! = initial_residual_sum!(backend, reduction_workgroup_size)
-    residual_kernel!(
+    launch_qeq_kernel!(
+        initial_residual_sum!,
+        backend,
+        reduction_ndrange,
+        reduction_workgroup_size,
         eem.state.r,
         eem.state.mχ,
         eem.state.Hq,
-        eem.state.buffers;
-        ndrange=reduction_ndrange
+        eem.state.buffers,
     )
 
     # project initial residual and then precondition, and calculates its sum
-    project_reduce_kernel! = project_precondition_reduce!(backend, reduction_workgroup_size)
-    project_reduce_kernel!(
+    launch_qeq_kernel!(
+        project_precondition_reduce!,
+        backend,
+        reduction_ndrange,
+        reduction_workgroup_size,
         eem.state.r,
         eem.state.z,
         eem.state.buffers,
         eem.state.H_diag_inv,
-        ndrange=reduction_ndrange
     )
 
     # project initial preconditioned residual and set initial search direction to initial projected preconditioned residual
     # calculate the scalar product dot(r, z)
-    initial_direction_kernel! = initialize_direction_reduce!(backend, reduction_workgroup_size)
-    initial_direction_kernel!(
+    launch_qeq_kernel!(
+        initialize_direction_reduce!,
+        backend,
+        reduction_ndrange,
+        reduction_workgroup_size,
         eem.state.r,
         eem.state.z,
         eem.state.d,
-        eem.state.buffers;
-        ndrange=reduction_ndrange
+        eem.state.buffers,
     )
 
     # numerator of α (distance to move along search direction)
@@ -1177,63 +1374,72 @@ function charge_equilibration!(
 
     iter = 0
 
-    dot_kernel! = reduce_dot!(backend, reduction_workgroup_size)
-    update_qr_kernel! = update_charge_residual_reduce!(backend, reduction_workgroup_size)
-    shift_z_kernel! = shift_z_reduce_rz!(backend, reduction_workgroup_size)
-    direction_kernel! = update_direction!(backend)
 
     while iter < eem.max_iterations && rz > QEq_tolerance 
         fill!(eem.state.buffers, zero(QT))
 
         # calculate H*d
-        smm_kernel!(
+        sparse_mat_mul!(
+            smm_kernel!,
+            smm_kernel_ndrange,
+            matvec_workgroupsize,
             eem.state.Hd,
             eem.state.H_diag,
             eem.state.H_nonzero,
             eem.state.rowptr,
             eem.state.colidx,
-            eem.state.d;
-            ndrange=smm_kernel_ndrange,
-            workgroupsize=matvec_workgroupsize
+            eem.state.d,
         )
         
         # calculate dHd, the denominator of α
-        dot_kernel!(
+        launch_qeq_kernel!(
+            reduce_dot!,
+            backend,
+            reduction_ndrange,
+            reduction_workgroup_size,
             eem.state.buffers,
             eem.state.d,
-            eem.state.Hd;
-            ndrange=reduction_ndrange
+            eem.state.Hd,
         )
 
         # check curvature, calculate α, update q and r 
         # calculate sum(r) and store in slot 3
-        update_qr_kernel!(
+        launch_qeq_kernel!(
+            update_charge_residual_reduce!,
+            backend,
+            reduction_ndrange,
+            reduction_workgroup_size,
             eem.state.q,
             eem.state.r,
             eem.state.d,
             eem.state.Hd,
             eem.state.buffers,
-            rz;
-            ndrange=reduction_ndrange
+            rz,
         )
 
         # project updated residual, precondition it
         # calculate sum(z) and store in slot 1
-        project_reduce_kernel!(
+        launch_qeq_kernel!(
+            project_precondition_reduce!,
+            backend,
+            reduction_ndrange,
+            reduction_workgroup_size,
             eem.state.r,
             eem.state.z,
             eem.state.buffers,
             eem.state.H_diag_inv,
-            ndrange=reduction_ndrange
         )
 
         # project preconditioned updated residual
         # calculate dot(r, z) and store in slot 2
-        shift_z_kernel!(
+        launch_qeq_kernel!(
+            shift_z_reduce_rz!,
+            backend,
+            reduction_ndrange,
+            reduction_workgroup_size,
             eem.state.r,
             eem.state.z,
-            eem.state.buffers;
-            ndrange=reduction_ndrange
+            eem.state.buffers,
         )
 
         # calculate Gram-Schmidt coefficient for search direction update
@@ -1261,12 +1467,14 @@ function charge_equilibration!(
         if rz > QEq_tolerance
             β = rz / rz_old
 
-            direction_kernel!(
+            launch_qeq_kernel!(
+                update_direction!,
+                backend,
+                n_atoms,
+                atom_workgroupsize,
                 eem.state.d,
                 eem.state.z,
-                β;
-                ndrange=n_atoms,
-                workgroupsize=atom_workgroupsize
+                β,
             )
         end
     end
