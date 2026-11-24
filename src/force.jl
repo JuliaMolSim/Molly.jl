@@ -591,6 +591,7 @@ mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT,
     constraint_velocities_buffer::Base.RefValue{Any}
     constraint_preview_coords_buffer::Base.RefValue{Any}
     constraint_preview_velocities_buffer::Base.RefValue{Any}
+    unwrapped_coords::Base.RefValue{Any} 
     validity::BufferValidity
     box_mins::C
     box_maxs::C
@@ -644,6 +645,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       pre_coupling_ref(), pre_coupling_ref(), pre_coupling_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      Ref{Any}(nothing),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -798,6 +800,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       pre_coupling_ref(),
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
+                      Ref{Any}(nothing),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
                       morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
@@ -1452,11 +1455,15 @@ function forces!(fs,
         fill!(buffers.virial, zero(eltype(buffers.virial)))
     end
 
+    # One unwrap shared by all biases
+    unwrapped_coords = buffers.unwrapped_coords
+    unwrapped_coords[] = nothing
     for inter in values(general_inters)
         if evaluate_before_pairwise(inter)
             AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                      n_threads=n_threads, buffers=buffers, needs_vir=needs_vir,
-                                     visit_state=visit_state, strictness=strictness)
+                                     visit_state=visit_state, strictness=strictness,
+                                     unwrapped_coords=unwrapped_coords)
         end
     end
 
@@ -1468,7 +1475,7 @@ function forces!(fs,
                 AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors,
                                 step_n=step_n, n_threads=n_threads, buffers=buffers,
                                 needs_vir=needs_vir, visit_state=visit_state,
-                                strictness=strictness)
+                                strictness=strictness, unwrapped_coords=unwrapped_coords)
             end
         end
     end
@@ -1485,6 +1492,7 @@ function forces!(fs,
                     specific_inter_lists, n_threads, Val(has_early_interactions))
         general_forces!(false)
     end
+    unwrapped_coords[] = nothing # Release the unwrapped coordinates
     distribute_forces!(fs, sys, buffers; n_threads=n_threads)
 
     if needs_vir
@@ -1605,8 +1613,9 @@ function gpu_forces_concurrent!(fs,
     # Giving the specific and general interactions a queue each was slower, as the pairwise
     #   force kernel then shares the device with more work at once
     side = side_work_start(get_backend(sys.coords))
+    # The unwrap plan may have been last used on the main stream, e.g. by the barostat
     shared = (sys.coords, sys.velocities, sys.atoms, buffers.fs_mat, buffers.virial_slots,
-              fs)
+              fs, unwrap_plan_arrays(sys.topology)...)
     with_pairwise_partition(values(pairwise_inters)) do pis_nonl, pis_nl
         # The kernels using the neighbor list are launched first as they take the longest
         if length(pis_nl) > 0

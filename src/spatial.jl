@@ -669,11 +669,13 @@ end
 
 Unwrap coordinates so that molecules are not split over the boundary.
 
-Returns coordinates on CPU.
-Ensures that the center of geometry of bonded clusters of atoms is
-always inside the simulation box.
+`unwrap_molecules(sys)` returns coordinates on CPU; the second form returns them on the
+device of `coords`.
+Ensures that the center of geometry of each molecule is always inside the simulation box.
+Molecules are taken from `topology` and must be the connected components of its bonds.
+Boundaries with an infinite dimension are not supported on GPU.
 """
-unwrap_molecules(sys) = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+unwrap_molecules(sys) = from_device(unwrap_molecules(sys.coords, sys.boundary, sys.topology))
 
 function unwrap_molecules(coords::AbstractVector{<:SVector{D}}, boundary, topology) where D
     coords_cpu = from_device(coords)
@@ -1419,6 +1421,17 @@ function molecule_unwrap_plan(topology::MolecularTopology,
     return plan
 end
 
+# The device arrays of the unwrap plan cached in `topology`, none if there is no plan
+function unwrap_plan_arrays(topology)
+    plan = (isnothing(topology) ? nothing : topology.unwrap_cache[])
+    if !(plan isa MoleculeUnwrapPlan)
+        return ()
+    end
+    return (plan.parents, plan.atom_molecule_inds, plan.molecule_atom_counts, plan.frac,
+            plan.shifts_1, plan.shifts_2, plan.ancestors_1, plan.ancestors_2,
+            plan.center_sums)
+end
+
 @inline wrap_frac01(v) = v .- floor.(v)
 
 # The box matrix without units, in the length unit of the coordinates
@@ -1538,6 +1551,42 @@ function molecule_centers(coords::AbstractGPUArray{SVector{D, C}}, boundary,
                    plan.center_sums, plan.molecule_atom_counts, box, coord_unit, Val(D),
                    Val(T); ndrange=n_mol)
     return centers
+end
+
+# Shifts each atom by the box lengths that put the center of its molecule inside the box
+@kernel inbounds=true function unwrap_place_kernel!(coords_out, @Const(frac), @Const(shifts),
+                                        @Const(center_sums), @Const(counts),
+                                        @Const(atom_molecule_inds), box, coord_unit,
+                                        ::Val{D}, ::Val{T}) where {D, T}
+    i = @index(Global, Linear)
+    if i <= length(coords_out)
+        mean_frac = molecule_mean_frac(center_sums, counts, atom_molecule_inds[i], Val(D),
+                                       Val(T))
+        u = frac[i] - shifts[i] - floor.(mean_frac)
+        coords_out[i] = (box * u) * coord_unit
+    end
+end
+
+# Systems sharing a topology share its plan buffers, so don't unwrap them from parallel tasks
+function unwrap_molecules(coords::AbstractGPUArray{SVector{D, C}}, boundary,
+                          topology) where {D, C}
+    if isnothing(topology)
+        return coords
+    end
+    if has_infinite_boundary(boundary)
+        throw(ArgumentError("infinite boundary not supported for unwrap_molecules on GPU"))
+    end
+    T = typeof(ustrip(zero(C)))
+    coord_unit = unit(C)
+    plan = molecule_unwrap_plan(topology, coords)
+    box = box_matrix_nounits(boundary, coord_unit, T)
+    shifts = unwrap_molecules_gpu!(plan, coords, inv(box))
+    coords_out = similar(coords)
+    launch_kernel!(unwrap_place_kernel!(get_backend(coords), 256), coords_out, plan.frac,
+                   shifts, plan.center_sums, plan.molecule_atom_counts,
+                   plan.atom_molecule_inds, box, coord_unit, Val(D), Val(T);
+                   ndrange=length(coords))
+    return coords_out
 end
 
 #=

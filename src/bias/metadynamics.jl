@@ -1088,11 +1088,11 @@ bias_description(md::Metadynamics) =
 
 # Host copies of the system made once per call: the coordinates each CV is evaluated on
 #   (unwrapped for correction=:pbc, as stored for :wrap), the atoms and the velocities
-function metadynamics_host_state(md::Metadynamics, sys)
+function metadynamics_host_state(md::Metadynamics, sys, cache=nothing)
     cvs = md.memory.cvs
     coords = any(cv -> cv.correction != :pbc, cvs) ? from_device(sys.coords) : nothing
-    coords_pbc = any(cv -> cv.correction == :pbc, cvs) ? from_device(unwrap_molecules(sys)) :
-                                                          nothing
+    coords_pbc = any(cv -> cv.correction == :pbc, cvs) ?
+                 from_device(cached_unwrap(sys, cache)) : nothing
     cv_coords = map(cv -> cv.correction == :pbc ? coords_pbc : coords, cvs)
     return cv_coords, from_device(sys.atoms), from_device(sys.velocities)
 end
@@ -1129,11 +1129,12 @@ end
 # Subtracts the bias forces from fs and returns the bias energy before any deposit (nothing
 #   without with_energy), from one evaluation of the CVs
 function metadynamics_forces!(fs, sys, md::Metadynamics; needs_vir::Bool=false,
-                              buffers=nothing, step_n=nothing, with_energy::Bool=false,
-                              visit_state::Bool=false, strictness=default_strictness())
+                              buffers=nothing, step_n=nothing, unwrapped_coords=nothing,
+                              with_energy::Bool=false, visit_state::Bool=false,
+                              strictness=default_strictness())
     visit_state && check_logger_kT(md.logger, md, sys.k) # Only a deposit uses kT
     cvs = md.memory.cvs
-    cv_coords, atoms, velocities = metadynamics_host_state(md, sys)
+    cv_coords, atoms, velocities = metadynamics_host_state(md, sys, unwrapped_coords)
 
     # CV gradients and values, each CV on the coordinates its own correction asks for
     grads = map(cvs, cv_coords) do cv, coords
@@ -1165,9 +1166,11 @@ end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
                                   md::Metadynamics; needs_vir::Bool=false,
-                                  buffers=nothing, step_n=nothing, visit_state::Bool=false,
-                                  strictness=default_strictness(), kwargs...)
-    metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, visit_state, strictness)
+                                  buffers=nothing, step_n=nothing, unwrapped_coords=nothing,
+                                  visit_state::Bool=false, strictness=default_strictness(),
+                                  kwargs...)
+    metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, unwrapped_coords,
+                         visit_state, strictness)
     return fs
 end
 
@@ -1178,10 +1181,10 @@ concurrent_with_pairwise(::Metadynamics) = true
 function AtomsCalculators.energy_forces!(fs::AbstractVector, # Required for disambiguation
                                          sys::System, md::Metadynamics; needs_vir::Bool=false,
                                          buffers=nothing, step_n=nothing,
-                                         visit_state::Bool=false,
+                                         unwrapped_coords=nothing, visit_state::Bool=false,
                                          strictness=default_strictness(), kwargs...)
-    pe = metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, with_energy=true,
-                              visit_state, strictness)
+    pe = metadynamics_forces!(fs, sys, md; needs_vir, buffers, step_n, unwrapped_coords,
+                              with_energy=true, visit_state, strictness)
     return (energy=pe, forces=fs)
 end
 

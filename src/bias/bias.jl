@@ -286,13 +286,25 @@ function check_bias_finite(value, label::AbstractString, bias;
     error(msg)
 end
 
+# Unwrapped coordinates on the device of sys.coords, computed once per call of the GPU
+#   forces!, which passes its cache as the unwrapped_coords keyword
+function cached_unwrap(sys, cache=nothing)
+    isnothing(cache) && return unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    if isnothing(cache[])
+        cache[] = unwrap_molecules(sys.coords, sys.boundary, sys.topology)
+    end
+    return cache[]
+end
+
+# The coordinates a bias uses, unwrapped for correction=:pbc
+function bias_coords(sys, cv_type, cache=nothing)
+    cv_type.correction != :pbc && return sys.coords
+    return cached_unwrap(sys, cache)
+end
+
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                             bias::BiasPotential; kwargs...)
-    if bias.cv_type.correction == :pbc
-        coords = unwrap_molecules(sys)
-    else
-        coords = sys.coords
-    end
+    coords = bias_coords(sys, bias.cv_type)
 
     cv_sim = calculate_cv(
         bias.cv_type,
@@ -312,19 +324,18 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     fs, sys, bias::BiasPotential;
     needs_vir::Bool = false,
     buffers = nothing, # Dummy to be able to have explicit kwarg. In reality a buffer will always be passed
+    unwrapped_coords = nothing,
     kwargs...
 )
-    if bias.cv_type.correction == :pbc
-        coords = unwrap_molecules(sys)
-    else
-        coords = sys.coords
-    end
+    # Copied to the host once, also for the virial
+    coords = from_device(bias_coords(sys, bias.cv_type, unwrapped_coords))
+    atoms = from_device(sys.atoms)
 
     # Gradient of CV with respect to coordinates
     d_coords, cv_sim = cv_gradient(
         bias.cv_type,
-        from_device(coords),
-        from_device(sys.atoms),
+        coords,
+        atoms,
         sys.boundary,
         from_device(sys.velocities),
     )
@@ -345,8 +356,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(
     )
     
     if needs_vir && bias.cv_type.has_virial
-        calculate_virial!(buffers.virial, bias.cv_type, from_device(coords), -fs_svec,
-                          from_device(sys.atoms), sys.boundary)
+        calculate_virial!(buffers.virial, bias.cv_type, coords, -fs_svec, atoms, sys.boundary)
     end
 
     fs .-= to_device(fs_svec, typeof(fs))
