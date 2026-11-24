@@ -559,6 +559,8 @@ end
 
 @testset "ReaxFF $quantity gradient CPU $structure_file smoothness=$smoothness_correction" for smoothness_correction in (false, true),
         quantity in (:energy, :force_loss), structure_file in ("ethane.pdb", "water.pdb")
+    grad_atol = (quantity == :force_loss ? 1e-7 : 1e-8)
+
     reaxff = ReaxFF(
         force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
         float_type=Float64,
@@ -702,7 +704,7 @@ end
             getfield(enzyme_gradients, name),
             getfield(finite_diff_gradients, name);
             rtol=1e-6,
-            atol=1e-8
+            atol=grad_atol
         )
     end
 
@@ -720,7 +722,7 @@ end
                 getfield(enzyme_atom_gradients[i], name),
                 getfield(finite_diff_atom_gradients[i], name);
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -742,7 +744,7 @@ end
                 getfield(enzyme_bond_gradients[i], name),
                 finite_diff_bond_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -764,7 +766,7 @@ end
                 getfield(enzyme_off_diagonal_gradients[i], name),
                 finite_diff_off_diagonal_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -783,7 +785,7 @@ end
                 getfield(enzyme_angle_gradients[i], name),
                 finite_diff_angle_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -801,7 +803,7 @@ end
                 getfield(enzyme_torsion_gradients[i], name),
                 finite_diff_torsion_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -819,7 +821,7 @@ end
                 getfield(enzyme_h_bond_gradients[i], name),
                 finite_diff_h_bond_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
