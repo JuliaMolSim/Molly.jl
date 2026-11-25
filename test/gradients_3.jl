@@ -15,7 +15,7 @@
         push!(runs, ("CPU parallel gbn2"        , Array, true, false, false, false, true , 1e-3, 1e-3))
         push!(runs, ("CPU parallel gbn2 forward", Array, true, true , false, false, true , 0.5 , 0.1 ))
     end
-    #=for AT in array_list[2:end] # gpu  par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+    #=for AT in array_list_grads[2:end] # gpu par fwd  f32    obc2   gbn2   tol_σ tol_r0
         push!(runs, ("$AT"    ,   AT,  false, false, false, false, false, 0.25, 20.0))
         push!(runs, ("$AT f32",   AT,  false, false, true , false, false, 0.5 , 50.0))
     end=#

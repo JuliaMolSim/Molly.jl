@@ -16,6 +16,7 @@ if !run_visualize_tests
 end
 
 const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0"
+const run_gpu_grad_tests = get(ENV, "GPUGRADTESTS", (run_gpu_tests ? "1" : "0")) != "0"
 
 const DEVICE = parse(Int, get(ENV, "DEVICE", "0")) # Allow GPU device to be specified
 
@@ -90,11 +91,12 @@ const init_code_block = quote
     const n_threads_list = (1, $n_threads_per_job)
 
     const run_gpu_tests = $run_gpu_tests
+    const run_gpu_grad_tests = $run_gpu_grad_tests
     const run_cuda_tests  = run_gpu_tests && CUDA.functional()
     const run_metal_tests = run_gpu_tests && Metal.functional()
     const DEVICE = $DEVICE
-    array_list = (Array,)
 
+    array_list = (Array,)
     if run_cuda_tests
         array_list = (array_list..., CuArray)
         CUDA.device!(DEVICE)
@@ -108,6 +110,22 @@ const init_code_block = quote
         array_list = (array_list..., oneArray)
         oneAPI.device!(DEVICE)
     end
+
+    array_list_grads = (Array,)
+    if run_gpu_grad_tests && CUDA.functional()
+        array_list_grads = (array_list_grads..., CuArray)
+        CUDA.device!(DEVICE)
+    end
+    if run_gpu_grad_tests && AMDGPU.functional()
+        array_list_grads = (array_list_grads..., ROCArray)
+        amd_device = (iszero(DEVICE) ? 1 : DEVICE)
+        AMDGPU.device!(AMDGPU.device(amd_device))
+    end
+    if run_gpu_grad_tests && oneAPI.functional()
+        array_list_grads = (array_list_grads..., oneArray)
+        oneAPI.device!(DEVICE)
+    end
+
     if run_metal_tests
         # Metal only supports 32-bit precision, so MtlArray can not be added to array_list
         array_list_metal = (array_list..., MtlArray)

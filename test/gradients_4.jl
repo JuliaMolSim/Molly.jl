@@ -39,7 +39,7 @@
     if Threads.nthreads() > 1
         push!(platform_runs, ("CPU parallel", Array, true))
     end
-    for AT in array_list[2:end]
+    for AT in array_list_grads[2:end]
         push!(platform_runs, ("$AT", AT, false))
     end
     nonbonded_methods = (("cutoff", DistanceCutoff(1.0)), ("PME", SetupPME()))

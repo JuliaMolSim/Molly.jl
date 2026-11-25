@@ -390,7 +390,7 @@ end
         units=false,
     )
 
-    for AT in array_list
+    for AT in array_list_grads
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;

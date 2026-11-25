@@ -1329,6 +1329,7 @@ end
     @test disp(Molly.set_lambda!(sys_λ_mod, 0.6)) ≈
           disp(AbsoluteFESystem(sys_rebuilt, 0.6, solute)) rtol=1e-12
 
+    # Use array_list not array_list_grads since no AD is done
     for AT in array_list[2:end]
         sys_gpu = garnet_sys(AT, true)
         plan_gpu = ParameterPlan(sys_gpu, params_dic)

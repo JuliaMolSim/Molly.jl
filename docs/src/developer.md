@@ -10,6 +10,7 @@ Warnings appearing at the start of the test run due to unavailable backends is e
 Various environmental variables can be set to modify the tests:
 - `VISTESTS` determines whether to run the [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) plotting tests which will error on remote systems where a display is not available, default `VISTESTS=1`.
 - `GPUTESTS` determines whether to run the GPU tests if a GPU is available, default `GPUTESTS=1`.
+- `GPUGRADTESTS` determines whether to run the GPU gradient tests if a GPU is available, defaults to `GPUTESTS`.
 - `DEVICE` determines which GPU to run the GPU tests on, default `DEVICE=0`.
 The CI run does not carry out all tests - for example the GPU tests are not run - and this is reflected in the code coverage.
 Running the test file locally gives higher coverage.
