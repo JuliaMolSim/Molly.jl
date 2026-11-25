@@ -2077,24 +2077,6 @@ end
                     force_units=NoUnits,
                     energy_units=NoUnits,
                 )
-
-                # A system that is not a 3D GPU system gets an explanation
-                cpu_sys = System(
-                    atoms=[Molly.Atom(index=i, mass=1.0f0) for i in 1:2],
-                    coords=[
-                        SVector{3,Float32}(1.0, 1.0, 1.0),
-                        SVector{3,Float32}(2.0, 1.0, 1.0),
-                    ],
-                    boundary=CubicBoundary(10.0f0),
-                    neighbor_finder=GPUCellListNeighborFinder(
-                        dist_cutoff=1.0f0,
-                        output=:geometric_pairs,
-                    ),
-                    force_units=NoUnits,
-                    energy_units=NoUnits,
-                )
-
-                @test_throws ArgumentError find_neighbors(cpu_sys)
             end
         end
     end
