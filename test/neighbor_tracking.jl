@@ -178,9 +178,13 @@ end
     @test serial == (d2_all[end], d2_all[end - 1])
 
     # The GPU reductions give the same displacements as the CPU one, including the generic
-    #   kernel used on GPUs other than CUDA ones
+    #   kernel used on backends without `fused_tile_check`
+    # The device code can contract a multiplication and an addition into a fused
+    #   multiply-add, so the displacements of the atoms can differ in the last bits, and by
+    #   more in a deformed box where the displacement is the difference of two coordinates
     for AT in array_list[2:end]
         for T in (Float32, Float64)
+            same_top2(a, b) = all(isapprox.(a, b; rtol=sqrt(eps(T))))
             c0 = [SVector{3, T}(c) for c in coords_many_0]
             c1 = [SVector{3, T}(c) for c in coords_many_1]
             b_T = CubicBoundary(T(5.0))
@@ -188,18 +192,20 @@ end
             c0_d, c1_d = to_device(c0, AT), to_device(c1, AT)
             tracker = Molly.DisplacementTracker()
             for _ in 1:2 # The second time reuses the buffers
-                @test Molly.max_sq_displacements(c1_d, c0_d, b_T, nothing, NoUnits, T, 1,
-                                                 tracker) == cpu
+                @test same_top2(Molly.max_sq_displacements(c1_d, c0_d, b_T, nothing, NoUnits,
+                                                           T, 1, tracker), cpu)
             end
-            generic = invoke(Molly.max_sq_displacements,
-                             Tuple{AbstractGPUArray, Any, Any, Any, Any, Type{T}, Integer, Any},
-                             c1_d, c0_d, b_T, nothing, NoUnits, T, 1, nothing)
-            @test generic == cpu
+            generic = Molly.grouped_max_sq_displacements(c1_d, c0_d, b_T, nothing, NoUnits, T)
+            @test same_top2(generic, cpu)
+            fused = Molly.fused_max_sq_displacements(c1_d, c0_d, b_T, nothing, NoUnits, T,
+                                                     nothing)
+            @test same_top2(fused, cpu)
             # A box deformation, and fewer atoms than threads in a group
             F = SVector{3, T}(1.01, 0.99, 1.0)
             b_F = CubicBoundary(T(5.0) .* F)
-            @test Molly.max_sq_displacements(c1_d[1:7], c0_d[1:7], b_F, F, NoUnits, T, 1) ==
-                  Molly.max_sq_displacements(c1[1:7], c0[1:7], b_F, F, NoUnits, T, 1)
+            @test same_top2(Molly.max_sq_displacements(c1_d[1:7], c0_d[1:7], b_F, F, NoUnits,
+                                                       T, 1),
+                            Molly.max_sq_displacements(c1[1:7], c0[1:7], b_F, F, NoUnits, T, 1))
         end
     end
 end

@@ -232,7 +232,7 @@ and energy loops use.
 Returns a [`NeighborList`](@ref) for the classical neighbor finders and a
 [`GPUCellListNeighborList`](@ref) for [`GPUCellListNeighborFinder`](@ref).
 
-For [`GPUNeighborFinder`](@ref), this returns `nothing`: the CUDA pairwise force
+For [`GPUNeighborFinder`](@ref), this returns `nothing`: the tiled pairwise force
 and energy kernels build and cache their interacting tile list internally from
 the neighbor-finder metadata, and with `auto_update=false` this call marks when that
 list is rebuilt.
@@ -317,9 +317,9 @@ tracked list, since it does not reuse the memory of that list, so that analysis 
 simulation does not cause extra rebuilds. A shared neighbor finder should not be used by
 systems that are simulated at the same time on different threads.
 
-GPUNeighborFinder builds its tile list in the CUDA force and energy kernels rather than
+GPUNeighborFinder builds its tile list in the tiled force and energy kernels rather than
 in find_neighbors, so it makes the same check there against coordinates stored in the
-GPU buffers, see the CUDA extension.
+GPU buffers, see `run_tiled_kernel!`.
 =#
 
 # State of a neighbor finder that tracks displacements, mutable so that neighbor finders
@@ -595,7 +595,8 @@ const displacement_max_n_groups = 256
 Each group finds the two largest squared displacements of the atoms it covers, which are
 then reduced on the host. One kernel and one small transfer takes about a third of the
 time of the equivalent mapreduce for a system of tens of thousands of atoms.
-The CUDA extension has a faster version.
+Backends that support `fused_tile_check`, such as CUDA, use a faster version that reduces
+the results on the device, see `fused_max_sq_displacements`.
 =#
 @kernel inbounds=true function max_sq_displacements_kernel!(group_maxs, @Const(coords),
                                     @Const(ref_coords), boundary, F, dist_unit, n_atoms,
@@ -656,6 +657,18 @@ end
 
 function max_sq_displacements(coords::AbstractGPUArray, ref_coords, boundary, F, dist_unit,
                               ::Type{T}, n_threads::Integer, tracker=nothing) where {T}
+    if fused_tile_check(get_backend(coords))
+        return fused_max_sq_displacements(coords, ref_coords, boundary, F, dist_unit, T,
+                                          tracker)
+    else
+        return grouped_max_sq_displacements(coords, ref_coords, boundary, F, dist_unit, T,
+                                            tracker)
+    end
+end
+
+# The check with the results of the groups reduced on the host, see above
+function grouped_max_sq_displacements(coords, ref_coords, boundary, F, dist_unit, ::Type{T},
+                                      tracker=nothing) where {T}
     n_atoms = length(coords)
     iszero(n_atoms) && return (zero(T), zero(T))
     n_groups = min(cld(n_atoms, displacement_group_size), displacement_max_n_groups)
@@ -828,12 +841,18 @@ end
 #=
     uses_gpu_neighbor_finder(AT)
 
-Indicate whether an array type `AT` is compatible with [`GPUNeighborFinder`](@ref).
+Whether [`GPUNeighborFinder`](@ref) is used for systems with array type `AT` by default,
+which is the case for GPU array types whose KernelAbstractions backend supports the tiled
+kernels on the active device, see `supports_tiled_kernels`.
 
-Custom GPU array types should define a method for this function that returns `true`
-if they are supported. By default, this returns `false`.
+Custom GPU array types are covered when their backend reports the KernelInterface traits
+that the kernels need, otherwise they can define a method for this function.
 =#
 uses_gpu_neighbor_finder(AT) = false
+
+function uses_gpu_neighbor_finder(::Type{AT}) where AT <: AbstractGPUArray
+    return supports_tiled_kernels(array_type_backend(AT))
+end
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
@@ -842,11 +861,16 @@ uses_gpu_neighbor_finder(AT) = false
     GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
                       n_steps=10, array_type=nothing, initialized=false, strictness=:warn)
 
-Neighbor finder for CUDA systems that uses tiled pairwise kernels.
+Neighbor finder for GPU systems that uses Molly's tiled pairwise kernels.
+These need a KernelAbstractions backend that supports atomics and sub-groups of 32
+work-items with shuffles, or of 64 work-items that can diverge in halves, which
+`Molly.supports_tiled_kernels(backend)` checks. This is the case for CUDA.jl, AMDGPU.jl,
+oneAPI.jl on devices with sub-groups of 32 work-items and Metal.jl where it supports
+atomics (Metal 4.1 and later).
 
 See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
-Instead, the CUDA pairwise force and energy paths reorder atoms on a Morton
+Instead, the tiled pairwise force and energy paths reorder atoms on a Morton
 curve and build a compact list of interacting 32x32 tiles directly on the device.
 The exclusions and special pairs are read from per-atom sparse lists inside the
 tiles that contain them, so the memory used grows linearly with the number of
@@ -862,7 +886,8 @@ points as for the other neighbor finders, since the tile list is rebuilt at the 
 force or energy evaluation after `find_neighbors` is called on a step that is a multiple
 of `n_steps` or with `force_recompute=true`.
 
-This is the recommended neighbor finder for `CuArray` systems. On other GPUs use
+This is the recommended neighbor finder on GPUs that support the tiled kernels, and the
+default there when setting up a [`System`](@ref) from a file. On other GPUs use
 [`GPUCellListNeighborFinder`](@ref).
 The exceptions are stored in the `eligible` and `special` fields as
 [`SparsePairMatrix`](@ref)s on the device. Updating the exception pairs should reset
@@ -1031,7 +1056,7 @@ function GPUNeighborFinder(;
                 initialized, 0, 0, 0, eligible_sparse, special_sparse, DisplacementTracker())
 end
 
-# The interacting tile list is built within the CUDA pairwise kernels, so this only records
+# The interacting tile list is built within the tiled pairwise kernels, so this only records
 #   that it is due to be rebuilt, at the same points as the other neighbor finders rebuild
 #   their lists
 # With auto_update=false the Morton order is recomputed as well every `n_steps` steps,
@@ -1068,8 +1093,8 @@ Neighbor finder for GPU systems that bins atoms into a uniform grid of cells and
 searches the 3x3x3 stencil of cells around each atom.
 
 Returns a [`GPUCellListNeighborList`](@ref). It runs on any GPU backend and is
-the recommended neighbor finder for non-CUDA GPUs, where [`GPUNeighborFinder`](@ref)
-is not available. Three-dimensional [`CubicBoundary`](@ref) and
+the recommended neighbor finder on GPUs that do not support the tiled kernels of
+[`GPUNeighborFinder`](@ref). Three-dimensional [`CubicBoundary`](@ref) and
 [`TriclinicBoundary`](@ref) systems are supported, provided the grid has at least
 three cells along every box axis, i.e. opposite box faces are at least three times
 the internally padded search cutoff apart. For a [`TriclinicBoundary`](@ref), that
@@ -1339,6 +1364,8 @@ in place rather than reallocated when the box changes.
     box::SMatrix{3, 3, T, 9}
     box_inv::SMatrix{3, 3, T, 9}
     cutoff2::T
+    # The workspaces of the scans, see `cell_list_scan!`
+    scan_workspaces::Dict{Symbol, Any} = Dict{Symbol, Any}()
 end
 
 #=
@@ -2095,6 +2122,23 @@ KernelAbstractions CPU backend.
     end
 end
 
+#=
+The inclusive scan of `src` into `dst` starting from `init`, with the workspace of the scan
+kept in the state under `key` while the arrays keep their length, so that a rebuild does
+not allocate the scratch memory of the scan.
+=#
+function cell_list_scan!(state::GPUCellListState, key::Symbol, dst, src, init)
+    entry = get(state.scan_workspaces, key, nothing)
+    if isnothing(entry) || entry[1] != length(dst)
+        ws = AcceleratedKernels.workspace(AcceleratedKernels.accumulate!, +, dst, src;
+                                          init=init)
+        entry = (length(dst), ws)
+        state.scan_workspaces[key] = entry
+    end
+    AcceleratedKernels.accumulate!(+, dst, src; init=init, workspace=entry[2])
+    return dst
+end
+
 function build_gpu_cell_list!(state::GPUCellListState)
     n_atoms, n_cells = Int(state.n_atoms), Int(state.n_cells)
     backend = get_backend(state.x)
@@ -2113,8 +2157,7 @@ function build_gpu_cell_list!(state::GPUCellListState)
 
     # The buffers can be longer than the cell grid after the box has shrunk, but the
     #   counts past n_cells are zero so the scan is still correct over the grid
-    AcceleratedKernels.accumulate!(+, state.inclusive_counts, state.cell_counts, backend;
-                                   init=Int32(0))
+    cell_list_scan!(state, :cells, state.inclusive_counts, state.cell_counts, Int32(0))
 
     offsets_kernel! = gpu_cell_list_offsets_kernel!(backend, n_threads_cells)
     offsets_kernel!(state.cell_offsets, state.counters, state.inclusive_counts,
@@ -2124,8 +2167,8 @@ function build_gpu_cell_list!(state::GPUCellListState)
     tile_counts_kernel!(state.cell_tile_counts, state.cell_counts, state.n_cells;
                         ndrange=n_cells)
 
-    AcceleratedKernels.accumulate!(+, state.cell_tile_inclusive_counts,
-                                   state.cell_tile_counts, backend; init=Int32(0))
+    cell_list_scan!(state, :cell_tiles, state.cell_tile_inclusive_counts,
+                    state.cell_tile_counts, Int32(0))
 
     offsets_kernel!(state.cell_tile_offsets, state.counters,
                     state.cell_tile_inclusive_counts, state.n_cells, COUNTER_HOST_TILES;
@@ -2192,8 +2235,7 @@ function scan_pair_counts_gpu_cell_list!(state::GPUCellListState)
     n_atoms = Int(state.n_atoms)
     backend = get_backend(state.x)
 
-    AcceleratedKernels.accumulate!(+, state.pair_inclusive_counts, state.pair_counts, backend;
-                                   init=Int64(0))
+    cell_list_scan!(state, :pairs, state.pair_inclusive_counts, state.pair_counts, Int64(0))
 
     offsets_kernel! = gpu_cell_list_offsets_kernel!(backend, gpu_threads_cell_list(n_atoms))
     offsets_kernel!(state.pair_offsets, state.counters, state.pair_inclusive_counts,
@@ -2448,7 +2490,8 @@ end
 
 Find close atoms by distance.
 
-This is the recommended neighbor finder on non-NVIDIA GPUs when the box is too small for
+This is the recommended neighbor finder on GPUs that do not support the tiled kernels of
+[`GPUNeighborFinder`](@ref) when the box is too small for
 [`GPUCellListNeighborFinder`](@ref). It checks every pair of atoms, so the time it takes
 grows with the square of the number of atoms.
 
@@ -2469,8 +2512,8 @@ These are iterables of `(i, j)` pairs or sparse matrices.
 They are stored as [`SparsePairMatrix`](@ref)s, so the memory used is proportional to the
 number of pairs.
 `array_type` is the array type used to store them, `Array` by default, and should match
-the [`System`](@ref) that the neighbor finder is used with, for example `CuArray` for a
-system on a NVIDIA GPU.
+the [`System`](@ref) that the neighbor finder is used with, for example `CuArray` or
+`ROCArray` for a system on a GPU.
 
 Alternatively, `eligible` can be given as a symmetric `n_atoms` x `n_atoms` Boolean
 matrix that is `true` for the pairs that can interact, along with `special` as a matrix
@@ -2836,7 +2879,7 @@ function find_neighbors(sys::System{D, AT},
     # The inclusive prefix sum of the per-word neighbor counts gives the index one past the
     #   last neighbor written by each mask word, from which the fill kernel subtracts its
     #   own count to get its write offset
-    AcceleratedKernels.accumulate!(+, counts, backend; init=Int32(0))
+    AcceleratedKernels.accumulate!(+, counts; backend=backend, init=Int32(0))
     n_neighbors = Int(only(Array(@view counts[n_masks:n_masks])))
     neighbors_list = similar(sys.coords, Tuple{Int32, Int32, Bool}, n_neighbors)
 

@@ -1035,18 +1035,18 @@ Base.firstindex(::GPUCellListNeighborList) = 1
 Base.lastindex(neighbors::GPUCellListNeighborList) = length(neighbors)
 Base.eachindex(neighbors::GPUCellListNeighborList) = Base.OneTo(length(neighbors))
 
-# CUDA launch configuration
-const CUDA_LAUNCH_UNSET = 0
-const CUDA_TILE_THREADS_UNSET = (0, 0)
+# Launch configuration of the tiled kernels of GPUNeighborFinder, see tile_launch_config.jl
+const TILE_LAUNCH_UNSET = 0
+const TILE_THREADS_UNSET = (0, 0)
 
-struct CUDALaunchConfig
+struct TileLaunchConfig
     force_block_y::Int
     force_maxregs::Int
     tile_threads::NTuple{2, Int}
     energy_block_y::Int
 end
 
-function CUDALaunchConfig(;
+function TileLaunchConfig(;
                           force_block_y=nothing,
                           force_maxregs=nothing,
                           tile_threads=nothing,
@@ -1064,32 +1064,32 @@ function CUDALaunchConfig(;
     end
 
     tile_threads_raw = tile_threads === nothing ?
-                       CUDA_TILE_THREADS_UNSET :
+                       TILE_THREADS_UNSET :
                        (Int(tile_threads[1]), Int(tile_threads[2]))
-    return CUDALaunchConfig(
-        Int(something(force_block_y, CUDA_LAUNCH_UNSET)),
-        Int(something(force_maxregs, CUDA_LAUNCH_UNSET)),
+    return TileLaunchConfig(
+        Int(something(force_block_y, TILE_LAUNCH_UNSET)),
+        Int(something(force_maxregs, TILE_LAUNCH_UNSET)),
         tile_threads_raw,
-        Int(something(energy_block_y, CUDA_LAUNCH_UNSET)),
+        Int(something(energy_block_y, TILE_LAUNCH_UNSET)),
     )
 end
 
-@inline function cuda_force_block_y(config::CUDALaunchConfig)
+@inline function config_force_block_y(config::TileLaunchConfig)
     value = config.force_block_y
     return iszero(value) ? nothing : value
 end
 
-@inline function cuda_force_maxregs(config::CUDALaunchConfig)
+@inline function config_force_maxregs(config::TileLaunchConfig)
     value = config.force_maxregs
     return iszero(value) ? nothing : value
 end
 
-@inline function cuda_tile_threads(config::CUDALaunchConfig)
+@inline function config_tile_threads(config::TileLaunchConfig)
     value = config.tile_threads
-    return value == CUDA_TILE_THREADS_UNSET ? nothing : value
+    return value == TILE_THREADS_UNSET ? nothing : value
 end
 
-@inline function cuda_energy_block_y(config::CUDALaunchConfig)
+@inline function config_energy_block_y(config::TileLaunchConfig)
     value = config.energy_block_y
     return iszero(value) ? nothing : value
 end
@@ -1116,9 +1116,14 @@ end
 default_float_type_high(::Type{<:AbstractArray}, ::Type{T}) where {T} = Float64
 
 function default_float_type_high(::Type{AT}, ::Type{T}) where {AT <: AbstractGPUArray, T}
-    # get_backend requires an array rather than an array type, Float32 is used to make
-    #   the array since it is supported by every backend
-    return default_float_type_high(get_backend(AT{Float32}(undef, 0)), T)
+    return default_float_type_high(array_type_backend(AT), T)
+end
+
+# The KernelAbstractions backend of the array type `AT`, e.g. `CuArray` or `CuArray{Float32}`
+# get_backend requires an array rather than an array type, Float32 is used to make the
+#   empty array since it is supported by every backend
+function array_type_backend(::Type{AT}) where AT <: AbstractArray
+    return get_backend(Base.typename(AT).wrapper{Float32}(undef, 0))
 end
 
 # The float type of a system with float type T moved to arrays of type AT, which is Float32
@@ -1355,7 +1360,7 @@ mutable struct System{D, AT, T, TH, A, C, B, V, AD, TO, PI, SI, GI, CN, VS, VF, 
     total_mass::TM
     data::DA
     grad_safe::Bool
-    launch_config::CUDALaunchConfig
+    launch_config::TileLaunchConfig
 end
 
 function System(;
@@ -1380,7 +1385,7 @@ function System(;
                 data=nothing,
                 grad_safe::Bool=false,
                 strictness=default_strictness(),
-                launch_config=CUDALaunchConfig())
+                launch_config=TileLaunchConfig())
     check_strictness(strictness)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
@@ -1667,7 +1672,7 @@ function System(crystal::Crystal{D};
                 float_type_high=Float64,
                 data=nothing,
                 grad_safe::Bool=false,
-                launch_config=CUDALaunchConfig()) where D
+                launch_config=TileLaunchConfig()) where D
     atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
@@ -2077,7 +2082,7 @@ end
     array_type(arr)
 
 The array type of a [`System`](@ref), [`ReplicaSystem`](@ref) or array, for example
-`Array` for systems on CPU or `CuArray` for systems on a NVIDIA GPU.
+`Array` for systems on CPU or `CuArray` for systems on an NVIDIA GPU.
 """
 array_type(::AT) where AT = AT.name.wrapper
 array_type(::Union{System{<:Any, AT}, ReplicaSystem{<:Any, AT}}) where {AT} = AT
@@ -2333,7 +2338,7 @@ function System(sys::AtomsBase.AbstractSystem{D};
                 float_type_high=Float64,
                 data=nothing,
                 grad_safe::Bool=false,
-                launch_config=CUDALaunchConfig()) where D
+                launch_config=TileLaunchConfig()) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
@@ -2603,23 +2608,62 @@ end
 #=
 Set up a KernelAbstractions kernel launch that respects `n_threads` on the CPU backend.
 Sizing the workgroups on CPU so that there are `n_threads` of them limits the launch to
-`n_threads` tasks.
-Only use these for kernels where the workgroup size does not affect the result, i.e. not
+`n_threads` threads, unless that needs larger workgroups than the backend allows.
+Only use this for kernels where the workgroup size does not affect the result, i.e. not
 for kernels that use `@synchronize` or `@localmem`.
 =#
-@inline function backend_kernel(kernel, backend, block_size, static_ndrange...)
-    return kernel(backend, block_size, static_ndrange...)
-end
-
-@inline function backend_kernel(kernel, backend::KernelAbstractions.CPU, block_size,
-                                static_ndrange...)
-    return kernel(backend)
-end
-
 @inline backend_workgroupsize(backend, ndrange, n_threads) = nothing
 
-@inline function backend_workgroupsize(::KernelAbstractions.CPU, ndrange, n_threads)
-    return max(cld(ndrange, max(n_threads, 1)), 1)
+# Whether a KernelAbstractions backend runs kernels on a GPU rather than on the CPU
+# `KernelAbstractions.GPU` can not be used for this from KernelAbstractions 0.10, where it is
+#   a deprecated alias of `KernelAbstractions.Backend`, which the CPU backend is too
+@inline is_gpu_backend(backend) = !(backend isa KernelAbstractions.CPU)
+
+@inline function backend_workgroupsize(backend::KernelAbstractions.CPU, ndrange, n_threads)
+    # The CPU backend of KernelAbstractions 0.10 is an OpenCL backend (POCL), which limits
+    #   the size of a workgroup
+    return clamp(cld(ndrange, max(n_threads, 1)), 1, KI.max_work_group_size(backend))
+end
+
+#=
+Kernels that accumulate into per-work-group buffers without atomics on the CPU, such as those
+of ReaxFF and the sparse matrix construction of ElectronegativityEqualizationMethod, take the
+items that a work-item handles from `chunk_items`. On the CPU these kernels run with one
+work-item per work-group, which handles a contiguous chunk of `chunk` items in order, and with
+no more work-groups than the buffers have slots. PoCL, the CPU backend of KernelAbstractions
+0.10, runs each work-group on one of its threads, but it treats the work-items of a work-group
+as independent and can vectorize across them, so updates of the same element by two
+work-items of one work-group would race. It also limits the size of a work-group, so a launch
+with one work-item per item can have more work-groups than there are slots. Kernels defined
+with `@kernel_and_item` run these chunked launches as Julia code on Julia threads instead,
+one chunk to a task, see `launch_item_kernel!`. On GPUs, which accumulate with atomics
+instead, `chunk` is `Val(1)` and each work-item handles one item.
+=#
+@inline chunk_items(i, ::Val{1}, n_items) = i:i
+@inline chunk_items(i, chunk::Integer, n_items) = ((i - 1) * chunk + 1):min(i * chunk, n_items)
+
+# The size of the chunks that split `n_items` items into at most `n_slots` chunks
+@inline cpu_chunk_size(n_items, n_slots) = max(cld(n_items, max(n_slots, 1)), 1)
+
+#=
+The items of the work-item `i` of a chunked kernel whose items are the entries of a matrix
+with a column per atom, such as the bonded neighbors `nbrs`, so that the items of atom `j`
+are `(j - 1) * max_nbrs + 1` to `j * max_nbrs`. The atoms of a system are not equally
+expensive, for example the atoms of a protein come before the water, so on the CPU the
+atoms are dealt to the chunks in turn in blocks of `ATOM_CHUNK_BLOCK` atoms rather than
+in one contiguous range per chunk. On GPUs, where `chunk` is `Val(1)`, this is
+`chunk_items`.
+=#
+const ATOM_CHUNK_BLOCK = 32
+
+@inline atom_chunk_items(i, chunk::Val{1}, n_items, max_nbrs) = chunk_items(i, chunk, n_items)
+
+@inline function atom_chunk_items(i, chunk::Integer, n_items, max_nbrs)
+    n_chunks = cld(n_items, chunk)
+    block = ATOM_CHUNK_BLOCK * max_nbrs
+    n_blocks = cld(n_items, block)
+    return (ti for b in i:n_chunks:n_blocks
+               for ti in ((b - 1) * block + 1):min(b * block, n_items))
 end
 
 function default_strictness()

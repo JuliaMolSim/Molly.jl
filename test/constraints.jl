@@ -380,8 +380,11 @@ end
     cpu_backend = KernelAbstractions.CPU()
     for n_threads in (1, 2, 4, 16), ndrange in (1, 10, 128, 4931)
         wgs = Molly.backend_workgroupsize(cpu_backend, ndrange, n_threads)
-        @test wgs >= 1
-        @test cld(ndrange, wgs) <= n_threads
+        max_wgs = Molly.KI.max_work_group_size(cpu_backend)
+        @test 1 <= wgs <= max_wgs
+        # At most n_threads workgroups, unless the workgroup size limit of the backend
+        #   requires more
+        @test cld(ndrange, wgs) <= max(n_threads, cld(ndrange, max_wgs))
     end
     for AT in array_list
         AT == Array && continue
@@ -441,9 +444,10 @@ end
 end
 
 @testset "GPU constrained System constructor" begin
-    if CuArray in array_list
+    # Every GPU backend that supports the tiled kernels of GPUNeighborFinder
+    for AT in array_list_metal[2:end]
+        Molly.uses_gpu_neighbor_finder(AT) || continue
         T = Float32
-        AT = CuArray
         n_atoms = 2
         atom_mass = T(10.0)u"g/mol"
         bond_length = T(0.13)u"nm"

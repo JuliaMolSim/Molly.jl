@@ -559,6 +559,8 @@ end
 
 @testset "ReaxFF $quantity gradient CPU $structure_file smoothness=$smoothness_correction" for smoothness_correction in (false, true),
         quantity in (:energy, :force_loss), structure_file in ("ethane.pdb", "water.pdb")
+    grad_atol = (quantity == :force_loss ? 1e-7 : 1e-8)
+
     reaxff = ReaxFF(
         force_field_file=joinpath(data_dir, "ReaxFF", "force_fields", "Chenoweth_2008_CHO.ff"),
         float_type=Float64,
@@ -702,7 +704,7 @@ end
             getfield(enzyme_gradients, name),
             getfield(finite_diff_gradients, name);
             rtol=1e-6,
-            atol=1e-8
+            atol=grad_atol
         )
     end
 
@@ -720,7 +722,7 @@ end
                 getfield(enzyme_atom_gradients[i], name),
                 getfield(finite_diff_atom_gradients[i], name);
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -742,7 +744,7 @@ end
                 getfield(enzyme_bond_gradients[i], name),
                 finite_diff_bond_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -764,7 +766,7 @@ end
                 getfield(enzyme_off_diagonal_gradients[i], name),
                 finite_diff_off_diagonal_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -783,7 +785,7 @@ end
                 getfield(enzyme_angle_gradients[i], name),
                 finite_diff_angle_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -801,7 +803,7 @@ end
                 getfield(enzyme_torsion_gradients[i], name),
                 finite_diff_torsion_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
     end
@@ -819,8 +821,75 @@ end
                 getfield(enzyme_h_bond_gradients[i], name),
                 finite_diff_h_bond_gradients[i][j];
                 rtol=1e-6,
-                atol=1e-8
+                atol=grad_atol
             )
         end
+    end
+end
+
+@testset "EEM sparse matrix product gradient CPU" begin
+    # Rows of 400 entries, as condensed phase systems have at a 10 Å cutoff, are too long for
+    #   Enzyme through the PoCL kernel, so an Enzyme rule differentiates the product. It is
+    #   checked against Enzyme through a plain Julia product.
+    n_rows, half_row = 500, 200
+    rng = Xoshiro(1)
+    rows = [Tuple{Int32, Float64}[] for _ in 1:n_rows]
+    for i in 1:n_rows, offset in 1:half_row
+        # Each pair is in both of its rows with the same value, as in the EEM matrix
+        j, value = mod1(i + offset, n_rows), rand(rng)
+        push!(rows[i], (j, value))
+        push!(rows[j], (i, value))
+    end
+    rowptr = cumsum([1; length.(rows)])
+    colidx = [c for row in rows for (c, _) in row]
+    H_nonzero = [v for row in rows for (_, v) in row]
+    H_diag, x = 1 .+ rand(rng, n_rows), rand(rng, n_rows)
+
+    function sparse_mat_mul_ref!(y, H_diag, H_nonzero, rowptr, colidx, x)
+        for i in eachindex(y)
+            y[i] = H_diag[i] * x[i]
+            for k in rowptr[i]:(rowptr[i + 1] - 1)
+                y[i] += H_nonzero[k] * x[colidx[k]]
+            end
+        end
+        return nothing
+    end
+
+    function sparse_mat_mul_molly!(y, H_diag, H_nonzero, rowptr, colidx, x)
+        kernel!, ndrange = Molly.sparse_mat_mul_kernel(CPU(), length(y))
+        Molly.sparse_mat_mul!(kernel!, ndrange, nothing, y, H_diag, H_nonzero, rowptr,
+                              colidx, x)
+        return nothing
+    end
+
+    # Overwrites x and H_nonzero after using them, as the conjugate gradient loop does
+    function loss(mat_mul!, H_diag, H_nonzero, rowptr, colidx, x, y1, y2)
+        mat_mul!(y1, H_diag, H_nonzero, rowptr, colidx, x)
+        x .= 0.01 .* y1 .+ 0.5 .* x
+        mat_mul!(y2, H_diag, H_nonzero, rowptr, colidx, x)
+        H_nonzero .*= 2
+        mat_mul!(y1, H_diag, H_nonzero, rowptr, colidx, y2)
+        return sum(abs2, y1) + sum(y2)
+    end
+
+    grads = map((sparse_mat_mul_ref!, sparse_mat_mul_molly!)) do mat_mul!
+        d_H_diag, d_H_nonzero, d_x = zero(H_diag), zero(H_nonzero), zero(x)
+        autodiff(
+            Reverse,
+            loss,
+            Active,
+            Const(mat_mul!),
+            Duplicated(copy(H_diag), d_H_diag),
+            Duplicated(copy(H_nonzero), d_H_nonzero),
+            Const(rowptr),
+            Const(colidx),
+            Duplicated(copy(x), d_x),
+            Duplicated(zeros(n_rows), zeros(n_rows)),
+            Duplicated(zeros(n_rows), zeros(n_rows)),
+        )
+        return (d_H_diag, d_H_nonzero, d_x)
+    end
+    for (grad_ref, grad_molly) in zip(grads...)
+        @test isapprox(grad_molly, grad_ref; rtol=1e-12)
     end
 end

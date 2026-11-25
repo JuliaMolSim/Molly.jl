@@ -302,7 +302,7 @@ end
 
 #=
 Convert an eligible and a special matrix, dense or sparse, to sparse ones that list the
-excluded and the special pairs respectively, as the CUDA tiled kernels read them.
+excluded and the special pairs respectively, as the tiled GPU kernels read them.
 A SparsePairMatrix that already lists those pairs is moved to `AT`, anything else is
 converted by scanning it.
 =#

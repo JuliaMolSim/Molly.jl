@@ -79,7 +79,9 @@ Molly throws various standard exception types, especially `ArgumentError`s, but 
 
 ## Fast math
 
-On CUDA GPUs the pairwise force and energy kernels are compiled with fast math for `Float32` systems, where the loss in precision is not noticeable. `Float64` systems do not use fast math, since there is a noticeable loss in precision and that path is much slower anyway.
+On CUDA GPUs the pairwise force and energy kernels are compiled with fast math for `Float32` systems, where the loss in precision is not noticeable.
+`Float64` systems do not use fast math, since there is a noticeable loss in precision and that path is much slower anyway.
+Other GPU backends compile the kernels with their default floating point settings; a backend extension can change that by defining `Molly.fastmath_backend` and `Molly.tile_kernel_config`.
 
 ## Benchmarks
 

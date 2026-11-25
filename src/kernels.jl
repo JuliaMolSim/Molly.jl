@@ -1,4 +1,4 @@
-# KernelAbstractions.jl kernels, CUDA kernels are in an extension
+# KernelAbstractions.jl kernels, the tiled kernels of GPUNeighborFinder are in gpu_tiles.jl
 
 @public required_atom_fields
 
@@ -119,12 +119,209 @@ end
 
 #=
 Launch a KernelAbstractions kernel, as `kernel!(args...; ndrange=ndrange)` does.
-The CUDA extension has a faster method for kernels with a static workgroup size, which
-keeps the compiled kernel rather than looking it up at every launch. The kernels of a
-simulation step are small enough that the host time to launch them is often what limits
-the speed, so this is used for the kernels that run every step.
+The kernels of a simulation step are small enough that the host time to launch them is
+often what limits the speed, so this is used for the kernels that run every step. On GPU
+backends a kernel with a static workgroup size is launched as KernelAbstractions launches
+it, but keeping the compiled kernel rather than looking it up at every launch, see
+`cached_kernel_function`. The kernels for which `kernel_fastmath` is `true` are compiled
+with fast math on backends that support it, see `fastmath_backend`.
 =#
 @inline launch_kernel!(kernel!, args...; ndrange) = kernel!(args...; ndrange=ndrange)
+
+function launch_kernel!(obj::KernelAbstractions.Kernel{<:Any, <:KernelAbstractions.NDIteration.StaticSize},
+                        args...; ndrange)
+    backend = KernelAbstractions.backend(obj)
+    # The launches of the CPU backend run the workgroups that cover the ndrange without
+    #   bounds checks, which needs its own launch
+    is_gpu_backend(backend) || return obj(args...; ndrange=ndrange)
+    sizes = KernelAbstractions.sizes_only(obj)
+    skip, ndrange_, workgroupsize, iterspace = KernelAbstractions.launch_setup(sizes, ndrange,
+                                                                                nothing)
+    skip && return nothing
+    launch = @noinline KernelAbstractions.select_launch(sizes, workgroupsize, iterspace)
+    T = KernelAbstractions.narrow_index_type(backend)
+    # The common launch mode is specialized statically, as KernelAbstractions does
+    if launch === KernelAbstractions.NDLaunch{T}()
+        launch_ka_kernel!(obj, KernelAbstractions.NDLaunch{T}(), ndrange_, iterspace, args)
+    else
+        Base.inferencebarrier(launch_ka_kernel!)(obj, launch, ndrange_, iterspace, args)
+    end
+    return nothing
+end
+
+#=
+What launching the kernel does after the launch mode is chosen, see
+`KernelAbstractions.launch_kernel`, with the compiled kernel kept.
+=#
+@noinline function launch_ka_kernel!(obj, launch, ndrange, iterspace, args::Tuple)
+    backend = KernelAbstractions.backend(obj)
+    subgroups = KernelAbstractions.kernel_subgroups(obj)
+    ctx = KernelAbstractions.mkcontext(obj, ndrange, iterspace, launch; subgroups)
+    kernel_args, tt = KernelAbstractions.prepare_arguments(backend, obj.f, ctx, args)
+    kernel_backend = (kernel_fastmath(obj.f, args) ? fastmath_backend(backend) : backend)
+    kernel = cached_kernel_function(kernel_backend, obj.f,
+                                    KernelAbstractions.prepend(ctx, kernel_args),
+                                    Val(KernelAbstractions.compiler_options(obj)))
+    ctx, groups, items = KernelAbstractions.launch_geometry(KernelAbstractions.sizes_only(obj),
+                                launch, subgroups, ndrange, iterspace, ctx, nothing)
+    KI.launch(kernel, groups, items, KernelAbstractions.prepend(ctx, kernel_args))
+    return nothing
+end
+
+#=
+The backend to compile a kernel with fast math with, see `kernel_fastmath`, which is the
+same backend unless a backend extension defines a method for backends that support it.
+=#
+fastmath_backend(backend) = backend
+
+#=
+    @kernel_and_item function name(args...) ... end
+
+Define the KernelAbstractions kernel `name` as `@kernel` does, and a function that runs one
+work-item of it as plain Julia code, which `item_kernel(name)` returns, with
+`@index(Global, Linear)` the work-item and `@index(Group, Linear)` its work-group. Other
+macros of KernelAbstractions are not supported, so kernels with `@localmem` or
+`@synchronize` can not be defined this way. Kernels defined this way are launched with
+`launch_item_kernel!`, which runs them as Julia code on the CPU backend.
+=#
+macro kernel_and_item(ex)
+    if !(ex isa Expr && ex.head === :function && length(ex.args) == 2)
+        error("@kernel_and_item expects a function definition")
+    end
+    sig, body = ex.args
+    where_params = []
+    call = sig
+    while call.head === :where
+        where_params = vcat(call.args[2:end], where_params)
+        call = call.args[1]
+    end
+    name = call.args[1]
+    if any(a -> a isa Expr && a.head in (:parameters, :kw, :...), call.args[2:end])
+        error("@kernel_and_item does not support keyword, default or varargs arguments")
+    end
+    # Unnamed arguments such as `::Val{N}` need a name to be passed on
+    item_args = map(call.args[2:end]) do a
+        if a isa Expr && a.head === :macrocall && a.args[1] === Symbol("@Const")
+            a = a.args[end]
+        end
+        if a isa Expr && a.head === :(::) && length(a.args) == 1
+            return Expr(:(::), gensym(:arg), a.args[1])
+        end
+        return a
+    end
+    global_index, group_index = gensym(:global_index), gensym(:group_index)
+    function item_body(x)
+        if x isa Expr && x.head === :macrocall
+            macro_name, macro_args = x.args[1], filter(a -> !(a isa LineNumberNode), x.args[2:end])
+            if macro_name === Symbol("@index") && macro_args == [:Global, :Linear]
+                return global_index
+            elseif macro_name === Symbol("@index") && macro_args == [:Group, :Linear]
+                return group_index
+            elseif macro_name in (Symbol("@index"), Symbol("@localmem"), Symbol("@private"),
+                        Symbol("@synchronize"), Symbol("@uniform"), Symbol("@groupsize"),
+                        Symbol("@ndrange"), Symbol("@print"), Symbol("@context"))
+                error("@kernel_and_item does not support $macro_name",
+                      macro_name === Symbol("@index") ? " other than (Global, Linear) and " *
+                      "(Group, Linear)" : "")
+            end
+        end
+        return x isa Expr ? Expr(x.head, map(item_body, x.args)...) : x
+    end
+    item_name = Symbol(rstrip(string(name), '!'), "_item!")
+    item_call = Expr(:call, item_name, global_index, group_index, item_args...)
+    item_sig = isempty(where_params) ? item_call : Expr(:where, item_call, where_params...)
+    item_def = Expr(:function, item_sig, Expr(:block, item_body(body), :(return nothing)))
+    return esc(quote
+        $(Expr(:macrocall, Symbol("@kernel"), __source__, ex))
+
+        @inline $item_def
+
+        item_kernel(::typeof($name)) = $item_name
+    end)
+end
+
+# The per-item function of a kernel defined with `@kernel_and_item`
+function item_kernel end
+
+#=
+Launch the kernel that `kernel_fn`, defined with `@kernel_and_item`, makes for `backend`
+with `args` over `ndrange`, with `workgroupsize` `nothing`, an integer or a tuple.
+On GPU backends this is the KernelAbstractions launch. On the CPU backend the work-items
+run as Julia code on Julia threads rather than through PoCL, a work-group to a task with
+its work-items in order, for two reasons:
+- PoCL's math library is slower than Julia's, `exp` takes 2.6 times and `cbrt` 4 times as
+  long, which made the ReaxFF non-bonded kernel 1.7 times slower than as Julia code.
+- Enzyme differentiates the Julia code directly. KernelAbstractions 0.10 differentiates
+  PoCL kernels in device code, which does not support `Active` arguments, the scalars and
+  parameter structs that most of these kernels take. KernelAbstractions 0.9 supported them
+  on its CPU backend.
+A chunked launch, of one work-item per work-group with each work-item a contiguous chunk of
+the items (see `chunk_items`), runs one chunk to a task. Kernels where PoCL can vectorise
+across the work-items of a work-group, such as the sparse matrix-vector product of charge
+equilibration, are better defined with `@kernel` and launched through PoCL.
+=#
+function launch_item_kernel!(kernel_fn::F, backend, ndrange, workgroupsize,
+                             args::Vararg{Any, N}) where {F, N}
+    if backend isa KernelAbstractions.CPU
+        item! = item_kernel(kernel_fn)
+        if is_chunked_launch(workgroupsize)
+            # The range is made here, as Enzyme could not deduce the type of the
+            #   `1:n_chunks` made next to the `@threads` closure that holds active arguments
+            launch_chunked_cpu!(item!, Base.OneTo(Int(ndrange)), args)
+        else
+            wgs = cpu_group_size(workgroupsize, ndrange)
+            n_groups = cld(ndrange, wgs)
+            tasks = Base.OneTo(min(n_groups, Threads.nthreads()))
+            launch_groups_cpu!(item!, tasks, n_groups, wgs, Int(ndrange), args)
+        end
+    else
+        kernel_fn(backend)(args...; ndrange=ndrange, workgroupsize=workgroupsize)
+    end
+    return nothing
+end
+
+is_chunked_launch(workgroupsize::Integer) = isone(workgroupsize)
+is_chunked_launch(workgroupsize) = false
+
+cpu_group_size(workgroupsize::Integer, ndrange) = Int(workgroupsize)
+cpu_group_size(workgroupsize::Tuple{Integer}, ndrange) = Int(only(workgroupsize))
+cpu_group_size(::Nothing, ndrange) = max(cld(ndrange, Threads.nthreads()), 1)
+
+# Each work-item, a chunk of the items, is also its own work-group, so the slots that the
+#   chunked kernels accumulate into belong to one task
+function launch_chunked_cpu!(item!::I, chunks::AbstractUnitRange, args::Tuple) where I
+    if length(chunks) == 1
+        item!(1, 1, args...)
+    else
+        Threads.@threads for chunk_i in chunks
+            item!(chunk_i, chunk_i, args...)
+        end
+    end
+    return nothing
+end
+
+function launch_groups_cpu!(item!::I, tasks::AbstractUnitRange, n_groups::Int, wgs::Int,
+                            ndrange::Int, args::Tuple) where I
+    n_tasks = length(tasks)
+    if n_tasks == 1
+        run_groups_cpu!(item!, 1, n_groups, wgs, ndrange, args)
+    else
+        Threads.@threads for t in tasks
+            run_groups_cpu!(item!, (t - 1) * n_groups ÷ n_tasks + 1, t * n_groups ÷ n_tasks,
+                            wgs, ndrange, args)
+        end
+    end
+    return nothing
+end
+
+@inline function run_groups_cpu!(item!::I, g_start, g_end, wgs, ndrange, args::Tuple) where I
+    for g in g_start:g_end
+        for i in ((g - 1) * wgs + 1):min(g * wgs, ndrange)
+            item!(i, g, args...)
+        end
+    end
+    return nothing
+end
 
 #=
 Work launched with `run_side_work!` can run on the device at the same time as the work
@@ -212,7 +409,8 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
     if isnothing(neighbors)
         error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
               "interactions used without a neighbor finder need use_neighbors=false and " *
-              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUNeighborFinder is only available on GPUs that support its tiled kernels, " *
+              "see Molly.supports_tiled_kernels, on other GPUs use " *
               "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
@@ -232,7 +430,7 @@ end
 Launch the pairwise forces of the interactions that use the neighbor list, possibly
 leaving work to `finish_pairwise_forces_gpu!`, which `gpu_forces!` calls once the specific
 forces are launched. Together they add the forces to `buffers.fs_mat` as
-`pairwise_forces_loop_gpu!` does. The CUDA tiled path uses this to wait for the check of
+`pairwise_forces_loop_gpu!` does. The tiled path uses this to wait for the check of
 its tile list as late as possible, so that the host launches the specific forces rather
 than waiting for the device to catch up.
 =#
@@ -566,10 +764,10 @@ end
 
 #=
 Whether a kernel may be compiled with fast math for arguments `args`, which back-ends that
-support it can read when launching it. As with the CUDA pairwise force kernel, and OpenMM,
-the specific force kernels are compiled with approximate division, square roots and
-reciprocal square roots in Float32, which changes the forces by about the rounding error of
-Float32.
+support it can read when launching it, see `fastmath_backend`. As with the tiled pairwise
+force kernel, and OpenMM, the specific force kernels are compiled on CUDA with approximate
+division, square roots and reciprocal square roots in Float32, which changes the forces by
+about the rounding error of Float32.
 =#
 kernel_fastmath(kernel_fn, args) = false
 
@@ -583,7 +781,8 @@ function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:Abs
     if isnothing(neighbors)
         error("an interaction uses the neighbor list but neighbors is nothing, pairwise " *
               "interactions used without a neighbor finder need use_neighbors=false and " *
-              "GPUNeighborFinder is only available on NVIDIA GPUs, on other GPUs use " *
+              "GPUNeighborFinder is only available on GPUs that support its tiled kernels, " *
+              "see Molly.supports_tiled_kernels, on other GPUs use " *
               "GPUCellListNeighborFinder or DistanceNeighborFinder instead")
     end
     nbs = neighbor_pairs(neighbors)
@@ -768,8 +967,10 @@ function sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
     kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
     kernel!(buffers.morton_seq_buffer_1, coords, boundary, w, masks, morton_bits;
             ndrange=length(coords))
+    # The sort reuses scratch memory kept with the buffers, see `morton_sort_workspace`
     AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
-                                 temp=buffers.morton_seq_buffer_2, block_size=512)
+                                 alg=morton_sort_alg(backend),
+                                 workspace=morton_sort_workspace(buffers, backend))
     return buffers
 end
 
@@ -798,7 +999,7 @@ end
 
 #=
 The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
-    tile search of the CUDA pairwise kernels.
+    tile search of the tiled pairwise kernels.
 Coordinates in an orthorhombic box are used as they are.
 Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
     using the basis vectors. The brick holds one image of each point, as the triclinic cell

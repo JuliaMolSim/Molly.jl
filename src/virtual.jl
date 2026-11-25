@@ -311,6 +311,12 @@ vs_n_chunks(n_items, n_threads) = clamp(cld(n_items, vs_min_chunk), 1, max(n_thr
 @inline vs_chunk_range(chunk_i, n_chunks, n_items) =
             (((chunk_i - 1) * n_items) ÷ n_chunks + 1):((chunk_i * n_items) ÷ n_chunks)
 
+#=
+The virtual sites of CPU systems are placed, and their forces distributed, in loops rather
+than with kernels, since Enzyme can not differentiate kernels of the CPU backend of
+KernelAbstractions 0.10 (PoCL), which it would have to compile even for a system without
+virtual sites
+=#
 function place_virtual_sites_coords!(coords, boundary, virtual_sites, n_threads)
     for i in eachindex(virtual_sites)
         place_virtual_site!(coords, boundary, virtual_sites[i])

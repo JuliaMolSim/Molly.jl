@@ -28,6 +28,7 @@ using FillArrays: Fill
 using GPUArrays
 using Graphs
 using KernelAbstractions
+import KernelInterface as KI
 using NearestNeighbors
 import PeriodicTable
 using PhiloxRNG: randn_f64, randn_f32, philox4x32_10
@@ -60,7 +61,7 @@ include("sparse_pairs.jl")
 include("parameters.jl")
 include("conversion.jl")
 include("units.jl")
-include("cuda_config.jl")
+include("tile_launch_config.jl")
 include("spatial.jl")
 include("cutoffs.jl")
 include("mixing.jl")
@@ -100,6 +101,7 @@ include("constraints/settle.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")
+include("gpu_tiles.jl")
 include("loggers.jl")
 include("analysis.jl")
 include("residues.jl")

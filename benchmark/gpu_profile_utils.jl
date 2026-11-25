@@ -1,24 +1,22 @@
 using Molly
 using Molly: sorted_morton_seq!
-using CUDA
+using KernelAbstractions
 using StaticArrays
 
-function gpu_cuda_ext()
-    ext = Base.get_extension(Molly, :MollyCUDAExt)
-    isnothing(ext) && error("MollyCUDAExt is not loaded, import CUDA before profiling GPU kernels")
-    return ext
-end
+# The stages of the tiled pairwise path of GPUNeighborFinder are timed one at a time, each
+#   followed by a synchronization, so the times include the launch overhead of each stage
+# This works with any GPU backend that supports the tiled kernels
 
-function gpu_stage_time_ms!(f::F) where {F}
-    CUDA.synchronize()
+function gpu_stage_time_ms!(f::F, backend) where {F}
+    KernelAbstractions.synchronize(backend)
     start_ns = time_ns()
     f()
-    CUDA.synchronize()
+    KernelAbstractions.synchronize(backend)
     return (time_ns() - start_ns) / 1.0e6
 end
 
 function gpu_tile_stats(buffers, n_atoms::Integer)
-    num_tiles = Int(only(Array(buffers.num_interacting_tiles)))
+    num_tiles = buffers.num_pairs
     overflow_count = Int(only(Array(buffers.interacting_tiles_overflow)))
     tile_types = Array(buffers.interacting_tiles_type[1:num_tiles])
     clean_tiles = count(==(UInt8(0)), tile_types)
@@ -28,6 +26,7 @@ function gpu_tile_stats(buffers, n_atoms::Integer)
     interacting_fraction = total_possible_tiles == 0 ? 0.0 : num_tiles / total_possible_tiles
     return (
         num_tiles = num_tiles,
+        num_candidates = buffers.num_tile_candidates,
         clean_tiles = clean_tiles,
         masked_tiles = masked_tiles,
         overflow_count = overflow_count,
@@ -35,182 +34,74 @@ function gpu_tile_stats(buffers, n_atoms::Integer)
     )
 end
 
-function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
+function neighbor_pairwise_inters(sys)
+    pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
+    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
+    return pairwise_inters
+end
+
+# Rebuild the Morton order, the exception data and the tile list of `buffers` from the
+#   coordinates of `sys`, timing each stage
+function profile_gpu_tile_rebuild!(sys::System{D}, buffers) where D
+    N = length(sys.coords)
+    nf = sys.neighbor_finder
+    morton_sort_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+    end
+    compress_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.refresh_tile_exceptions!(buffers, nf, Val(N))
+        nf.initialized = true
+        buffers.sparse_pair_generation = nf.cache_generation
+    end
+    reorder_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.reorder_system_gpu!(buffers, sys)
+    end
+    bounds_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.compute_block_bounds!(buffers, sys, N)
+    end
+    tile_find_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.find_interacting_tiles!(buffers, sys, cld(N, 32))
+    end
+    prune_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.prune_interacting_tiles!(buffers, sys, N)
+    end
+    Molly.throw_if_interacting_tiles_overflowed(buffers)
+    return (
+        morton_sort_ms = morton_sort_ms,
+        compress_ms = compress_ms,
+        reorder_ms = reorder_ms,
+        bounds_ms = bounds_ms,
+        tile_find_ms = tile_find_ms,
+        prune_ms = prune_ms,
+    )
+end
+
+function profile_gpu_force_path!(sys::System{D, <:Any, T};
                                  step_n::Integer=0,
                                  needs_vir::Bool=false,
                                  buffers=Molly.init_buffers!(sys, 1)) where {D, T}
-    ext = gpu_cuda_ext()
-    pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
-
+    pairwise_inters = neighbor_pairwise_inters(sys)
     N = length(sys.coords)
-    n_blocks = cld(N, 32)
-    r_cut2 = sys.neighbor_finder.dist_cutoff_2
+    TH = Molly.float_type_high(sys)
 
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.fs_mat_reordered, zero(T))
-    fill!(buffers.virial_nounits, zero(T))
+    fill!(buffers.virial_slots, zero(TH))
 
-    morton_sort_ms = 0.0
-    compress_ms = 0.0
-    reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
-    if reorder_needed
-        morton_sort_ms = gpu_stage_time_ms!() do
-            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
-            sys.neighbor_finder.initialized = true
-        end
-        compress_ms = gpu_stage_time_ms!() do
-            ext.refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
-        end
+    rebuild_times = profile_gpu_tile_rebuild!(sys, buffers)
+    block_y = Molly.force_block_y(sys, buffers, pairwise_inters)
+    maxregs = Molly.force_maxregs(sys)
+    force_kernel_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.launch_force_tiles!(buffers, sys, pairwise_inters, Val(needs_vir), step_n,
+                                  block_y, maxregs)
     end
-
-    reorder_ms = gpu_stage_time_ms!() do
-        ext.reorder_system_gpu!(buffers, sys)
+    reverse_reorder_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.reverse_reorder_forces_gpu!(buffers, sys)
     end
-
-    bounds_ms = gpu_stage_time_ms!() do
-        @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
-            buffers.morton_seq,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.coords,
-            Val(N),
-            sys.boundary,
-            Val(D),
-        )
-    end
-
-    max_tiles = length(buffers.interacting_tiles_i)
-    tile_find_ms = gpu_stage_time_ms!() do
-        ext.reset_interacting_tile_state!(buffers)
-        tile_kernel = @cuda launch=false ext.find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.boundary,
-            Val(r_cut2),
-            Val(n_blocks),
-            Val(D),
-            max_tiles,
-            buffers.block_exc_min,
-            buffers.block_exc_max,
-        )
-        tile_threads_xy = ext.tile_launch_params(tile_kernel)
-        tile_kernel(
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.boundary,
-            Val(r_cut2),
-            Val(n_blocks),
-            Val(D),
-            max_tiles,
-            buffers.block_exc_min,
-            buffers.block_exc_max;
-            blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
-            threads=tile_threads_xy,
-        )
-    end
-
-    num_tiles = Int(only(Array(buffers.num_interacting_tiles)))
-
-    auto_kernel = @cuda launch=false always_inline=true ext.force_kernel!(
-        buffers.fs_mat_reordered,
-        buffers.virial_nounits,
-        buffers.coords_reordered,
-        buffers.velocities_reordered,
-        buffers.atoms_reordered,
-        Val(N),
-        Val(r_cut2),
-        Val(sys.force_units),
-        pairwise_inters,
-        sys.boundary,
-        step_n,
-        ext.tile_exceptions(buffers, sys.neighbor_finder),
-        Val(needs_vir),
-        Val(T),
-        Val(D),
-        buffers.interacting_tiles_i,
-        buffers.interacting_tiles_j,
-        buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles,
-        buffers.interacting_tiles_overflow,
-    )
-    block_y, maxregs = ext.force_launch_params(auto_kernel)
-    n_blocks_launch = num_tiles > 0 ? cld(num_tiles, block_y) : 1
-    force_kernel_ms = gpu_stage_time_ms!() do
-        kernel = if maxregs === nothing
-            auto_kernel
-        else
-            @cuda launch=false maxregs=maxregs always_inline=true ext.force_kernel!(
-                buffers.fs_mat_reordered,
-                buffers.virial_nounits,
-                buffers.coords_reordered,
-                buffers.velocities_reordered,
-                buffers.atoms_reordered,
-                Val(N),
-                Val(r_cut2),
-                Val(sys.force_units),
-                pairwise_inters,
-                sys.boundary,
-                step_n,
-                ext.tile_exceptions(buffers, sys.neighbor_finder),
-                Val(needs_vir),
-                Val(T),
-                Val(D),
-                buffers.interacting_tiles_i,
-                buffers.interacting_tiles_j,
-                buffers.interacting_tiles_type,
-                buffers.num_interacting_tiles,
-                buffers.interacting_tiles_overflow,
-            )
-        end
-        kernel(
-            buffers.fs_mat_reordered,
-            buffers.virial_nounits,
-            buffers.coords_reordered,
-            buffers.velocities_reordered,
-            buffers.atoms_reordered,
-            Val(N),
-            Val(r_cut2),
-            Val(sys.force_units),
-            pairwise_inters,
-            sys.boundary,
-            step_n,
-            ext.tile_exceptions(buffers, sys.neighbor_finder),
-            Val(needs_vir),
-            Val(T),
-            Val(D),
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow;
-            threads=(32, block_y),
-            blocks=n_blocks_launch,
-        )
-    end
-
-    reverse_reorder_ms = gpu_stage_time_ms!() do
-        ext.reverse_reorder_forces_gpu!(buffers, sys)
-    end
-    ext.throw_if_interacting_tiles_overflowed(buffers)
 
     return (
         times = (
-            morton_sort_ms = morton_sort_ms,
-            compress_ms = compress_ms,
-            reorder_ms = reorder_ms,
-            bounds_ms = bounds_ms,
-            tile_find_ms = tile_find_ms,
+            rebuild_times...,
             force_kernel_ms = force_kernel_ms,
             reverse_reorder_ms = reverse_reorder_ms,
         ),
@@ -223,145 +114,25 @@ function profile_gpu_force_path!(sys::System{D, <:CuArray, T};
     )
 end
 
-function profile_gpu_energy_path!(sys::System{D, <:CuArray, T};
+function profile_gpu_energy_path!(sys::System{D, <:Any, T};
                                   step_n::Integer=0,
                                   buffers=Molly.init_buffers!(sys, 1, true)) where {D, T}
-    ext = gpu_cuda_ext()
-    pairwise_inters = Tuple(filter(use_neighbors, values(sys.pairwise_inters)))
-    isempty(pairwise_inters) && error("no neighbor-list pairwise interactions found to profile")
-
+    pairwise_inters = neighbor_pairwise_inters(sys)
     N = length(sys.coords)
-    n_blocks = cld(N, 32)
-    r_cut2 = sys.neighbor_finder.dist_cutoff_2
+    TH = Molly.float_type_high(sys)
 
-    fill!(buffers.pe_vec_nounits, zero(T))
+    fill!(buffers.pe_vec_nounits, zero(TH))
 
-    morton_sort_ms = 0.0
-    compress_ms = 0.0
-    reorder_needed = step_n % sys.neighbor_finder.n_steps == 0 || !sys.neighbor_finder.initialized
-    if reorder_needed
-        morton_sort_ms = gpu_stage_time_ms!() do
-            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
-            sys.neighbor_finder.initialized = true
-        end
-        compress_ms = gpu_stage_time_ms!() do
-            ext.refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
-        end
+    rebuild_times = profile_gpu_tile_rebuild!(sys, buffers)
+    block_y = Molly.energy_block_y(sys, buffers, pairwise_inters)
+    energy_kernel_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        Molly.launch_energy_tiles!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters,
+                                   step_n, block_y)
     end
-
-    reorder_ms = gpu_stage_time_ms!() do
-        ext.reorder_system_gpu!(buffers, sys)
-    end
-
-    bounds_ms = gpu_stage_time_ms!() do
-        @cuda blocks=n_blocks threads=32 ext.kernel_min_max!(
-            buffers.morton_seq,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.coords,
-            Val(N),
-            sys.boundary,
-            Val(D),
-        )
-    end
-
-    max_tiles = length(buffers.interacting_tiles_i)
-    tile_find_ms = gpu_stage_time_ms!() do
-        ext.reset_interacting_tile_state!(buffers)
-        tile_kernel = @cuda launch=false ext.find_interacting_blocks_kernel!(
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.boundary,
-            Val(r_cut2),
-            Val(n_blocks),
-            Val(D),
-            max_tiles,
-            buffers.block_exc_min,
-            buffers.block_exc_max,
-        )
-        tile_threads_xy = ext.tile_launch_params(tile_kernel)
-        tile_kernel(
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow,
-            buffers.box_mins,
-            buffers.box_maxs,
-            sys.boundary,
-            Val(r_cut2),
-            Val(n_blocks),
-            Val(D),
-            max_tiles,
-            buffers.block_exc_min,
-            buffers.block_exc_max;
-            blocks=(cld(n_blocks, tile_threads_xy[1]), cld(n_blocks, tile_threads_xy[2])),
-            threads=tile_threads_xy,
-        )
-    end
-
-    num_tiles = Int(only(Array(buffers.num_interacting_tiles)))
-
-    auto_kernel = @cuda launch=false always_inline=true ext.energy_kernel!(
-        buffers.pe_vec_nounits,
-        buffers.coords_reordered,
-        buffers.velocities_reordered,
-        buffers.atoms_reordered,
-        Val(N),
-        Val(r_cut2),
-        Val(sys.energy_units),
-        pairwise_inters,
-        sys.boundary,
-        step_n,
-        ext.tile_exceptions(buffers, sys.neighbor_finder),
-        Val(T),
-        Val(D),
-        buffers.interacting_tiles_i,
-        buffers.interacting_tiles_j,
-        buffers.interacting_tiles_type,
-        buffers.num_interacting_tiles,
-        buffers.interacting_tiles_overflow,
-    )
-    block_y = ext.energy_launch_params(auto_kernel)
-    n_blocks_launch = num_tiles > 0 ? cld(num_tiles, block_y) : 1
-    energy_kernel_ms = gpu_stage_time_ms!() do
-        auto_kernel(
-            buffers.pe_vec_nounits,
-            buffers.coords_reordered,
-            buffers.velocities_reordered,
-            buffers.atoms_reordered,
-            Val(N),
-            Val(r_cut2),
-            Val(sys.energy_units),
-            pairwise_inters,
-            sys.boundary,
-            step_n,
-            ext.tile_exceptions(buffers, sys.neighbor_finder),
-            Val(T),
-            Val(D),
-            buffers.interacting_tiles_i,
-            buffers.interacting_tiles_j,
-            buffers.interacting_tiles_type,
-            buffers.num_interacting_tiles,
-            buffers.interacting_tiles_overflow;
-            blocks=n_blocks_launch,
-            threads=(32, block_y),
-        )
-    end
-    ext.throw_if_interacting_tiles_overflowed(buffers)
 
     return (
         times = (
-            morton_sort_ms = morton_sort_ms,
-            compress_ms = compress_ms,
-            reorder_ms = reorder_ms,
-            bounds_ms = bounds_ms,
-            tile_find_ms = tile_find_ms,
+            rebuild_times...,
             energy_kernel_ms = energy_kernel_ms,
         ),
         tile_stats = gpu_tile_stats(buffers, N),

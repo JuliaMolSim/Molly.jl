@@ -13,7 +13,9 @@ function Molly.force(inter::NonCentralInter, dr, atom_i, atom_j, force_units, sp
 end
 
 @testset "GPU Consistency" begin
-    if run_cuda_tests
+    # Every GPU backend with Float64 that supports the tiled kernels of GPUNeighborFinder
+    for AT in array_list[2:end]
+        Molly.uses_gpu_neighbor_finder(AT) || continue
         @testset "33-atom (No Cancellation)" begin
             n_atoms = 33
             D = 3
@@ -23,14 +25,14 @@ end
             atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms]
             
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(T(5.0))),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=T(5.0),
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -84,14 +86,14 @@ end
             r_cut = T(4.0)
             
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -151,9 +153,9 @@ end
                 energy_units=u"kJ * mol^-1",
             )
             gpu_sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
-                velocities=CuArray(velocities),
+                atoms=AT(atoms),
+                coords=AT(coords),
+                velocities=AT(velocities),
                 boundary=boundary,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -202,15 +204,15 @@ end
             )
             
             sys_gpu = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
-                velocities=CuArray(velocities),
+                atoms=AT(atoms),
+                coords=AT(coords),
+                velocities=AT(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu,
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=3.0u"nm",
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -235,15 +237,15 @@ end
             ),)
 
             sys_gpu_overflow = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
-                velocities=CuArray(velocities),
+                atoms=AT(atoms),
+                coords=AT(coords),
+                velocities=AT(velocities),
                 boundary=boundary,
                 pairwise_inters=pairwise_inters_gpu_overflow,
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=20.0u"nm",
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -265,18 +267,17 @@ end
                     buffers.tree_maxs,
                     buffers.morton_seq,
                     buffers.morton_seq_buffer_1,
-                    buffers.morton_seq_buffer_2,
                     buffers.morton_seq_inv,
                     buffers.excluded_pos,
                     buffers.special_pos,
                     buffers.block_exc_min,
                     buffers.block_exc_max,
-                    CUDA.zeros(Int32, tiny_capacity),
-                    CUDA.zeros(Int32, tiny_capacity),
-                    CUDA.zeros(UInt8, tiny_capacity),
-                    CUDA.zeros(UInt32, tiny_capacity),
-                    CUDA.zeros(Int32, 1),
-                    CUDA.zeros(Int32, 1),
+                    AT(zeros(Int32, tiny_capacity)),
+                    AT(zeros(Int32, tiny_capacity)),
+                    AT(zeros(UInt8, tiny_capacity)),
+                    AT(zeros(UInt32, tiny_capacity)),
+                    AT(zeros(Int32, 1)),
+                    AT(zeros(Int32, 1)),
                     buffers.coords_reordered,
                     buffers.velocities_reordered,
                     buffers.atoms_reordered,
@@ -321,14 +322,14 @@ end
             r_cut = T(0.8)
 
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -383,14 +384,14 @@ end
                 r_cut = T(1.0)
                 pairwise_inters = (LennardJones(cutoff=DistanceCutoff(r_cut)),)
                 sys = System(
-                    atoms=CuArray(atoms),
-                    coords=CuArray(coords),
+                    atoms=AT(atoms),
+                    coords=AT(coords),
                     boundary=boundary,
                     pairwise_inters=pairwise_inters,
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=r_cut,
-                        array_type=CuArray,
+                        array_type=AT,
                     ),
                     force_units=NoUnits,
                     energy_units=NoUnits,
@@ -430,8 +431,8 @@ end
             special_pairs = [(1, 3)]
 
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
@@ -439,7 +440,7 @@ end
                     dist_cutoff=r_cut,
                     excluded_pairs=excluded_pairs,
                     special_pairs=special_pairs,
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits
@@ -474,7 +475,6 @@ end
         end
 
         @testset "Tile tree search and sparse exceptions" begin
-            ext = Base.get_extension(Molly, :MollyCUDAExt)
             n_atoms = 8000
             T = Float64
             # Truncated octahedra of the same volume, given as basis vectors (cx < 0) and
@@ -513,12 +513,12 @@ end
                                      n_atoms=n_atoms, dist_cutoff=r_cut,
                                      excluded_pairs=excluded_pairs, special_pairs=special_pairs),
                                  force_units=NoUnits, energy_units=NoUnits)
-                gpu_sys = System(atoms=CuArray(atoms), coords=CuArray(coords), boundary=boundary,
+                gpu_sys = System(atoms=AT(atoms), coords=AT(coords), boundary=boundary,
                                  pairwise_inters=pairwise_inters,
                                  neighbor_finder=GPUNeighborFinder(
                                      n_atoms=n_atoms, dist_cutoff=r_cut,
                                      excluded_pairs=excluded_pairs, special_pairs=special_pairs,
-                                     array_type=CuArray),
+                                     array_type=AT),
                                  force_units=NoUnits, energy_units=NoUnits)
                 @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.eligible) == 2000
                 @test Molly.n_listed_pairs(gpu_sys.neighbor_finder.special) == 1000
@@ -535,20 +535,20 @@ end
                     Array(buffers.interacting_tiles_j)[1:buffers.num_pairs],
                 )))
                 function search_tiles!(search!)
-                    ext.reset_interacting_tile_state!(buffers)
+                    Molly.reset_interacting_tile_state!(buffers)
                     search!(buffers, gpu_sys, n_blocks)
                     buffers.num_pairs = Int(only(Array(buffers.num_interacting_tiles)))
                     return tile_list(buffers)
                 end
-                tiles_all_pairs = search_tiles!(ext.find_interacting_tiles_all_pairs!)
-                @test search_tiles!(ext.find_interacting_tiles_tree!) == tiles_all_pairs
+                tiles_all_pairs = search_tiles!(Molly.find_interacting_tiles_all_pairs!)
+                @test search_tiles!(Molly.find_interacting_tiles_tree!) == tiles_all_pairs
                 @test n_blocks < length(tiles_all_pairs) < n_blocks * (n_blocks + 1) ÷ 2
 
                 # After the tree search the tiles, with their types, are sorted by 32x32
                 #   groups of blocks, the order in which the all-pairs search finds them
                 function found_tiles(tree_min_blocks)
-                    withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
-                        ext.find_interacting_tiles!(buffers, gpu_sys, n_blocks)
+                    withenv("MOLLY_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
+                        Molly.find_interacting_tiles!(buffers, gpu_sys, n_blocks)
                     end
                     return collect(zip(
                         Array(buffers.interacting_tiles_i)[1:buffers.num_pairs],
@@ -564,13 +564,13 @@ end
 
                 # The tree search is used from a number of blocks that grows with the tiles
                 #   per block of the previous search, or 0 tiles before the first search
-                @test ext.use_tile_tree(gpu_sys, 20_000, 0)
-                @test !ext.use_tile_tree(gpu_sys, 2_000, 0)
-                @test ext.use_tile_tree(gpu_sys, 6_000, 6_000 * 30)
-                @test !ext.use_tile_tree(gpu_sys, 6_000, 6_000 * 300)
+                @test Molly.use_tile_tree(gpu_sys, 20_000, 0)
+                @test !Molly.use_tile_tree(gpu_sys, 2_000, 0)
+                @test Molly.use_tile_tree(gpu_sys, 6_000, 6_000 * 30)
+                @test !Molly.use_tile_tree(gpu_sys, 6_000, 6_000 * 300)
 
                 for tree_min_blocks in ("1", "1000000")
-                    withenv("MOLLY_CUDA_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
+                    withenv("MOLLY_TILE_TREE_MIN_BLOCKS" => tree_min_blocks) do
                         fs_gpu = Array(forces(gpu_sys, nothing))
                         pe_gpu = potential_energy(gpu_sys, nothing)
                         @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
@@ -585,7 +585,7 @@ end
                     rng = Xoshiro(8)
                     coords_shifted = [c + B * SVector{3, T}(rand(rng, -2:2), rand(rng, -2:2),
                                                            rand(rng, -2:2)) for c in coords]
-                    gpu_sys_shifted = System(gpu_sys; coords=CuArray(coords_shifted))
+                    gpu_sys_shifted = System(gpu_sys; coords=AT(coords_shifted))
                     fs_gpu = Array(forces(gpu_sys_shifted, nothing))
                     @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
 
@@ -605,7 +605,7 @@ end
                                         min_1 .- (min_2 .+ ext_2 .+ shift), zero(T))
                             sum(abs2, gaps)
                         end
-                        within = ext.boxes_within_cutoff(min_1, min_1 + ext_1, min_2,
+                        within = Molly.boxes_within_cutoff(min_1, min_1 + ext_1, min_2,
                                                          min_2 + ext_2, boundary, r_cut_test^2)
                         n_wrong += (within != (dist2 <= r_cut_test^2))
                     end
@@ -625,8 +625,8 @@ end
 
             # System on GPU with no neighbor finder
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(use_neighbors=false, cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=nothing,
@@ -669,15 +669,15 @@ end
             r_cut = T(5.0)
 
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
-                velocities=CuArray(velocities),
+                atoms=AT(atoms),
+                coords=AT(coords),
+                velocities=AT(velocities),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -710,14 +710,14 @@ end
             r_cut = T(2.0)
 
             sys = System(
-                atoms=CuArray(atoms),
-                coords=CuArray(coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=DistanceCutoff(r_cut)),),
                 neighbor_finder=GPUNeighborFinder(
                     n_atoms=n_atoms,
                     dist_cutoff=r_cut,
-                    array_type=CuArray,
+                    array_type=AT,
                 ),
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -755,14 +755,14 @@ end
 
             function gpu_state(atoms_state)
                 sys = System(
-                    atoms=CuArray(atoms_state),
-                    coords=CuArray(coords),
+                    atoms=AT(atoms_state),
+                    coords=AT(coords),
                     boundary=boundary,
                     pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.2u"nm")),),
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=1.2u"nm",
-                        array_type=CuArray,
+                        array_type=AT,
                     ),
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1",
@@ -798,7 +798,6 @@ end
             boundary = CubicBoundary(FT(50.0)u"nm")
             atom_mass = FT(10.0)u"g/mol"
             temp = FT(298.0)u"K"
-            AT = CuArray
             # Some atoms are virtual sites, which must have their velocities
             #   actively set to zero by random_velocities!.
             vs_inds = [2, 4, 7]
@@ -858,7 +857,6 @@ end
 
         @testset "langevin_o_step! FT=$FT" for FT in (Float32, Float64)
             n_atoms = 50_000
-            AT = CuArray
 
             rng = Xoshiro(15)
             init_vels = [randn(rng, SVector{3, FT}) for _ in 1:n_atoms]
@@ -912,10 +910,10 @@ end
             rtol = (T == Float32 ? 1e-5 : 1e-12)
             @test isapprox(virial(sys_cpu; n_threads=1), W_ref; rtol=rtol)
             @test isapprox(virial(sys_cpu), W_ref; rtol=rtol)
-            for nf in (DistanceNeighborFinder(; nf_args..., array_type=CuArray),
-                       GPUCellListNeighborFinder(; nf_args..., array_type=CuArray),
-                       GPUNeighborFinder(; nf_args..., array_type=CuArray))
-                sys_gpu = make_sys(CuArray, nf)
+            for nf in (DistanceNeighborFinder(; nf_args..., array_type=AT),
+                       GPUCellListNeighborFinder(; nf_args..., array_type=AT),
+                       GPUNeighborFinder(; nf_args..., array_type=AT))
+                sys_gpu = make_sys(AT, nf)
                 @test isapprox(Array(virial(sys_gpu)), W_ref; rtol=rtol)
             end
         end

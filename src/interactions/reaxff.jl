@@ -704,7 +704,7 @@ function System(coord_file_path::AbstractString,
 
     backend = get_backend(coords)
     
-    nf = if backend isa KernelAbstractions.GPU && gpu_cell_list_suitable(boundary_used, far_dist_cutoff; force_float32=true)
+    nf = if is_gpu_backend(backend) && gpu_cell_list_suitable(boundary_used, far_dist_cutoff; force_float32=true)
         GPUCellListNeighborFinder(
             auto_update = auto_update,
             n_steps = neighbor_refresh_n_steps,
@@ -713,7 +713,7 @@ function System(coord_file_path::AbstractString,
             output = :geometric_pairs,
             strictness = strictness,
         )
-    elseif backend isa KernelAbstractions.GPU
+    elseif is_gpu_backend(backend)
         DistanceNeighborFinder(
             n_atoms = n_atoms,
             array_type = AT,
@@ -1583,11 +1583,43 @@ function write_force_rij(
     end
 end
 
-@inline reaxff_workgroupsize(backend, ndrange, n_threads) = backend_workgroupsize(backend, ndrange, n_threads)
+#=
+`inter.device_params` holds arrays as well as inline parameter structs. Reading one of the
+structs from it can copy all of `device_params` to the stack, with the slots of the arrays
+in the copy filled with a byte pattern, and a kernel launch that takes the struct then gets
+a pointer into that copy, the type of which Enzyme can not deduce. These functions are not
+inlined, so they return a copy of the struct alone.
+=#
+@noinline reaxff_general_parameters(inter) = inter.device_params.general_parameters
+@noinline reaxff_taper_parameters(inter) = inter.device_params.taper_parameters
 
-@inline reaxff_workgroupsize(::KernelAbstractions.GPU, ndrange, n_threads) = ndrange <= 50_000 ? 32 : 128
+@inline function reaxff_workgroupsize(backend, ndrange, n_threads)
+    if is_gpu_backend(backend)
+        return ndrange <= 50_000 ? 32 : 128
+    else
+        return backend_workgroupsize(backend, ndrange, n_threads)
+    end
+end
 
-@kernel function resolve_forces_kernel(
+#=
+The kernels that accumulate forces with `add_force!` take their items from `chunk_items`. On
+the CPU they accumulate into the slot of `group_forces` of their work-group without atomics,
+so they run as at most `n_threads` work-groups of one work-item, each of which handles a
+contiguous chunk of the items. On GPUs, which use atomics, each work-item handles one item.
+=#
+@inline function reaxff_chunk(backend, n_items, n_threads)
+    return is_gpu_backend(backend) ? Val(1) : cpu_chunk_size(n_items, n_threads)
+end
+
+@inline function reaxff_chunked_launch(backend, n_items, n_threads)
+    if is_gpu_backend(backend)
+        return (ndrange=n_items, workgroupsize=reaxff_workgroupsize(backend, n_items, n_threads))
+    else
+        return (ndrange=cld(n_items, cpu_chunk_size(n_items, n_threads)), workgroupsize=1)
+    end
+end
+
+@kernel_and_item function resolve_forces_kernel(
     fill_pos,
     nbrs,
     coords,
@@ -1597,37 +1629,40 @@ end
     S_dE_dBOππ,
     S_dE_dΔ,
     forces,
-    derivatives
+    derivatives,
+    chunk,
+    n_items,
 )
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        max_nbrs = size(nbrs, 1)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
+        @inbounds begin
+            max_nbrs = size(nbrs, 1)
         
-        # map linear GPU index onto column major nbrs matrix
-        i = (ti - 1) ÷ max_nbrs + 1
-        idx_j = (ti - 1) % max_nbrs + 1
+            # map linear GPU index onto column major nbrs matrix
+            i = (ti - 1) ÷ max_nbrs + 1
+            idx_j = (ti - 1) % max_nbrs + 1
 
-        if idx_j <= fill_pos[i]
-            j = nbrs[idx_j, i]
+            if idx_j <= fill_pos[i]
+                j = nbrs[idx_j, i]
 
-            if j > i
-                write_force_BO(
-                    coords,
-                    boundary,
-                    i,
-                    j,
-                    idx_j,
-                    S_dE_dBO[idx_j, i] +  S_dE_dΔ[i] + S_dE_dΔ[j],
-                    S_dE_dBOπ[idx_j, i],
-                    S_dE_dBOππ[idx_j, i],
-                    derivatives,
-                    forces,
-                    nbrs,
-                    fill_pos,
-                    group
-                )
+                if j > i
+                    write_force_BO(
+                        coords,
+                        boundary,
+                        i,
+                        j,
+                        idx_j,
+                        S_dE_dBO[idx_j, i] +  S_dE_dΔ[i] + S_dE_dΔ[j],
+                        S_dE_dBOπ[idx_j, i],
+                        S_dE_dBOππ[idx_j, i],
+                        derivatives,
+                        forces,
+                        nbrs,
+                        fill_pos,
+                        group
+                    )
+                end
             end
         end
     end
@@ -1664,8 +1699,10 @@ function resolve_forces!(
         dBOππ′_dr = inter.state.dBOππ′_dr
     )
 
-    kernel = resolve_forces_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        resolve_forces_kernel,
+        backend,
+        reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
         fill_pos,
         nbrs,
         sys.coords,
@@ -1676,8 +1713,8 @@ function resolve_forces!(
         S_dE_dΔ,
         reaxff_kernel_forces(inter, backend),
         derivatives,
-        ndrange=length(nbrs),
-        workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
+        reaxff_chunk(backend, length(nbrs), n_threads),
+        length(nbrs),
     )
 end
 
@@ -2058,7 +2095,7 @@ end
 end
 
 
-@kernel function bond_kernel(
+@kernel_and_item function bond_kernel(
     nbrs_list,
     bond_pair_indices,
     n_bond_pairs,
@@ -2169,7 +2206,7 @@ end
 end
 
 
-@kernel function bond_correction_kernel(
+@kernel_and_item function bond_correction_kernel(
     atid,
     fill_pos,
     nbrs,
@@ -2324,7 +2361,7 @@ function bonds!(
     reverse_nbrs = inter.state.reverse_nbrs
     fill_pos = inter.state.fill_pos
     odgp = inter.device_params.off_diagonal_parameters
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
 
     coordn′ = inter.state.coordn
     BO′     = inter.state.BO
@@ -2342,13 +2379,15 @@ function bonds!(
     bo_cutoff  = inter.device_params.global_parameters.bo_cutoff
 
     # assume unit-less coords has units of nm
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", one(T) * inter.sys_coord_unit))) : T(10.0)
+    # the field type of `sys_coord_unit` is not concrete, so the type is asserted for the
+    #   kernel launches to be inferred
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", one(T) * inter.sys_coord_unit))) : T(10.0))::T
 
     bond_dist_cutoff_sq = inter.device_params.global_parameters.bond_dist_cutoff^2
 
     bond_pair_indices = nothing
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         if length(inter.state.bond_pair_indices) < length(neighbors)
             resize!(inter.state.bond_pair_indices, length(neighbors))
         end
@@ -2372,8 +2411,11 @@ function bonds!(
         bond_pair_indices = inter.state.bond_pair_indices
     end
 
-    b_kernel = bond_kernel(backend)
-    b_kernel(
+    launch_item_kernel!(
+        bond_kernel,
+        backend,
+        length(neighbors),
+        reaxff_workgroupsize(backend, length(neighbors), n_threads),
         neighbors.list,
         bond_pair_indices,
         inter.state.n_bond_pairs,
@@ -2396,9 +2438,7 @@ function bonds!(
         atmp,
         odgp,
         bond_dist_cutoff_sq,
-        inter.smoothness_correction;
-        ndrange=length(neighbors),
-        workgroupsize=reaxff_workgroupsize(backend, length(neighbors), n_threads)
+        inter.smoothness_correction,
     )
     synchronize(backend)
 
@@ -2439,8 +2479,11 @@ function bonds!(
     pair_energies = inter.state.thread_atom_energies_1
     fill!(pair_energies, zero(T))
 
-    bc_kernel = bond_correction_kernel(backend)
-    bc_kernel(
+    launch_item_kernel!(
+        bond_correction_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atid,
         fill_pos,
         nbrs,
@@ -2472,9 +2515,7 @@ function bonds!(
         BO′_ππ,
         Δ′,
         Δ′_boc,
-        inter.smoothness_correction;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        inter.smoothness_correction,
     )
 
     Δ       = inter.state.Δ        
@@ -2495,7 +2536,7 @@ function bonds!(
         workgroupsize=reaxff_workgroupsize(backend, length(coordn), n_threads)
     )
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (pair_energies,), (1,), backend)
     else
         E_bond = sum(pair_energies)
@@ -2505,7 +2546,7 @@ function bonds!(
 end
 
 
-@kernel function lone_pairs_kernel(
+@kernel_and_item function lone_pairs_kernel(
     atmp,
     atid,
     Δ_e,
@@ -2578,7 +2619,7 @@ function lone_pairs!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where T
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     atmp = inter.device_params.atom_parameters
     atid = inter.state.sys_atid 
 
@@ -2594,8 +2635,11 @@ function lone_pairs!(
     atom_energies = inter.state.thread_atom_energies_1
     fill!(atom_energies, zero(T))
 
-    kernel = lone_pairs_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        lone_pairs_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atmp,
         atid,
         Δ_e,
@@ -2605,16 +2649,14 @@ function lone_pairs!(
         Δ_lp,
         dn_lp_dΔi,
         S_dE_dΔ,
-        atom_energies;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        atom_energies,
     )
 
     if backend isa KernelAbstractions.CPU
         synchronize(backend)
     end
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (atom_energies,), (3,), backend)
     else
         E_lp = sum(atom_energies)
@@ -2624,7 +2666,7 @@ function lone_pairs!(
 end
 
 
-@kernel function ovun_kernel(
+@kernel_and_item function ovun_kernel(
     fill_pos,
     nbrs,
     bndp,
@@ -2782,7 +2824,7 @@ function over_under_coordination!(
     atid = inter.state.sys_atid 
     bndp = inter.device_params.bond_parameters
     atmp = inter.device_params.atom_parameters
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     n_atoms = inter.state.n_atoms
     fill_pos = inter.state.fill_pos
 
@@ -2806,8 +2848,11 @@ function over_under_coordination!(
 
     reverse_nbrs = inter.state.reverse_nbrs
 
-    kernel = ovun_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        ovun_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         fill_pos,
         nbrs,
         bndp,
@@ -2826,12 +2871,10 @@ function over_under_coordination!(
         dn_lp_dΔi,
         S_dE_dΔ,
         overcoordination_energies,
-        undercoordination_energies;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        undercoordination_energies,
     )
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (overcoordination_energies, undercoordination_energies), (2, 2), backend)
     else
         E_overcoordination = sum(overcoordination_energies)
@@ -2874,7 +2917,7 @@ end
 
 # identifies all valid angles with defined angle parameters and which satisfy bond order constraints
 # writes j, idx_i, idx_k, angle parameter index for each valid angle
-@kernel function construct_valid_angles!(
+@kernel_and_item function construct_valid_angles!(
     valid_angles,
     n_valid_angles,
     fill_pos,
@@ -2887,57 +2930,60 @@ end
     atid,
     ::Val{smoothness_correction},
     angle_args,
+    chunk,
+    n_items,
 ) where {smoothness_correction}
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        max_nbrs = size(nbrs, 1)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
+        @inbounds begin
+            max_nbrs = size(nbrs, 1)
 
-        # one bond j-i per thread (in angle i-j-k)
-        j = (ti - 1) ÷ max_nbrs + 1
-        idx_i = (ti - 1) % max_nbrs + 1
+            # one bond j-i per thread (in angle i-j-k)
+            j = (ti - 1) ÷ max_nbrs + 1
+            idx_i = (ti - 1) % max_nbrs + 1
 
-        if idx_i < fill_pos[j]  # must be at least one neighbor after i
-            i = nbrs[idx_i, j]
+            if idx_i < fill_pos[j]  # must be at least one neighbor after i
+                i = nbrs[idx_i, j]
 
-            BO_ij_raw = BO[idx_i, j]
-            BO_ij = BO_ij_raw - valence_cutoff
+                BO_ij_raw = BO[idx_i, j]
+                BO_ij = BO_ij_raw - valence_cutoff
 
-            if BO_ij > 0
-                for idx_k in (idx_i + 1):fill_pos[j]
-                    k = nbrs[idx_k, j]
+                if BO_ij > 0
+                    for idx_k in (idx_i + 1):fill_pos[j]
+                        k = nbrs[idx_k, j]
 
-                    type_i, type_k = minmax(atid[i], atid[k])
-                    ang_info = angle_entries[type_i, atid[j], type_k]
-                    start_index = ang_info.index
-                    end_index = start_index + ang_info.num_entries - 1
+                        type_i, type_k = minmax(atid[i], atid[k])
+                        ang_info = angle_entries[type_i, atid[j], type_k]
+                        start_index = ang_info.index
+                        end_index = start_index + ang_info.num_entries - 1
 
-                    if start_index > 0
-                        BO_jk_raw = BO[idx_k, j]
-                        BO_jk = BO_jk_raw - valence_cutoff
+                        if start_index > 0
+                            BO_jk_raw = BO[idx_k, j]
+                            BO_jk = BO_jk_raw - valence_cutoff
 
-                        if (BO_jk > zero(BO_jk)) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
-                            for p_idx in start_index:end_index
-                                angp_ijk = angp[p_idx]
+                            if (BO_jk > zero(BO_jk)) && (smoothness_correction || BO_ij_raw * BO_jk_raw > valence_prod_cutoff)
+                                for p_idx in start_index:end_index
+                                    angp_ijk = angp[p_idx]
 
-                                if abs(angp_ijk.p_val1) > 0.001
-                                    if isnothing(angle_args)
-                                        valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
+                                    if abs(angp_ijk.p_val1) > 0.001
+                                        if isnothing(angle_args)
+                                            valid_angle_idx = Atomix.@atomic n_valid_angles[1] += 1
 
-                                        # if overflow, continue counting so can resize later
-                                        if valid_angle_idx <= size(valid_angles, 2)
-                                            valid_angles[1, valid_angle_idx] = j
-                                            valid_angles[2, valid_angle_idx] = idx_i
-                                            valid_angles[3, valid_angle_idx] = idx_k
-                                            valid_angles[4, valid_angle_idx] = p_idx
+                                            # if overflow, continue counting so can resize later
+                                            if valid_angle_idx <= size(valid_angles, 2)
+                                                valid_angles[1, valid_angle_idx] = j
+                                                valid_angles[2, valid_angle_idx] = idx_i
+                                                valid_angles[3, valid_angle_idx] = idx_k
+                                                valid_angles[4, valid_angle_idx] = p_idx
+                                            end
+                                        else
+                                            valence_angle!(
+                                                j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO,
+                                                valence_cutoff, valence_prod_cutoff, angle_entries,
+                                                angp, atid, Val(smoothness_correction), angle_args...,
+                                            )
                                         end
-                                    else
-                                        valence_angle!(
-                                            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO,
-                                            valence_cutoff, valence_prod_cutoff, angle_entries,
-                                            angp, atid, Val(smoothness_correction), angle_args...,
-                                        )
                                     end
                                 end
                             end
@@ -2986,24 +3032,27 @@ end
     S_dE_dΔ,
     forces,
     ::Val{smoothness_correction},
+    chunk,
+    n_items,
 ) where {T, smoothness_correction}
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        j     = valid_angles[1, ti]
-        idx_i = valid_angles[2, ti]
-        idx_k = valid_angles[3, ti]
-        p_idx = valid_angles[4, ti]
+    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+        @inbounds begin
+            j     = valid_angles[1, ti]
+            idx_i = valid_angles[2, ti]
+            idx_k = valid_angles[3, ti]
+            p_idx = valid_angles[4, ti]
 
-        valence_angle!(
-            j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO, valence_cutoff,
-            valence_prod_cutoff, angle_entries, angp, atid, Val(smoothness_correction),
-            atmp, genp, Δ_e_mod2, n_lp, dn_lp_dΔi, Δ_angle, Δ, Δ_boc, coordn,
-            reverse_nbrs, BO_π, BO_ππ, coords, boundary, conv_factor, deg_to_rad,
-            val_energies, pen_energies, coa_energies, S_dE_dBO, S_dE_dBOπ, S_dE_dBOππ,
-            S_dE_dΔ, forces,
-        )
+            valence_angle!(
+                j, idx_i, idx_k, p_idx, group, fill_pos, nbrs, BO, valence_cutoff,
+                valence_prod_cutoff, angle_entries, angp, atid, Val(smoothness_correction),
+                atmp, genp, Δ_e_mod2, n_lp, dn_lp_dΔi, Δ_angle, Δ, Δ_boc, coordn,
+                reverse_nbrs, BO_π, BO_ππ, coords, boundary, conv_factor, deg_to_rad,
+                val_energies, pen_energies, coa_energies, S_dE_dBO, S_dE_dBOπ, S_dE_dBOππ,
+                S_dE_dΔ, forces,
+            )
+        end
     end
 end
 
@@ -3329,7 +3378,7 @@ function valence_angles!(
     backend;
     n_threads::Integer=Threads.nthreads(),
 ) where T
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     atmp = inter.device_params.atom_parameters
     atid = inter.state.sys_atid
     angp = inter.device_params.angle_parameters
@@ -3364,7 +3413,7 @@ function valence_angles!(
 
     deg_to_rad = T(3.14159265 / 180.0)
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     angle_args = nothing
     if backend isa KernelAbstractions.CPU
@@ -3399,9 +3448,11 @@ function valence_angles!(
 
     fill!(inter.state.n_valid_angles, 0)
 
-    valid_angles_kernel! = construct_valid_angles!(backend)
     if !isempty(nbrs)
-        valid_angles_kernel!(
+        launch_item_kernel!(
+            construct_valid_angles!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_angles,
             inter.state.n_valid_angles,
             fill_pos,
@@ -3413,9 +3464,9 @@ function valence_angles!(
             angp,
             atid,
             inter.smoothness_correction,
-            angle_args;
-            ndrange=length(nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
+            angle_args,
+            reaxff_chunk(backend, length(nbrs), n_threads),
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -3429,7 +3480,10 @@ function valence_angles!(
         new_size = max(n_valid_angles, 2 * size(inter.state.valid_angles, 2))
         inter.state.valid_angles = similar(inter.state.valid_angles, 4, new_size)
         fill!(inter.state.n_valid_angles, 0)
-        valid_angles_kernel!(
+        launch_item_kernel!(
+            construct_valid_angles!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_angles,
             inter.state.n_valid_angles,
             fill_pos,
@@ -3441,9 +3495,9 @@ function valence_angles!(
             angp,
             atid,
             inter.smoothness_correction,
-            angle_args;
-            ndrange=length(nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
+            angle_args,
+            reaxff_chunk(backend, length(nbrs), n_threads),
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -3489,12 +3543,13 @@ function valence_angles!(
             S_dE_dΔ,
             reaxff_kernel_forces(inter, backend),
             inter.smoothness_correction,
-            ndrange=n_valid_angles,
-            workgroupsize=reaxff_workgroupsize(backend, n_valid_angles, n_threads)
+            reaxff_chunk(backend, n_valid_angles, n_threads),
+            n_valid_angles;
+            reaxff_chunked_launch(backend, n_valid_angles, n_threads)...
         )
     end
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (val_energies, pen_energies, coa_energies), (4, 5, 6), backend)
     else
         E_val = sum(val_energies)
@@ -3553,7 +3608,7 @@ end
 
 # identifies all valid torsions with defined torsion parameters and which satisfy bond order constraints
 # writes j, idx_k, idx_i, idx_l into valid_torsions for each valid i-j-k-l torsion
-@kernel function construct_valid_torsions!(
+@kernel_and_item function construct_valid_torsions!(
     valid_torsions,
     n_valid_torsions,
     fill_pos,
@@ -3564,58 +3619,61 @@ end
     atid,
     ::Val{smoothness_correction},
     torsion_args,
+    chunk,
+    n_items,
 ) where {smoothness_correction}
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        max_nbrs = size(nbrs, 1)
+    for ti in atom_chunk_items(@index(Global, Linear), chunk, n_items, size(nbrs, 1))
+        @inbounds begin
+            max_nbrs = size(nbrs, 1)
 
-        # one central bond j-k per thread
-        j = (ti - 1) ÷ max_nbrs + 1
-        idx_k = (ti - 1) % max_nbrs + 1
+            # one central bond j-k per thread
+            j = (ti - 1) ÷ max_nbrs + 1
+            idx_k = (ti - 1) % max_nbrs + 1
         
-        if idx_k <= fill_pos[j]
-            k = nbrs[idx_k, j]
+            if idx_k <= fill_pos[j]
+                k = nbrs[idx_k, j]
 
-            if k > j    # avoid double counting
-                BO_jk_raw = BO[idx_k, j]
-                BO_jk = BO_jk_raw - valence_cutoff
+                if k > j    # avoid double counting
+                    BO_jk_raw = BO[idx_k, j]
+                    BO_jk = BO_jk_raw - valence_cutoff
 
-                if BO_jk > zero(BO_jk)
-                    # loop through neighbors i of j
-                    for idx_i in 1:fill_pos[j]
-                        i = nbrs[idx_i, j]
+                    if BO_jk > zero(BO_jk)
+                        # loop through neighbors i of j
+                        for idx_i in 1:fill_pos[j]
+                            i = nbrs[idx_i, j]
 
-                        if i != k   # atom i must not be atom k in i-j-k
-                            BO_ij_raw = BO[idx_i, j]
-                            BO_ij = BO_ij_raw - valence_cutoff
+                            if i != k   # atom i must not be atom k in i-j-k
+                                BO_ij_raw = BO[idx_i, j]
+                                BO_ij = BO_ij_raw - valence_cutoff
 
-                            if BO_ij > zero(BO_ij)
-                                # loop through neighbors l of k
-                                for idx_l in 1:fill_pos[k]
-                                    l = nbrs[idx_l, k]
+                                if BO_ij > zero(BO_ij)
+                                    # loop through neighbors l of k
+                                    for idx_l in 1:fill_pos[k]
+                                        l = nbrs[idx_l, k]
 
-                                    if l != j && l != i   # atom l must not be i or j in i-j-k-l
-                                        # check if valid torsion
-                                        torp_ijkl = torp[atid[i], atid[j], atid[k], atid[l]]
+                                        if l != j && l != i   # atom l must not be i or j in i-j-k-l
+                                            # check if valid torsion
+                                            torp_ijkl = torp[atid[i], atid[j], atid[k], atid[l]]
 
-                                        if torp_ijkl.is_defined
-                                            BO_kl_raw = BO[idx_l, k]
-                                            BO_kl = BO_kl_raw - valence_cutoff
+                                            if torp_ijkl.is_defined
+                                                BO_kl_raw = BO[idx_l, k]
+                                                BO_kl = BO_kl_raw - valence_cutoff
 
-                                            if BO_kl > zero(BO_kl) && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
-                                                if isnothing(torsion_args)
-                                                    valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
+                                                if BO_kl > zero(BO_kl) && (smoothness_correction || BO_ij_raw * BO_jk_raw * BO_kl_raw > valence_cutoff)
+                                                    if isnothing(torsion_args)
+                                                        valid_torsion_idx = Atomix.@atomic n_valid_torsions[1] += 1
 
-                                                    if valid_torsion_idx <= size(valid_torsions, 2)
-                                                        valid_torsions[1, valid_torsion_idx] = j
-                                                        valid_torsions[2, valid_torsion_idx] = idx_k
-                                                        valid_torsions[3, valid_torsion_idx] = idx_i
-                                                        valid_torsions[4, valid_torsion_idx] = idx_l
+                                                        if valid_torsion_idx <= size(valid_torsions, 2)
+                                                            valid_torsions[1, valid_torsion_idx] = j
+                                                            valid_torsions[2, valid_torsion_idx] = idx_k
+                                                            valid_torsions[3, valid_torsion_idx] = idx_i
+                                                            valid_torsions[4, valid_torsion_idx] = idx_l
+                                                        end
+                                                    else
+                                                        torsion!(j, idx_k, idx_i, idx_l, group, torsion_args...)
                                                     end
-                                                else
-                                                    torsion!(j, idx_k, idx_i, idx_l, group, torsion_args...)
                                                 end
                                             end
                                         end
@@ -3652,22 +3710,25 @@ end
     S_dE_dBOπ,
     BO_π,
     ::Val{smoothness_correction},
+    chunk,
+    n_items,
 ) where {T, smoothness_correction}
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        j     = valid_torsions[1, ti]
-        idx_k = valid_torsions[2, ti]
-        idx_i = valid_torsions[3, ti]
-        idx_l = valid_torsions[4, ti]
+    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+        @inbounds begin
+            j     = valid_torsions[1, ti]
+            idx_k = valid_torsions[2, ti]
+            idx_i = valid_torsions[3, ti]
+            idx_l = valid_torsions[4, ti]
 
-        torsion!(
-            j, idx_k, idx_i, idx_l, group, nbrs, BO, valence_cutoff, reverse_nbrs,
-            Δ_angle, genp, conv_factor, coords, boundary, torp, atid, torsion_energies,
-            conj_energies, forces, S_dE_dΔ, S_dE_dBO, S_dE_dBOπ, BO_π,
-            Val(smoothness_correction),
-        )
+            torsion!(
+                j, idx_k, idx_i, idx_l, group, nbrs, BO, valence_cutoff, reverse_nbrs,
+                Δ_angle, genp, conv_factor, coords, boundary, torp, atid, torsion_energies,
+                conj_energies, forces, S_dE_dΔ, S_dE_dBO, S_dE_dBOπ, BO_π,
+                Val(smoothness_correction),
+            )
+        end
     end
 end
 
@@ -3963,7 +4024,7 @@ function torsions!(
     nbrs = inter.state.nbrs
     fill_pos = inter.state.fill_pos
 
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     torp = inter.device_params.torsion_parameters
 
     Δ_angle = inter.state.Δ_angle
@@ -3983,7 +4044,7 @@ function torsions!(
     fill!(torsion_energies, zero(T))
     fill!(conj_energies, zero(T))
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     torsion_args = nothing
     if backend isa KernelAbstractions.CPU
@@ -4013,9 +4074,11 @@ function torsions!(
     fill!(inter.state.n_valid_torsions, 0)
 
     # this continues counting even when capacity of valid_torsions is reached => reports exact required size
-    valid_torsions_kernel! = construct_valid_torsions!(backend)
     if !isempty(nbrs)
-        valid_torsions_kernel!(
+        launch_item_kernel!(
+            construct_valid_torsions!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_torsions,
             inter.state.n_valid_torsions,
             fill_pos,
@@ -4025,9 +4088,9 @@ function torsions!(
             torp,
             atid,
             inter.smoothness_correction,
-            torsion_args;
-            ndrange=length(nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
+            torsion_args,
+            reaxff_chunk(backend, length(nbrs), n_threads),
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4042,7 +4105,10 @@ function torsions!(
         new_size = max(n_valid_torsions, 2 * size(inter.state.valid_torsions, 2))
         inter.state.valid_torsions = similar(inter.state.valid_torsions, 4, new_size)
         fill!(inter.state.n_valid_torsions, 0)
-        valid_torsions_kernel!(
+        launch_item_kernel!(
+            construct_valid_torsions!,
+            backend,
+            reaxff_chunked_launch(backend, length(nbrs), n_threads)...,
             inter.state.valid_torsions,
             inter.state.n_valid_torsions,
             fill_pos,
@@ -4052,9 +4118,9 @@ function torsions!(
             torp,
             atid,
             inter.smoothness_correction,
-            torsion_args;
-            ndrange=length(nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(nbrs), n_threads)
+            torsion_args,
+            reaxff_chunk(backend, length(nbrs), n_threads),
+            length(nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4086,13 +4152,14 @@ function torsions!(
             S_dE_dBO,
             S_dE_dBOπ,
             BO_π,
-            inter.smoothness_correction;
-            ndrange=n_valid_torsions,
-            workgroupsize=reaxff_workgroupsize(backend, n_valid_torsions, n_threads)
+            inter.smoothness_correction,
+            reaxff_chunk(backend, n_valid_torsions, n_threads),
+            n_valid_torsions;
+            reaxff_chunked_launch(backend, n_valid_torsions, n_threads)...
         )
     end
     
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (torsion_energies, conj_energies), (8, 9), backend)
     else
         E_tors = sum(torsion_energies)
@@ -4105,7 +4172,7 @@ function torsions!(
 end
 
 
-@kernel function corrections_kernel(
+@kernel_and_item function corrections_kernel(
     atid,
     genp,
     C_id,
@@ -4240,7 +4307,7 @@ function corrections!(
     atid = inter.state.sys_atid
     BO = inter.state.BO
     Δ = inter.state.Δ
-    genp = inter.device_params.general_parameters
+    genp = reaxff_general_parameters(inter)
     n_atoms = inter.state.n_atoms
     coordn = inter.state.coordn
 
@@ -4260,8 +4327,11 @@ function corrections!(
     fill!(c2_energies, zero(T))
     fill!(trip_energies, zero(T))
 
-    kernel = corrections_kernel(backend)
-    kernel(
+    launch_item_kernel!(
+        corrections_kernel,
+        backend,
+        n_atoms,
+        reaxff_workgroupsize(backend, n_atoms, n_threads),
         atid,
         genp,
         C_id,
@@ -4278,12 +4348,10 @@ function corrections!(
         coordn,
         c2_energies,
         trip_energies,
-        inter.smoothness_correction;
-        ndrange=n_atoms,
-        workgroupsize=reaxff_workgroupsize(backend, n_atoms, n_threads)
+        inter.smoothness_correction,
     )
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (c2_energies, trip_energies), (3, 1), backend)
     else
         E_c2 = sum(c2_energies)
@@ -4298,7 +4366,7 @@ end
 
 # identifies all valid hydrogen bonds and which satisfy bond order constraints
 # writes j, k, idx_i into valid_hbonds for each valid i-j --- k hydrogen bond
-@kernel function construct_valid_hbonds!(
+@kernel_and_item function construct_valid_hbonds!(
     valid_hbonds,
     n_valid_hbonds,
     far_nbrs_list,
@@ -4316,69 +4384,72 @@ end
     h_bond_donors,
     h_bond_acceptors,
     hbond_args,
+    chunk,
+    n_items,
 ) where T
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
     cutoff_sq = hbond_dist_cutoff * hbond_dist_cutoff
 
-    @inbounds begin
-        atom_a, atom_b, _ = far_nbrs_list[ti]
+    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+        @inbounds begin
+            atom_a, atom_b, _ = far_nbrs_list[ti]
 
-        # i-j --- k  <==>  donor-H --- acceptor
-        if atid[atom_a] == h_id && h_bond_acceptors[atid[atom_b]]
-            j = atom_a
-            k = atom_b
-        elseif atid[atom_b] == h_id && h_bond_acceptors[atid[atom_a]]
-            j = atom_b
-            k = atom_a
-        else
-            j = zero(atom_a)
-            k = zero(atom_b)
-        end
+            # i-j --- k  <==>  donor-H --- acceptor
+            if atid[atom_a] == h_id && h_bond_acceptors[atid[atom_b]]
+                j = atom_a
+                k = atom_b
+            elseif atid[atom_b] == h_id && h_bond_acceptors[atid[atom_a]]
+                j = atom_b
+                k = atom_a
+            else
+                j = zero(atom_a)
+                k = zero(atom_b)
+            end
 
-        if !iszero(j)
-            r_vec_jk = map(x -> ustrip(x) * conv_factor, vector(coords[k], coords[j], boundary))
+            if !iszero(j)
+                r_vec_jk = map(x -> ustrip(x) * conv_factor, vector(coords[k], coords[j], boundary))
 
-            r_jk_sq = r_vec_jk[1]^2 + r_vec_jk[2]^2 + r_vec_jk[3]^2
+                r_jk_sq = r_vec_jk[1]^2 + r_vec_jk[2]^2 + r_vec_jk[3]^2
 
-            if r_jk_sq < cutoff_sq
-                atid_j = atid[j]
-                atid_k = atid[k]
+                if r_jk_sq < cutoff_sq
+                    atid_j = atid[j]
+                    atid_k = atid[k]
 
-                # find donors by checking atoms bonded to H
-                for idx_i in 1:fill_pos[j]
-                    i = nbrs[idx_i, j]
+                    # find donors by checking atoms bonded to H
+                    for idx_i in 1:fill_pos[j]
+                        i = nbrs[idx_i, j]
 
-                    # donor and acceptor must not be same atom
-                    i != k || continue
+                        # donor and acceptor must not be same atom
+                        i != k || continue
 
-                    atid_i = atid[i]
-                    h_bond_donors[atid_i] || continue
+                        atid_i = atid[i]
+                        h_bond_donors[atid_i] || continue
 
-                    BO_ij = BO[idx_i, j]
-                    BO_ij >= hbond_bo_cutoff || continue
+                        BO_ij = BO[idx_i, j]
+                        BO_ij >= hbond_bo_cutoff || continue
 
-                    hbdp_ijk = hbdp[atid_i, atid_j, atid_k]
-                    hbdp_ijk.is_defined || continue
+                        hbdp_ijk = hbdp[atid_i, atid_j, atid_k]
+                        hbdp_ijk.is_defined || continue
 
-                    if isnothing(hbond_args)
-                        valid_hbond_idx = Atomix.@atomic n_valid_hbonds[1] += 1
+                        if isnothing(hbond_args)
+                            valid_hbond_idx = Atomix.@atomic n_valid_hbonds[1] += 1
 
-                        if valid_hbond_idx <= size(valid_hbonds, 2)
-                            valid_hbonds[1, valid_hbond_idx] = j
-                            valid_hbonds[2, valid_hbond_idx] = k
-                            valid_hbonds[3, valid_hbond_idx] = idx_i
+                            if valid_hbond_idx <= size(valid_hbonds, 2)
+                                valid_hbonds[1, valid_hbond_idx] = j
+                                valid_hbonds[2, valid_hbond_idx] = k
+                                valid_hbonds[3, valid_hbond_idx] = idx_i
+                            end
+                        else
+                            reverse_nbrs, S_dE_dBO, forces, hb_energies, smoothness = hbond_args
+
+                            hbond_pair!(
+                                j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
+                                coords, boundary, hbdp, atid, S_dE_dBO, forces,
+                                hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
+                                smoothness, group,
+                            )
                         end
-                    else
-                        reverse_nbrs, S_dE_dBO, forces, hb_energies, smoothness = hbond_args
-
-                        hbond_pair!(
-                            j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
-                            coords, boundary, hbdp, atid, S_dE_dBO, forces,
-                            hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-                            smoothness, group,
-                        )
                     end
                 end
             end
@@ -4404,21 +4475,24 @@ end
     hbond_bo_cutoff,
     hbond_dist_cutoff,
     ::Val{smoothness_correction},
+    chunk,
+    n_items,
 ) where {T, smoothness_correction}
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
 
-    @inbounds begin
-        j     = valid_hbonds[1, ti]
-        k     = valid_hbonds[2, ti]
-        idx_i = valid_hbonds[3, ti]
+    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+        @inbounds begin
+            j     = valid_hbonds[1, ti]
+            k     = valid_hbonds[2, ti]
+            idx_i = valid_hbonds[3, ti]
 
-        hbond_pair!(
-            j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
-            coords, boundary, hbdp, atid, S_dE_dBO, forces,
-            hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
-            Val(smoothness_correction), group,
-        )
+            hbond_pair!(
+                j, k, idx_i, nbrs, BO, reverse_nbrs, conv_factor,
+                coords, boundary, hbdp, atid, S_dE_dBO, forces,
+                hb_energies, hbond_bo_cutoff, hbond_dist_cutoff,
+                Val(smoothness_correction), group,
+            )
+        end
     end
 end
 
@@ -4572,7 +4646,7 @@ function hydrogen_bonds!(
     hbond_bo_cutoff = inter.device_params.global_parameters.hbond_bo_cutoff
     hbond_dist_cutoff = inter.device_params.global_parameters.hbond_dist_cutoff
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     hb_energies = inter.state.thread_atom_energies_1
     fill!(hb_energies, zero(T))
@@ -4591,9 +4665,11 @@ function hydrogen_bonds!(
     fill!(inter.state.n_valid_hbonds, 0)
 
     # this continues counting even when capacity of valid hbonds is reached => reports exact required size
-    valid_hbonds_kernel! = construct_valid_hbonds!(backend)
     if length(far_nbrs) > 0
-        valid_hbonds_kernel!(
+        launch_item_kernel!(
+            construct_valid_hbonds!,
+            backend,
+            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
             inter.state.valid_hbonds,
             inter.state.n_valid_hbonds,
             far_nbrs.list,
@@ -4610,9 +4686,9 @@ function hydrogen_bonds!(
             hbond_dist_cutoff,
             h_bond_donors,
             h_bond_acceptors,
-            hbond_args;
-            ndrange=length(far_nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(far_nbrs), n_threads)
+            hbond_args,
+            reaxff_chunk(backend, length(far_nbrs), n_threads),
+            length(far_nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4627,7 +4703,10 @@ function hydrogen_bonds!(
         new_size = max(n_valid_hbonds, 2 * size(inter.state.valid_hbonds, 2))
         inter.state.valid_hbonds = similar(inter.state.valid_hbonds, 3, new_size)
         fill!(inter.state.n_valid_hbonds, 0)
-        valid_hbonds_kernel!(
+        launch_item_kernel!(
+            construct_valid_hbonds!,
+            backend,
+            reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
             inter.state.valid_hbonds,
             inter.state.n_valid_hbonds,
             far_nbrs.list,
@@ -4644,9 +4723,9 @@ function hydrogen_bonds!(
             hbond_dist_cutoff,
             h_bond_donors,
             h_bond_acceptors,
-            hbond_args;
-            ndrange=length(far_nbrs),
-            workgroupsize=reaxff_workgroupsize(backend, length(far_nbrs), n_threads)
+            hbond_args,
+            reaxff_chunk(backend, length(far_nbrs), n_threads),
+            length(far_nbrs),
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4674,8 +4753,9 @@ function hydrogen_bonds!(
             hbond_bo_cutoff,
             hbond_dist_cutoff,
             inter.smoothness_correction,
-            ndrange=n_valid_hbonds,
-            workgroupsize=reaxff_workgroupsize(backend, n_valid_hbonds, n_threads)
+            reaxff_chunk(backend, n_valid_hbonds, n_threads),
+            n_valid_hbonds;
+            reaxff_chunked_launch(backend, n_valid_hbonds, n_threads)...
         )
 
         if backend isa KernelAbstractions.CPU
@@ -4683,7 +4763,7 @@ function hydrogen_bonds!(
         end
     end
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (hb_energies,), (7,), backend)
     else
         E_hb = sum(hb_energies)
@@ -4693,7 +4773,7 @@ function hydrogen_bonds!(
 end
 
 
-@kernel function non_bonded_kernel(
+@kernel_and_item function non_bonded_kernel(
     far_nbrs_list,
     coords,
     boundary,
@@ -4708,87 +4788,108 @@ end
     forces,
     vdW_energies,
     coulomb_energies,
-    upper_taper_radius
+    upper_taper_radius,
+    chunk,
+    n_items,
 ) where T
-    ti = @index(Global, Linear)
     group = @index(Group, Linear)
+    vdW_sum = zero(T)
+    coulomb_sum = zero(T)
 
-    @inbounds begin
-        ni = far_nbrs_list[ti]
-        i, j, _ = ni
+    for ti in chunk_items(@index(Global, Linear), chunk, n_items)
+        @inbounds begin
+            ni = far_nbrs_list[ti]
+            i, j, _ = ni
 
-        r_vec_ij = map(x -> ustrip(x) * conv_factor, vector(coords[j], coords[i], boundary))
-        r_ij = norm(r_vec_ij)
+            r_vec_ij = map(x -> ustrip(x) * conv_factor, vector(coords[j], coords[i], boundary))
+            r_ij = norm(r_vec_ij)
 
-        if r_ij <= upper_taper_radius
-            r_ij_unit = r_vec_ij * inv(r_ij)
+            if r_ij <= upper_taper_radius
+                r_ij_unit = r_vec_ij * inv(r_ij)
     
-            Tap = muladd(tp.Tap_7, r_ij, tp.Tap_6)
-            Tap = muladd(Tap, r_ij, tp.Tap_5)
-            Tap = muladd(Tap, r_ij, tp.Tap_4)
-            Tap = muladd(Tap, r_ij, tp.Tap_3)
-            Tap = muladd(Tap, r_ij, tp.Tap_2)
-            Tap = muladd(Tap, r_ij, tp.Tap_1)
-            Tap = muladd(Tap, r_ij, tp.Tap_0)
+                Tap = muladd(tp.Tap_7, r_ij, tp.Tap_6)
+                Tap = muladd(Tap, r_ij, tp.Tap_5)
+                Tap = muladd(Tap, r_ij, tp.Tap_4)
+                Tap = muladd(Tap, r_ij, tp.Tap_3)
+                Tap = muladd(Tap, r_ij, tp.Tap_2)
+                Tap = muladd(Tap, r_ij, tp.Tap_1)
+                Tap = muladd(Tap, r_ij, tp.Tap_0)
     
-            dTap = muladd(T(7.0), tp.Tap_7 * r_ij, T(6.0) * tp.Tap_6)
-            dTap = muladd(dTap, r_ij, T(5.0) * tp.Tap_5)
-            dTap = muladd(dTap, r_ij, T(4.0) * tp.Tap_4)
-            dTap = muladd(dTap, r_ij, T(3.0) * tp.Tap_3)
-            dTap = muladd(dTap, r_ij, T(2.0) * tp.Tap_2)
-            dTap = muladd(dTap, r_ij, tp.Tap_1)
+                dTap = muladd(T(7.0), tp.Tap_7 * r_ij, T(6.0) * tp.Tap_6)
+                dTap = muladd(dTap, r_ij, T(5.0) * tp.Tap_5)
+                dTap = muladd(dTap, r_ij, T(4.0) * tp.Tap_4)
+                dTap = muladd(dTap, r_ij, T(3.0) * tp.Tap_3)
+                dTap = muladd(dTap, r_ij, T(2.0) * tp.Tap_2)
+                dTap = muladd(dTap, r_ij, tp.Tap_1)
     
-            odgp_ij = odgp[atid[i], atid[j]]
+                odgp_ij = odgp[atid[i], atid[j]]
     
-            # van der Walls interactions
-            D_ij = odgp_ij.D_ij
-            alpha = odgp_ij.alpha
-            r_vdW = T(2.0) * odgp_ij.r_vdW
+                # van der Walls interactions
+                D_ij = odgp_ij.D_ij
+                alpha = odgp_ij.alpha
+                r_vdW = T(2.0) * odgp_ij.r_vdW
     
-            gamma_w_inv_pow = odgp_ij.gamma_w_inv_pow
+                gamma_w_inv_pow = odgp_ij.gamma_w_inv_pow
     
-            r_ij_pow = positive_pow(r_ij, p_vdW1)
-            f13_sum1 = r_ij_pow + gamma_w_inv_pow
-            f13 = positive_pow(f13_sum1, p_vdW1_inv)
+                r_ij_pow = positive_pow(r_ij, p_vdW1)
+                f13_sum1 = r_ij_pow + gamma_w_inv_pow
+                f13 = positive_pow(f13_sum1, p_vdW1_inv)
     
-            df13_drij = f13 * r_ij_pow * inv(f13_sum1 * r_ij)
+                df13_drij = f13 * r_ij_pow * inv(f13_sum1 * r_ij)
     
-            r_vdW_inv = inv(r_vdW)
-            vdW_sum1 = one(T) - f13 * r_vdW_inv
+                r_vdW_inv = inv(r_vdW)
+                vdW_sum1 = one(T) - f13 * r_vdW_inv
             
-            vdW_exp2 = exp(T(0.5) * alpha * vdW_sum1)
-            vdW_exp1 = vdW_exp2 * vdW_exp2
+                vdW_exp2 = exp(T(0.5) * alpha * vdW_sum1)
+                vdW_exp1 = vdW_exp2 * vdW_exp2
     
-            vdW_tm2 = D_ij * (vdW_exp1 - T(2.0) * vdW_exp2)
-            vdW_engy = Tap * vdW_tm2
+                vdW_tm2 = D_ij * (vdW_exp1 - T(2.0) * vdW_exp2)
+                vdW_engy = Tap * vdW_tm2
     
-            Atomix.@atomic vdW_energies[i] += vdW_engy
+                if chunk isa Val{1}
+                    Atomix.@atomic vdW_energies[i] += vdW_engy
+                else
+                    vdW_sum += vdW_engy
+                end
     
-            vdW_prd1 = r_vdW_inv * df13_drij
+                vdW_prd1 = r_vdW_inv * df13_drij
     
-            dE_vdW_drij = dTap * vdW_tm2 + 
-                            Tap * D_ij * alpha * vdW_prd1 * (vdW_exp2 - vdW_exp1)
+                dE_vdW_drij = dTap * vdW_tm2 + 
+                                Tap * D_ij * alpha * vdW_prd1 * (vdW_exp2 - vdW_exp1)
     
-            # Coulomb energy
-            gamma_ij_inv_pow = odgp_ij.gamma_ij_inv_pow
+                # Coulomb energy
+                gamma_ij_inv_pow = odgp_ij.gamma_ij_inv_pow
     
-            q_prod = q[i] * q[j]
-            denom_sum = r_ij^3 + gamma_ij_inv_pow
-            coulomb_inv = inv(cbrt(denom_sum))
+                q_prod = q[i] * q[j]
+                denom_sum = r_ij^3 + gamma_ij_inv_pow
+                coulomb_inv = inv(cbrt(denom_sum))
     
-            coulomb_engy = Tap * C * q_prod * coulomb_inv
-            Atomix.@atomic coulomb_energies[i] += coulomb_engy
+                coulomb_engy = Tap * C * q_prod * coulomb_inv
+                if chunk isa Val{1}
+                    Atomix.@atomic coulomb_energies[i] += coulomb_engy
+                else
+                    coulomb_sum += coulomb_engy
+                end
     
-            dE_coulomb_drij = C * q_prod * coulomb_inv * (
-                                dTap -
-                                Tap * inv(denom_sum) * r_ij^2
-                            )
+                dE_coulomb_drij = C * q_prod * coulomb_inv * (
+                                    dTap -
+                                    Tap * inv(denom_sum) * r_ij^2
+                                )
             
-            tot_dE_drij = (dE_vdW_drij + dE_coulomb_drij) * r_ij_unit
+                tot_dE_drij = (dE_vdW_drij + dE_coulomb_drij) * r_ij_unit
     
-            add_force!(forces, tot_dE_drij, i, group)
-            add_force!(forces, -tot_dE_drij, j, group)
+                add_force!(forces, tot_dE_drij, i, group)
+                add_force!(forces, -tot_dE_drij, j, group)
+            end
         end
+    end
+
+    # On the CPU only the sums of the energies are used, so each chunk adds its sums once
+    #   rather than with an atomic add for each pair, which threads contend on
+    if !(chunk isa Val{1})
+        slot = mod1(group, length(vdW_energies))
+        Atomix.@atomic vdW_energies[slot] += vdW_sum
+        Atomix.@atomic coulomb_energies[slot] += coulomb_sum
     end
 end
 
@@ -4809,8 +4910,8 @@ function non_bonded!(
     n_threads::Integer=Threads.nthreads(),
 ) where T
 
-    tp = inter.device_params.taper_parameters
-    genp = inter.device_params.general_parameters
+    tp = reaxff_taper_parameters(inter)
+    genp = reaxff_general_parameters(inter)
     odgp = inter.device_params.off_diagonal_parameters
     atid = inter.state.sys_atid
     upper_taper_radius = inter.device_params.general_parameters.upper_taper_radius
@@ -4823,7 +4924,7 @@ function non_bonded!(
 
     C = T(332.06371)    # legacy constant
 
-    conv_factor = inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0)
+    conv_factor = (inter.use_units ? T(ustrip(uconvert(u"Å", 1.0 * inter.sys_coord_unit))) : T(10.0))::T
 
     vdW_energies = inter.state.thread_atom_energies_1
     coulomb_energies = inter.state.thread_atom_energies_2
@@ -4834,8 +4935,10 @@ function non_bonded!(
         synchronize(backend)
     end
 
-    nb_kernel = non_bonded_kernel(backend)
-    nb_kernel(
+    launch_item_kernel!(
+        non_bonded_kernel,
+        backend,
+        reaxff_chunked_launch(backend, length(far_nbrs), n_threads)...,
         far_nbrs.list,
         sys.coords,
         sys.boundary,
@@ -4850,16 +4953,16 @@ function non_bonded!(
         reaxff_kernel_forces(inter, backend),
         vdW_energies,
         coulomb_energies,
-        upper_taper_radius;
-        ndrange=length(far_nbrs),
-        workgroupsize=reaxff_workgroupsize(backend, length(far_nbrs), n_threads)
+        upper_taper_radius,
+        reaxff_chunk(backend, length(far_nbrs), n_threads),
+        length(far_nbrs),
     )
 
     if backend isa KernelAbstractions.CPU
         synchronize(backend)
     end
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         accumulate_reaxff_energy!(inter, (vdW_energies, coulomb_energies), (10, 11), backend)
     else
         E_vdW = sum(vdW_energies)
@@ -5127,7 +5230,7 @@ function compute_reaxff_energy_forces!(
     non_bonded!(inter, sys, neighbors, backend; n_threads=n_threads)
     resolve_forces!(inter, sys, backend; n_threads=n_threads)
 
-    if backend isa KernelAbstractions.GPU
+    if is_gpu_backend(backend)
         inter.state.energy = sum(inter.state.energy_components)
     else
         reduce_kernel = reduce_group_forces_kernel(backend)

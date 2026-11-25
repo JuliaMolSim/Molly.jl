@@ -492,7 +492,7 @@ end
 
 upper_tile_count(n_blocks::Integer) = (Int64(n_blocks) * (Int64(n_blocks) + 1)) ÷ 2
 
-# Number of nodes above the blocks in the tree of block bounding boxes used by the CUDA
+# Number of nodes above the blocks in the tree of block bounding boxes used by the tiled
 #   tile search, where level k has cld(n_blocks, 2^k) nodes and the top level one node
 function block_tree_n_nodes(n_blocks::Integer)
     n_nodes, n = 0, n_blocks
@@ -530,8 +530,8 @@ energy calculations.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `tree_mins`, `tree_maxs`: Bounding boxes of runs of consecutive blocks, the internal
   nodes of the tree searched for interacting tiles in large systems.
-- `morton_seq`, `morton_seq_buffer_1`, `morton_seq_buffer_2`, `morton_seq_inv`:
-  Morton-order indices and temporary buffers for reordering atoms on the GPU.
+- `morton_seq`, `morton_seq_buffer_1`, `morton_seq_inv`: Morton-order indices, the Morton
+  codes and the inverse order for reordering atoms on the GPU.
 - `excluded_pos`, `special_pos`: Morton position of the partner atom of each entry
   of the sparse excluded and special lists of a [`GPUNeighborFinder`](@ref).
 - `block_exc_min`, `block_exc_max`: for each 32-atom block, the lowest and highest
@@ -564,12 +564,14 @@ energy calculations.
   was built from, or `nothing` before the list is built or when it is rebuilt every
   time. Used by a [`GPUNeighborFinder`](@ref) with `auto_update` to decide when to
   refresh the list.
+- `tile_scratch`: scratch memory of the tiled kernels that is reused between calls, such
+  as the workspace of the sort of the Morton codes, see `TileScratch`.
 
 Every buffer takes memory proportional to the number of atoms or the number of
 exceptions, apart from the interacting-tile vectors which are sized from the number
 of atom blocks.
 The Morton order, block, tile, exception and reordered buffers are only used by the
-CUDA tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
+tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
 finders.
 =#
 mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT, CR, VR,
@@ -599,7 +601,6 @@ mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT,
     tree_maxs::C
     morton_seq::M
     morton_seq_buffer_1::M
-    morton_seq_buffer_2::M
     morton_seq_inv::M
     excluded_pos::M
     special_pos::M
@@ -623,11 +624,12 @@ mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT,
     num_pairs::Int
     num_tile_candidates::Int
     neighbor_reference::Base.RefValue{Any}
+    tile_scratch::Base.RefValue{Any}
 end
 
 function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
                     box_mins, box_maxs, tree_mins, tree_maxs, morton_seq, morton_seq_buffer_1,
-                    morton_seq_buffer_2, morton_seq_inv, excluded_pos, special_pos,
+                    morton_seq_inv, excluded_pos, special_pos,
                     block_exc_min, block_exc_max,
                     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                     interacting_tiles_diag, num_interacting_tiles,
@@ -647,7 +649,7 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       Ref{Any}(nothing),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
-                      morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
+                      morton_seq_buffer_1, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
                       interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
@@ -655,7 +657,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
                       step_n_preprocessed, sparse_pair_generation, UInt64(0), UInt64(0),
-                      num_pairs, num_pairs, Base.RefValue{Any}(nothing))
+                      num_pairs, num_pairs, Base.RefValue{Any}(nothing),
+                      Base.RefValue{Any}(nothing))
 end
 
 function clear_constraint_virial!(buffers::BuffersCPU, step_n::Integer)
@@ -738,6 +741,13 @@ is reset if it is a [`GPUNeighborFinder`](@ref).
 =#
 function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                        for_pe::Bool=false) where {D, T, TH}
+    return init_buffers_gpu(sys, n_threads, for_pe)
+end
+
+# Not restricted to GPU arrays, so that the GPU code path can be tested with `Array`s on
+#   the CPU backend of KernelAbstractions
+function init_buffers_gpu(sys::System{D, <:Any, T, TH}, n_threads,
+                          for_pe::Bool=false) where {D, T, TH}
     N = length(sys)
     C = eltype(eltype(sys.coords))
     tiled = sys.neighbor_finder isa GPUNeighborFinder
@@ -745,6 +755,9 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     n_blocks = cld(N_tiled, 32)
     n_upper_tiles = upper_tile_count(n_blocks)
     backend = get_backend(sys.coords)
+    # The tiled kernels can not run on every backend, which is checked once here rather
+    #   than at every launch
+    tiled && check_tiled_backend(backend, T)
 
     fs_mat       = KernelAbstractions.zeros(backend, T, D, N)
     fs_mat_reordered = KernelAbstractions.zeros(backend, T, D, N_tiled)
@@ -764,7 +777,6 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     tree_maxs = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
     morton_seq = KernelAbstractions.zeros(backend, Int32, N_tiled)
     morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N_tiled)
-    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N_tiled)
     morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N_tiled)
     # Sized from the sparse exception lists, which only GPUNeighborFinder reads here
     if tiled
@@ -778,7 +790,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
     block_exc_min = KernelAbstractions.zeros(backend, Int32, n_blocks)
     block_exc_max = KernelAbstractions.zeros(backend, Int32, n_blocks)
 
-    # Enough for typical systems, the CUDA tile search grows these vectors if needed
+    # Enough for typical systems, the tile search grows these vectors if needed
     max_interacting_blocks = min(n_upper_tiles, 192 * n_blocks)
     interacting_tiles_i = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
     interacting_tiles_j = KernelAbstractions.zeros(backend, Int32, max_interacting_blocks)
@@ -802,7 +814,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       Ref{Any}(nothing),
                       BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
-                      morton_seq_buffer_1, morton_seq_buffer_2, morton_seq_inv,
+                      morton_seq_buffer_1, morton_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
                       interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
@@ -810,7 +822,7 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T, TH}, n_threads,
                       interacting_tiles_overflow, coords_reordered, velocities_reordered,
                       atoms_reordered, fs_mat_reordered, Base.RefValue{Any}(nothing),
                       -1, UInt64(0), UInt64(0), UInt64(0), 0, 0,
-                      Base.RefValue{Any}(nothing))
+                      Base.RefValue{Any}(nothing), Base.RefValue{Any}(nothing))
 end
 
 """

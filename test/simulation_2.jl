@@ -142,7 +142,7 @@ end
                  for _ in 1:n_atoms]
         coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm", rng=rng)
         velocities = [random_velocity(10.0u"g/mol", 300.0u"K"; rng=rng) for _ in 1:n_atoms]
-        if AT <: CuArray
+        if Molly.uses_gpu_neighbor_finder(AT)
             nf = GPUNeighborFinder(n_atoms=n_atoms, dist_cutoff=1.0u"nm", n_steps=nf_steps,
                                    auto_update=auto_update, array_type=AT)
             logger_func = function (s, nbs, step_n, buffers; current_potential_energy=nothing,
@@ -236,15 +236,17 @@ end
         end
     end
 
-    if run_cuda_tests
+    # Every GPU backend with Float64 that supports the tiled kernels of GPUNeighborFinder
+    for AT in array_list[2:end]
+        Molly.uses_gpu_neighbor_finder(AT) || continue
         gpu_coupled_sims = [(n, f) for (n, f) in coupled_sims if n in ("VelocityVerlet",
                             "Verlet", "Langevin", "NoseHoover")]
         push!(gpu_coupled_sims, ("MTSIntegrator", cpl -> MTSIntegrator(dt=dt,
                                                     pi_fractions=(1, 2), coupling=cpl)))
-        @testset "GPUNeighborFinder $name" for (name, make_sim) in gpu_coupled_sims
+        @testset "GPUNeighborFinder $AT $name" for (name, make_sim) in gpu_coupled_sims
             # Rebuilding every step, the coupler and loggers see the current tiles
             coupler_nc, logger_nc = NeighborCheck(), NeighborCheck()
-            sys = neighbor_check_system(CuArray, nothing, logger_nc)
+            sys = neighbor_check_system(AT, nothing, logger_nc)
             simulate!(sys, make_sim((NeighborCheckCoupler(coupler_nc),)), 20; n_threads=1,
                       rng=Xoshiro(7))
             @test coupler_nc.n_checks == 20
@@ -254,7 +256,7 @@ end
             # Rebuilding every 10 steps, a coupler that moves the atoms forces a rebuild
             #   that the loggers see
             logger_nc = NeighborCheck()
-            sys = neighbor_check_system(CuArray, nothing, logger_nc; nf_steps=10,
+            sys = neighbor_check_system(AT, nothing, logger_nc; nf_steps=10,
                                         auto_update=false)
             simulate!(sys, make_sim((JiggleCoupler(Xoshiro(3)),)), 20; n_threads=1,
                       rng=Xoshiro(7))
@@ -262,7 +264,7 @@ end
             @test logger_nc.n_stale == 0
         end
 
-        @testset "GPUNeighborFinder $name" for (name, sim) in (
+        @testset "GPUNeighborFinder $AT $name" for (name, sim) in (
                 ("LangevinSplitting BAOAB", LangevinSplitting(dt=dt, temperature=temp,
                                         friction=friction_split, splitting="BAOAB")),
                 ("SteepestDescentMinimizer", SteepestDescentMinimizer(max_steps=20,
@@ -270,7 +272,7 @@ end
                 ("LBFGSMinimizer", LBFGSMinimizer(max_steps=20, tol=min_tol)),
             )
             logger_nc = NeighborCheck()
-            sys = neighbor_check_system(CuArray, nothing, logger_nc)
+            sys = neighbor_check_system(AT, nothing, logger_nc)
             if is_minimizer(sim)
                 simulate!(sys, sim; n_threads=1, run_loggers=true)
             else
@@ -681,17 +683,19 @@ end
         push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
         push!(runs, ("$AT cell NL"    , [GPUCellListNeighborFinder, false, false, AT]))
         push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
-    end
-    if run_cuda_tests
-        AT = CuArray
-        push!(runs, ("$AT GPU NL"    , [GPUNeighborFinder, false, false, AT]))
-        push!(runs, ("$AT f32 GPU NL", [GPUNeighborFinder, false, true , AT]))
+        if Molly.uses_gpu_neighbor_finder(AT)
+            push!(runs, ("$AT GPU NL"    , [GPUNeighborFinder, false, false, AT]))
+            push!(runs, ("$AT f32 GPU NL", [GPUNeighborFinder, false, true , AT]))
+        end
     end
     if run_metal_tests
         AT = MtlArray
         push!(runs, ("$AT f32"        , [Nothing                  , false, true , AT]))
         push!(runs, ("$AT f32 NL"     , [DistanceNeighborFinder   , false, true , AT]))
         push!(runs, ("$AT f32 cell NL", [GPUCellListNeighborFinder, false, true , AT]))
+        if Molly.uses_gpu_neighbor_finder(AT)
+            push!(runs, ("$AT f32 GPU NL", [GPUNeighborFinder, false, true , AT]))
+        end
     end
 
     # Check all simulations give the same result to within some error

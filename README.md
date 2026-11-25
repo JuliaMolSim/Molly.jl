@@ -40,7 +40,7 @@ Implemented features include:
 - Flexible bias potentials and collective variables.
 - Native support for the [ANI](https://github.com/aiqm/torchani) machine learning interatomic potential.
 - Automatic multithreading.
-- GPU acceleration on all backends supported by [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), with better performance on CUDA-enabled devices.
+- GPU acceleration on all backends supported by [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), including NVIDIA, AMD, Intel and Apple GPUs.
 - Run with Float64, Float32 or other float types.
 - Some analysis functions, e.g. RDF.
 - Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).

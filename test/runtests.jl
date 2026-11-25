@@ -26,7 +26,7 @@ else
 end
 
 if run_gpu_tests && AMDGPU.functional()
-    @info "The AMDGPU tests will be run on device $amd_device"
+    @info "The AMDGPU tests will be run on device $(iszero(DEVICE) ? 1 : DEVICE)"
 else
     @warn "The AMDGPU tests will not be run as a AMDGPU-enabled device is not available"
 end
