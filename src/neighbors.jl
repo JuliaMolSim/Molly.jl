@@ -1094,7 +1094,8 @@ searches the 3x3x3 stencil of cells around each atom.
 
 Returns a [`GPUCellListNeighborList`](@ref). It runs on any GPU backend and is
 the recommended neighbor finder on GPUs that do not support the tiled kernels of
-[`GPUNeighborFinder`](@ref). Three-dimensional [`CubicBoundary`](@ref) and
+[`GPUNeighborFinder`](@ref). It also runs on CPU, though [`CellListMapNeighborFinder`](@ref)
+is usually faster. Three-dimensional [`CubicBoundary`](@ref) and
 [`TriclinicBoundary`](@ref) systems are supported, provided the grid has at least
 three cells along every box axis, i.e. opposite box faces are at least three times
 the internally padded search cutoff apart. For a [`TriclinicBoundary`](@ref), that
@@ -1854,11 +1855,6 @@ end
 #=
 Search the 3x3x3 stencil of cells around each atom of one tile, storing the neighbors
 of each atom in the per-atom matrix.
-
-Note that this kernel can not run on the KernelAbstractions CPU backend, which splits
-a kernel at each `@synchronize` and so does not carry the per-thread state here across
-the barriers. The finder only dispatches on GPU array types, where the barrier is a
-group synchronization and the state is kept.
 =#
 @kernel inbounds=true function gpu_cell_list_search_kernel!(neighbor_counts, neighbors,
                                     counters, @Const(cell_counts), @Const(cell_offsets),
@@ -2350,13 +2346,13 @@ function reusable_gpu_cell_list_state(current_neighbors, n_atoms::Integer, ::Typ
     return state
 end
 
-function find_neighbors(sys::System{3, AT},
+function find_neighbors(sys::System,
                         nf::GPUCellListNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads(),
-                        kwargs...) where {AT <: AbstractGPUArray}
+                        kwargs...)
     if !rebuild_neighbors(sys, nf, current_neighbors, step_n, force_recompute;
                           n_threads=n_threads)
         return current_neighbors
@@ -2365,7 +2361,7 @@ function find_neighbors(sys::System{3, AT},
     (sys.boundary isa CubicBoundary{3} || sys.boundary isa TriclinicBoundary) || throw(
         ArgumentError("GPUCellListNeighborFinder currently supports only " *
                       "three-dimensional CubicBoundary and TriclinicBoundary systems, " *
-                      "got $(typeof(sys.boundary))"))
+                      "got $(typeof(sys.boundary)), use a DistanceNeighborFinder instead"))
 
     has_infinite_boundary(sys.boundary) && throw(ArgumentError(
         "GPUCellListNeighborFinder does not support infinite boundaries"))
@@ -2442,20 +2438,6 @@ function gpu_cell_list_suitable(boundary, dist_cutoff; force_float32=false)
     roundoff_margin = T(16) * eps(T) * opnorm(box, Inf)
     cutoff = nextfloat(T(requested_cutoff + roundoff_margin))
     return minimum(widths) / cutoff >= 3
-end
-
-# Defined so that unsupported systems get an explanation rather than a MethodError
-function find_neighbors(sys::System,
-                        nf::GPUCellListNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0,
-                        force_recompute::Bool=false;
-                        kwargs...)
-    throw(ArgumentError("GPUCellListNeighborFinder requires a three-dimensional GPU " *
-                        "system with a CubicBoundary or TriclinicBoundary, got a " *
-                        "$(AtomsBase.n_dimensions(sys.boundary))D $(array_type(sys.coords)) " *
-                        "system with a $(typeof(sys.boundary)); use " *
-                        "DistanceNeighborFinder or CellListMapNeighborFinder instead"))
 end
 
 # Dense masks, as for the other neighbor finders
