@@ -2281,7 +2281,7 @@ end
                 length(Molly.find_excluded_pairs(nf.eligible, nf.special)) + length(sys_on)
         @test potential_energy(sys_on) ≈ potential_energy(sys_off) +
                 potential_energy(sys_on; pairwise_inters=(), specific_inter_lists=(excl,))
-        @test_throws ArgumentError build(true; neighbor_finder_type=Nothing)
+        @test_throws ArgumentError build(true; neighbor_finder_type=Nothing, strictness=:nowarn)
     end
 end
 

@@ -13,6 +13,7 @@ For differentiable simulations there are a number of related packages:
 - [Time Machine](https://github.com/proteneer/timemachine)
 - [DiffTaichi](https://github.com/taichi-dev/difftaichi)
 - [DIMOS](https://github.com/nec-research/DIMOS)
+- [TorchFF](https://github.com/THGLab/torchff-lib)
 
 In Julia there are a number of packages related to atomic simulation, some of which are involved with the [JuliaMolSim](https://juliamolsim.github.io) organisation:
 - [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl)
@@ -27,3 +28,4 @@ In Julia there are a number of packages related to atomic simulation, some of wh
 - [BioStructures.jl](https://github.com/BioJulia/BioStructures.jl)
 - [PDBTools.jl](https://github.com/m3g/PDBTools.jl)
 - [MolSimToolkit.jl](https://github.com/m3g/MolSimToolkit.jl)
+- [BiochemicalAlgorithms.jl](https://github.com/hildebrandtlab/BiochemicalAlgorithms.jl)

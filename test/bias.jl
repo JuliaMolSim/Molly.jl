@@ -1941,3 +1941,84 @@ end
         @test virial(sys) ≈ -transpose(dU_dε) rtol=1e-6
     end
 end
+
+# Records the unwrap cache it sees inside forces!
+struct UnwrapProbe
+    seen::Vector{Any}
+end
+
+function AtomsCalculators.forces!(fs, sys, p::UnwrapProbe; unwrapped_coords=nothing, kwargs...)
+    push!(p.seen, isnothing(unwrapped_coords) ? nothing : unwrapped_coords[])
+    return fs
+end
+
+# Records the step_n that bias_gradient receives
+struct StepBias
+    steps::Vector{Any}
+end
+
+Molly.potential_energy(::StepBias, cv; kwargs...) = 0.0u"kJ * mol^-1"
+
+function Molly.bias_gradient(b::StepBias, cv; step_n=nothing, kwargs...)
+    push!(b.steps, step_n)
+    return 0.0u"kJ * mol^-1 * nm^-1"
+end
+
+@testset "Unwrap shared by :pbc biases" begin
+    # A molecule split over the boundary, with :pbc biases and Metadynamics that share one
+    # unwrap per forces!
+    boundary = CubicBoundary(2.0u"nm")
+    coords = [SVector(1.95, 0.1, 0.1), SVector(0.05, 0.1, 0.1), SVector(0.15, 0.25, 0.1),
+              SVector(1.0, 1.0, 1.0)]u"nm"
+    atoms = [Atom(mass=12.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for _ in 1:4]
+    topology = MolecularTopology([1, 2], [2, 3], 4)
+    k = 500.0u"kJ * mol^-1 * nm^-2"
+    md = Metadynamics(ListHills((CalcDist([1], [3], CalcSingleDist()),), 2.0u"kJ * mol^-1",
+                                0.5u"nm", [0.2u"nm"]))
+    biases = (BiasPotential(CalcDist([1], [3], CalcSingleDist()), SquareBias(k, 0.3u"nm")),
+              BiasPotential(CalcRg([1, 2, 3]), SquareBias(k, 0.1u"nm")), md)
+    build(AT, inters=biases) = System(atoms=AT(atoms), coords=AT(coords), boundary=boundary,
+                                      topology=topology, general_inters=inters)
+    fs_cpu, vir_cpu = forces_virial(build(Array))
+    pe_cpu = potential_energy(build(Array))
+    for AT in array_list
+        sys = build(AT)
+        fs, vir = forces_virial(sys)
+        @test all(isapprox.(from_device(fs), fs_cpu; atol=1e-9u"kJ * mol^-1 * nm^-1"))
+        @test all(isapprox.(from_device(vir), vir_cpu; atol=1e-9u"kJ * mol^-1"))
+        @test isapprox(potential_energy(sys), pe_cpu; atol=1e-9u"kJ * mol^-1")
+        if AT <: AbstractGPUArray
+            # A probe after each bias sees the same cached array
+            probes = (UnwrapProbe([]), UnwrapProbe([]))
+            forces(build(AT, (biases[1], probes[1], biases[2], probes[2])))
+            @test !isnothing(only(probes[1].seen))
+            @test only(probes[1].seen) === only(probes[2].seen)
+
+            buffers = Molly.init_buffers!(sys, 1)
+            Molly.forces!(Molly.zero_forces(sys), sys, nothing, 0, buffers, Val(false); n_threads=1)
+            @test isnothing(buffers.unwrapped_coords[]) # Released after each forces! call
+            cache = Ref{Any}(nothing)
+            u = Molly.cached_unwrap(sys, cache)
+            @test Molly.cached_unwrap(sys, cache) === u
+            @test all(isapprox.(from_device(u), Molly.unwrap_molecules(sys); atol=1e-12u"nm"))
+
+            # Direct calls with the buffers of a step don't reuse an unwrap
+            coords_moved = copy(coords)
+            coords_moved[3] = SVector(0.3, 0.6, 0.1)u"nm"
+            sys_moved = System(sys; coords=AT(coords_moved))
+            fs_1 = AtomsCalculators.forces!(Molly.zero_forces(sys), sys, biases[2];
+                                            buffers=buffers, step_n=1)
+            fs_2 = AtomsCalculators.forces!(Molly.zero_forces(sys), sys_moved, biases[2];
+                                            buffers=buffers, step_n=2)
+            fs_ref = AtomsCalculators.forces!(Molly.zero_forces(sys), sys_moved, biases[2])
+            @test from_device(fs_2) == from_device(fs_ref)
+            @test from_device(fs_2) != from_device(fs_1)
+        end
+
+        # bias_gradient gets the step_n of the force call
+        step_bias = StepBias([])
+        forces(build(AT, (BiasPotential(CalcDist([1], [3], CalcSingleDist()), step_bias),)),
+               nothing, 7)
+        @test step_bias.steps == [7]
+    end
+end

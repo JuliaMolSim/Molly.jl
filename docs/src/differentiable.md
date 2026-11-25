@@ -48,15 +48,19 @@ sys = System(
 )
 
 params_dic = extract_parameters(sys)  # A Dict from parameter name to value
-plan = ParameterPlan(sys, params_dic) # Resolve the names once, outside the loss
+plan = ParameterPlan(sys, params_dic) # Link the parameter Dict to the system
 
 function loss(params_dic, plan, sys, coords)
+    # Set up the system with the tracked parameters
     sys_params = inject_gradients(sys, params_dic, plan, coords)
+    # Calculate some observable, here the potential energy
     return potential_energy(sys_params)
 end
 
+# Dict to hold parameter gradients
 grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
 
+# Calculate gradients with Enzyme
 autodiff(
     set_runtime_activity(Reverse),
     loss,

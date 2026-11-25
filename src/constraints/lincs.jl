@@ -172,9 +172,9 @@ Not compatible with gradient calculation using Enzyme.
     is converted into 3 distance constraints internally. LINCS requires that angle
     constraints are isolated: none of their atoms may participate in distance constraints
     or in other angle constraints.
-- `n_rec=4`: order of the matrix expansion for coupling matrix inversion. Higher values
+- `n_rec=8`: order of the matrix expansion for coupling matrix inversion. Higher values
     improve accuracy for coupled constraints at the cost of performance.
-- `n_iter=1`: number of outer correction iterations for rotational lengthening. Higher
+- `n_iter=4`: number of outer correction iterations for rotational lengthening. Higher
     values improve accuracy for strongly perturbed bonds.
 - `iter_vel_correction=false`: whether to use iterative velocity constraint solving.
     When `false`, velocity correction uses one LINCS projection as in
@@ -237,8 +237,8 @@ function LINCS(; masses,
                vel_tolerance=1e-8u"nm^2 * ps^-1",
                dist_constraints=nothing,
                angle_constraints=nothing,
-               n_rec::Integer=4,
-               n_iter::Integer=1,
+               n_rec::Integer=8,
+               n_iter::Integer=4,
                iter_vel_correction::Bool=false,
                gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
@@ -290,7 +290,7 @@ end
 
 """
     SetupLINCS(; dist_tolerance=1e-6u"nm", vel_tolerance=1e-6u"nm^2 * ps^-1",
-               n_rec=4, n_iter=1, iter_vel_correction::Bool=false,
+               n_rec=8, n_iter=4, iter_vel_correction::Bool=false,
                gpu_block_size::Integer=128)
 
 Set up constraints using the LINCS (LINear Constraint Solver) algorithm.
@@ -310,8 +310,8 @@ end
 
 function SetupLINCS(; dist_tolerance=1e-6u"nm",
                     vel_tolerance=1e-6u"nm^2 * ps^-1",
-                    n_rec::Integer=4,
-                    n_iter::Integer=1,
+                    n_rec::Integer=8,
+                    n_iter::Integer=4,
                     iter_vel_correction::Bool=false,
                     gpu_block_size::Integer=128)
     ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))

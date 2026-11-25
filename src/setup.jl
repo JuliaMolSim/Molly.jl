@@ -519,8 +519,10 @@ Each residue is matched to a residue template of the force field, and a
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
-- `constraint_algorithm=SetupLINCS()`: Constraint algorithm to use for enforcing the
-    constraints. Can be an instance of [`SetupLINCS`](@ref) or [`SetupSHAKE_RATTLE`](@ref).
+- `constraint_algorithm=SetupSETTLE()`: Constraint algorithm to use for enforcing the
+    constraints. Can be an instance of [`SetupSETTLE`](@ref), [`SetupLINCS`](@ref) or
+    [`SetupSHAKE_RATTLE`](@ref). The default uses SETTLE for rigid water, as GROMACS and
+    OpenMM do, and LINCS for the other constraints.
 - `nonbonded_method=SetupCoulombReactionField()`: method for long range interaction summation,
     can be an instance of [`SetupCoulombReactionField`](@ref) (reaction field method),
     [`SetupPME`](@ref) (particle mesh Ewald summation), [`SetupEwald`](@ref)
@@ -597,7 +599,7 @@ function System(coord_file::AbstractString,
                 dist_buffer=nothing,
                 constraints=:none,
                 rigid_water::Bool=false,
-                constraint_algorithm=SetupLINCS(),
+                constraint_algorithm=SetupSETTLE(),
                 nonbonded_method=SetupCoulombReactionField(),
                 lj_cutoff=nothing,
                 dispersion_correction=nothing,
@@ -1351,13 +1353,16 @@ function check_constraint_topology(dist_constraints, angle_constraints, constrai
         end
         push!(angle_atoms, a)
     end
-    if constraint_algorithm isa SetupSHAKE_RATTLE
+    # With SETTLE the distance constraints are given to its inner algorithm
+    other_algorithm = (constraint_algorithm isa SetupSETTLE ?
+                       constraint_algorithm.constraint_algorithm : constraint_algorithm)
+    if other_algorithm isa SetupSHAKE_RATTLE
         for dc in dist_constraints
             if n_dist[dc.i] > 1 && n_dist[dc.j] > 1
                 throw(ArgumentError("constraints=:$constraints_type gives a chain of " *
                     "constraints through atoms $(dc.i) and $(dc.j), but SHAKE_RATTLE only " *
                     "supports clusters of constraints around a central atom, such as with " *
-                    "constraints=:hbonds, so use constraint_algorithm=SetupLINCS() instead"))
+                    "constraints=:hbonds, so use constraint_algorithm=SetupSETTLE() instead"))
             end
         end
     end
@@ -1416,18 +1421,21 @@ function exchange_constraints(T, bonds_all, angles_all, bonds_ub_flags, atoms_da
     if length(dist_constraints) > 0 || length(angle_constraints) > 0
         check_constraint_topology(dist_constraints, angle_constraints, constraints_type,
                                   rigid_water, constraint_algorithm)
-        algo = build_constraint_algorithm(T, dist_constraints, angle_constraints, atoms_data,
-                                          units, strictness, masses, constraint_algorithm)
-        constraints = (algo,)
+        constraints = build_constraint_algorithms(T, dist_constraints, angle_constraints,
+                                                  atoms_data, units, strictness, masses,
+                                                  constraint_algorithm)
     else
         constraints = ()
     end
     return constraints, bonds, angles
 end
 
-function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
+function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js, virtual_sites,
                                    hydrogen_mass, units, T)
     atoms_cpu = from_device(atoms)
+    # Virtual sites have no element and zero mass, so is_heavy_atom does not count them as heavy,
+    #   but they are not hydrogens and keep their zero mass
+    vs_inds = Set(vs.atom_ind for vs in from_device(virtual_sites))
     modified_masses = mass.(atoms_cpu)
     if units
         if dimension(hydrogen_mass) == NoDims
@@ -1444,7 +1452,7 @@ function hydrogen_mass_repartition(atoms, atoms_data, bond_is, bond_js,
     end
 
     for i in eachindex(atoms_cpu)
-        if !is_heavy_atom(atoms_cpu[i], atoms_data[i])
+        if !(i in vs_inds) && !is_heavy_atom(atoms_cpu[i], atoms_data[i])
             mass_change = new_h_mass - modified_masses[i]
             modified_masses[i] = new_h_mass
 
@@ -1518,7 +1526,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
 
     if hydrogen_mass != false # false, number or unitful mass
         atoms = hydrogen_mass_repartition(atoms, atoms_data, bonds_all.is, bonds_all.js,
-                                          hydrogen_mass, units, T)
+                                          virtual_sites, hydrogen_mass, units, T)
     end
 
     masses = mass.(from_device(atoms))

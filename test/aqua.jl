@@ -1,8 +1,9 @@
 if VERSION < v"1.12-"
     # AtomType has missing union, PeriodicTorsion has NTuple
-    Aqua.test_all(Molly; unbound_args=false)
+    # LazyArtifacts is only loaded in MollyLuxExt
+    Aqua.test_all(Molly; stale_deps=(ignore=[:LazyArtifacts],), unbound_args=false)
 else
-    Aqua.test_all(Molly)
+    Aqua.test_all(Molly; stale_deps=(ignore=[:LazyArtifacts],))
 end
 
 # Can be done with Aqua but we need to exclude the re-exported names

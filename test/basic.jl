@@ -394,6 +394,137 @@
     mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
+    # GPU vs CPU unwrap_molecules; host topologies, so the GPU path also uploads them
+    coords_chain = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
+                    SVector(1.0 , 1.0, 1.0)]
+    boundary_chain = CubicBoundary(2.0)
+    topology_chain = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
+    uw_cpu = Molly.unwrap_molecules(coords_chain, boundary_chain, topology_chain)
+    for AT in array_list
+        uw_gpu = Molly.unwrap_molecules(AT(coords_chain), boundary_chain, topology_chain)
+        @test uw_gpu isa AT # The GPU method keeps the coordinates on the device
+        @test isapprox(from_device(uw_gpu), uw_cpu; atol=1e-9)
+    end
+
+    # A ring across the boundary: the bond (3, 4) isn't part of the spanning tree
+    coords_ring = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0),
+                   SVector(0.05, 0.1, 0.0), SVector(1.95, 0.1, 0.0)]
+    boundary_ring = CubicBoundary(2.0)
+    topology_ring = MolecularTopology([1, 1, 1, 1], [4], [(1, 2), (2, 3), (3, 4), (4, 1)])
+    uw_ring_cpu = Molly.unwrap_molecules(coords_ring, boundary_ring, topology_ring)
+    for AT in array_list
+        uw_ring_gpu = Molly.unwrap_molecules(AT(coords_ring), boundary_ring, topology_ring)
+        @test uw_ring_gpu isa AT
+        @test isapprox(from_device(uw_ring_gpu), uw_ring_cpu; atol=1e-9)
+    end
+
+    # A chain longer than the box, which takes several rounds of pointer jumping
+    coords_long = [wrap_coords(SVector(0.1 * i, 0.0, 0.0), CubicBoundary(2.0)) for i in 0:60]
+    boundary_long = CubicBoundary(2.0)
+    topology_long = MolecularTopology(collect(1:60), collect(2:61), 61)
+    uw_long_cpu = Molly.unwrap_molecules(coords_long, boundary_long, topology_long)
+    for AT in array_list
+        uw_long_gpu = Molly.unwrap_molecules(AT(coords_long), boundary_long, topology_long)
+        @test uw_long_gpu isa AT
+        @test isapprox(from_device(uw_long_gpu), uw_long_cpu; atol=1e-9)
+    end
+
+    # Two 3-atom molecules, a 5-atom chain (depth 4, so more than one round of pointer
+    # jumping) and two isolated atoms
+    coords_mixed = [
+        SVector(0.0, 0.0, 0.0), SVector(0.1, 0.0, 0.0), SVector(-0.1, 0.0, 0.0),
+        SVector(5.0, 0.0, 0.0), SVector(5.1, 0.0, 0.0), SVector(4.9, 0.0, 0.0),
+        SVector(10.0, 0.0, 0.0), SVector(10.1, 0.0, 0.0), SVector(10.2, 0.0, 0.0),
+        SVector(10.3, 0.0, 0.0), SVector(10.4, 0.0, 0.0),
+        SVector(15.0, 0.0, 0.0), SVector(2.0, 2.0, 2.0),
+    ]
+    boundary_mixed = CubicBoundary(20.0)
+    topology_mixed = MolecularTopology(
+        [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5],
+        [3, 3, 5, 1, 1],
+        [(1, 2), (1, 3), (4, 5), (4, 6), (7, 8), (8, 9), (9, 10), (10, 11)],
+    )
+    uw_mixed_cpu = Molly.unwrap_molecules(coords_mixed, boundary_mixed, topology_mixed)
+    for AT in array_list
+        uw_mixed_gpu = Molly.unwrap_molecules(AT(coords_mixed), boundary_mixed, topology_mixed)
+        @test uw_mixed_gpu isa AT
+        @test isapprox(from_device(uw_mixed_gpu), uw_mixed_cpu; atol=1e-9)
+    end
+    # Bond-free atoms are their own root and pass through unchanged (mod box wrap)
+    @test isapprox(uw_mixed_cpu[12], coords_mixed[12]; atol=1e-9)
+    @test isapprox(uw_mixed_cpu[13], coords_mixed[13]; atol=1e-9)
+
+    # Infinite boundaries are rejected on GPU
+    for AT in filter(AT -> AT <: AbstractGPUArray, array_list)
+        @test_throws ArgumentError Molly.unwrap_molecules(AT(coords_chain),
+                                       CubicBoundary(2.0, 2.0, Inf), topology_chain)
+    end
+
+    # Triclinic box: bonded 4-atom chains placed at random and wrapped
+    rng_tri = Xoshiro(1)
+    boundary_tri = TriclinicBoundary(SVector(SVector(3.0, 0.0, 0.0), SVector(0.8, 2.5, 0.0),
+                                             SVector(0.5, 0.4, 2.2))u"nm")
+    coords_tri = typeof(SVector(1.0, 1.0, 1.0)u"nm")[]
+    bonds_tri_i, bonds_tri_j = Int[], Int[]
+    for _ in 1:50
+        c = random_coord(boundary_tri; rng=rng_tri)
+        base = length(coords_tri)
+        for k in 0:3
+            push!(coords_tri, wrap_coords(c .+ SVector(0.12k, 0.05k, 0.0)u"nm", boundary_tri))
+            k > 0 && (push!(bonds_tri_i, base + k); push!(bonds_tri_j, base + k + 1))
+        end
+    end
+    topology_tri = MolecularTopology(bonds_tri_i, bonds_tri_j, length(coords_tri))
+    uw_tri_cpu = Molly.unwrap_molecules(coords_tri, boundary_tri, topology_tri)
+    for AT in array_list
+        uw_tri_gpu = Molly.unwrap_molecules(AT(coords_tri), boundary_tri, topology_tri)
+        @test uw_tri_gpu isa AT
+        @test maximum(norm.(from_device(uw_tri_gpu) .- uw_tri_cpu)) < 1e-9u"nm"
+    end
+
+    # 2D
+    coords_2d = [SVector(1.95, 0.5), SVector(0.05, 0.5), SVector(0.15, 0.6), SVector(1.0, 1.0)]
+    boundary_2d = RectangularBoundary(2.0)
+    topology_2d = MolecularTopology([1, 2], [2, 3], 4)
+    uw_2d_cpu = Molly.unwrap_molecules(coords_2d, boundary_2d, topology_2d)
+    for AT in array_list
+        uw_2d_gpu = Molly.unwrap_molecules(AT(coords_2d), boundary_2d, topology_2d)
+        @test uw_2d_gpu isa AT
+        @test isapprox(from_device(uw_2d_gpu), uw_2d_cpu; atol=1e-9)
+    end
+
+    # GPU unwrap of a Float32 system against a Float64 reference: no molecule lands in the
+    # wrong periodic image
+    for AT in filter(AT -> AT <: AbstractGPUArray, array_list)
+        n_mol = 5_000
+        rng_f32 = Xoshiro(42)
+        box_f32 = 50.0f0u"nm"
+        coords_f32 = Vector{SVector{3, Float32}}(undef, n_mol * 3)
+        bonds_i, bonds_j = Int[], Int[]
+        for m in 1:n_mol
+            base = (m - 1) * 3
+            c = SVector{3, Float32}(rand(rng_f32, Float32), rand(rng_f32, Float32),
+                                    rand(rng_f32, Float32)) .* ustrip(box_f32)
+            coords_f32[base + 1] = c
+            coords_f32[base + 2] = c .+ SVector(0.1f0, 0f0, 0f0)
+            coords_f32[base + 3] = c .+ SVector(0f0, 0.1f0, 0f0)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 2)
+            push!(bonds_i, base + 1); push!(bonds_j, base + 3)
+        end
+        boundary_f32 = CubicBoundary(box_f32)
+        topology_f32 = MolecularTopology(bonds_i, bonds_j, n_mol * 3)
+
+        coords_f64 = SVector{3, Float64}.(ustrip_vec.(coords_f32)) .* u"nm"
+        boundary_f64 = CubicBoundary(Float64(ustrip(box_f32)) * u"nm")
+        uw_f32_gpu = Molly.unwrap_molecules(AT(coords_f32 .* u"nm"), boundary_f32, topology_f32)
+        @test uw_f32_gpu isa AT
+        uw_f32 = from_device(uw_f32_gpu)
+        uw_f64_ref = Molly.unwrap_molecules(coords_f64, boundary_f64, topology_f32)
+
+        max_atom_dist = ustrip(maximum(norm.(uw_f32 .- uw_f64_ref)))
+        @test max_atom_dist < 0.1 * ustrip(box_f32) # no molecule a full box vector away
+    end
+
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     for AT in array_list
         sys = System(
@@ -739,6 +870,25 @@ end
 
     ff_fp = joinpath(ff_dir, "tip4pfb.xml")
     @test_throws Molly.ForceFieldXMLError MolecularForceField(ff_fp, ff_fp)
+end
+
+@testset "Hydrogen mass repartitioning with virtual sites" begin
+    ff = MolecularForceField(joinpath(ff_dir, "tip4pfb.xml"))
+    sys_ref = System(joinpath(data_dir, "tip4pew.pdb"), ff;
+                     nonbonded_method=SetupCoulombReactionField())
+    sys_hmr = System(joinpath(data_dir, "tip4pew.pdb"), ff;
+                     nonbonded_method=SetupCoulombReactionField(), hydrogen_mass=3)
+    masses_ref, masses_hmr = mass.(sys_ref.atoms), mass.(sys_hmr.atoms)
+    vs_inds = [vs.atom_ind for vs in sys_hmr.virtual_sites]
+    h_inds = findall(ad -> ad.element == "H", sys_hmr.atoms_data)
+    o_inds = findall(ad -> ad.element == "O", sys_hmr.atoms_data)
+
+    @test length(vs_inds) == length(o_inds) > 0
+    @test all(iszero, masses_hmr[vs_inds])
+    @test all(m -> m ≈ 3.0u"g/mol", masses_hmr[h_inds])
+    @test all(masses_hmr[o_inds] .≈ masses_ref[o_inds] .- 2 .* (3.0u"g/mol" .- masses_ref[h_inds[1]]))
+    @test sum(masses_hmr) ≈ sum(masses_ref)
+    @test potential_energy(sys_hmr) ≈ potential_energy(sys_ref)
 end
 
 @testset "Double exponential force field setup" begin
@@ -2886,5 +3036,76 @@ end
                        atol=1e-8u"kJ * mol^-1")
         @test isapprox(potential_energy(sys; specific_inter_lists=()),
                        -9.680706225998881u"kJ * mol^-1"; atol=1e-8u"kJ * mol^-1")
+    end
+end
+
+@testset "Virtual sites in parallel" begin
+    # Molecules of three atoms that define a virtual site of each type, so that the sites
+    #   share atoms and their forces are distributed in groups, see `virtual_site_groups`
+    n_mols = 400
+    n_per_mol = 8
+    n_atoms = n_per_mol * n_mols
+    rng = Xoshiro(1)
+    boundary = CubicBoundary(6.0u"nm")
+    coords = SVector{3, typeof(1.0u"nm")}[]
+    virtual_sites = []
+    for mi in 1:n_mols
+        r1 = SVector{3}(rand(rng, 3) .* 6.0)u"nm"
+        r2 = r1 + SVector(0.1, 0.02, 0.0)u"nm"
+        r3 = r1 + SVector(-0.01, 0.1, 0.03)u"nm"
+        append!(coords, [r1, r2, r3, r1, r1, r1, r1, r1])
+        i = n_per_mol * (mi - 1)
+        append!(virtual_sites, [
+            ThreeParticleAverageSite(i + 4, i + 1, i + 2, i + 3, 0.6, 0.2, 0.2, 0.0u"nm^-1"),
+            OutOfPlaneSite(i + 5, i + 1, i + 2, i + 3, 0.3, 0.4, 2.0u"nm^-1"),
+            TwoParticleAverageSite(i + 6, i + 1, i + 3, 0.7, 0.3, 0.0u"nm^-1"),
+            OneParticleSite(i + 7, i + 2, 0.0u"nm^-1"),
+            LocalCoordinatesSite(i + 8, i + 1, i + 2, i + 3, (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0),
+                                 (-1.0, 0.0, 1.0), SVector(0.02, 0.03, 0.01)u"nm"),
+        ])
+    end
+    virtual_sites = [virtual_sites...]
+    @test isconcretetype(eltype(virtual_sites))
+    is_vs = [mod1(i, n_per_mol) > 3 for i in 1:n_atoms]
+    atoms = [Atom(mass=(is_vs[i] ? 0.0 : 10.0)u"g/mol") for i in 1:n_atoms]
+
+    # The sites of a molecule share atoms, apart from the two-particle and one-particle sites
+    groups = Molly.virtual_site_groups(virtual_sites, n_atoms)
+    n_groups = length(groups.group_starts) - 1
+    @test n_groups == 4
+    @test sort(groups.order) == eachindex(virtual_sites)
+    for g in 1:n_groups
+        group_inds = groups.order[groups.group_starts[g]:(groups.group_starts[g + 1] - 1)]
+        group_atoms = Int[]
+        for vs in virtual_sites[group_inds]
+            append!(group_atoms, (vs.atom_1, vs.atom_2, vs.atom_3)[1:Molly.n_virtual_site_atoms(vs)])
+        end
+        @test allunique(group_atoms)
+    end
+
+    fs_start = [SVector{3}(randn(rng, 3))u"kJ * mol^-1 * nm^-1" for _ in 1:n_atoms]
+    coords_ref, fs_ref = nothing, nothing
+    for AT in array_list, n_threads in n_threads_list
+        AT != Array && n_threads > 1 && continue
+        sys = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
+            boundary=boundary,
+            virtual_sites=to_device(virtual_sites, AT),
+        )
+        place_virtual_sites!(sys; n_threads=n_threads)
+        buffers = Molly.init_buffers!(sys, n_threads)
+        fs = to_device(fs_start, AT)
+        Molly.distribute_forces!(fs, sys, buffers; n_threads=n_threads)
+        coords_out, fs_out = from_device(sys.coords), from_device(fs)
+        if isnothing(coords_ref)
+            coords_ref, fs_ref = coords_out, fs_out
+            @test all(iszero, fs_out[is_vs])
+            # Moving the forces onto the atoms that define the sites keeps the total force
+            @test norm(sum(fs_out) - sum(fs_start)) < 1e-9u"kJ * mol^-1 * nm^-1"
+        else
+            @test maximum(norm.(coords_out .- coords_ref)) < 1e-12u"nm"
+            @test maximum(norm.(fs_out .- fs_ref)) < 1e-9u"kJ * mol^-1 * nm^-1"
+        end
     end
 end

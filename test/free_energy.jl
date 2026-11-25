@@ -735,3 +735,28 @@ end
                    Dict("core" => ligand, "unique_A" => Int[], "unique_B" => Int[]),
                    Dict(i => i for i in ligand)), ligand, charmm_prefixes)
 end
+
+@testset "Relative system with SETTLE" begin
+    # The default constraint setup gives SETTLE for water and LINCS for the other
+    #   constraints, each algorithm of the merged system should only get its own constraints
+    garnet = joinpath(ff_dir, "ethanol_garnet.xml")
+    ff = MolecularForceField(garnet;
+                custom_residue_templates=joinpath(ff_dir, "ethanol_garnet_residues.xml"))
+    systems = map((SetupSETTLE(), SetupLINCS())) do constraint_algorithm
+        System(joinpath(data_dir, "ethanol_solv.pdb"), ff;
+               nonbonded_method=SetupCoulombReactionField(), dist_cutoff=1.0u"nm",
+               strictness=:nowarn, constraints=:hbonds, rigid_water=true,
+               constraint_algorithm=constraint_algorithm)
+    end
+    mapping = Dict("core" => collect(1:8), "unique_A" => [9], "unique_B" => [9])
+    core_mapAB = Dict(i => i for i in 1:8)
+    rel_settle, rel_lincs = map(s -> RelativeFESystem(s, s, 0.5, mapping, core_mapAB), systems)
+    @test rel_settle.constraints[1] isa SETTLE
+    @test rel_settle.constraints[2] isa LINCS
+    @test length(rel_settle.constraints[1].clusters) == length(systems[1].constraints[1].clusters)
+    @test rel_settle.df == rel_lincs.df
+    @test Molly.constrained_atom_pairs(rel_settle) == Molly.constrained_atom_pairs(rel_lincs)
+    random_velocities!(rel_settle, 300.0u"K")
+    simulate!(rel_settle, VelocityVerlet(dt=0.002u"ps"), 20)
+    @test check_constraints(rel_settle, rel_settle.constraints[1])
+end
