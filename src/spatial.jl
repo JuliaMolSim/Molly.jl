@@ -1486,7 +1486,7 @@ end
             ancestors[i] = zero(eltype(ancestors))
         else
             f_parent = wrap_frac01(inv_box * ustrip_vec(coords[p]))
-            shifts[i] = round.(Int32, f - f_parent)
+            shifts[i] = unsafe_trunc.(Int32, round.(f - f_parent))
             ancestors[i] = p
         end
     end
