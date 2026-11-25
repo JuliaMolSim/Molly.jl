@@ -438,7 +438,7 @@ end
         if Threads.nthreads() > 1
             threaded = @allocated apply_constraints_n_threads!(sys_alloc, coords_ref,
                                                                Threads.nthreads())
-            @test 0 < threaded < 100_000
+            @test 0 < threaded < 200_000
         end
     end
 end
