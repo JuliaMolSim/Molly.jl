@@ -904,11 +904,11 @@ The exceptions are stored in the `eligible` and `special` fields as
   that use the special interaction path, for example 1-4 atoms.
 - `auto_update=true`: whether to refresh the tile list only when the atoms have moved
   far enough since the last refresh that a pair within the cutoff of the pairwise
-  interactions could be missing, in which case `n_steps` is ignored. The Morton order
+  interactions could be missing, in which case `n_steps` is ignored. The atom order
   is recomputed at the same time.
-- `n_steps=10`: with `auto_update=false`, the number of steps between Morton reorder
+- `n_steps=10`: with `auto_update=false`, the number of steps between reorder
   and tile-list refresh passes. A forced rebuild, for example after a barostat changes
-  the coordinates, refreshes the tile list without changing the Morton order. The
+  the coordinates, refreshes the tile list without changing the atom order. The
   buffer distance should then be larger than the distance an atom can move in that
   time.
 - `array_type`: the array type used to store the excluded and special pairs on
@@ -1059,7 +1059,7 @@ end
 # The interacting tile list is built within the tiled pairwise kernels, so this only records
 #   that it is due to be rebuilt, at the same points as the other neighbor finders rebuild
 #   their lists
-# With auto_update=false the Morton order is recomputed as well every `n_steps` steps,
+# With auto_update=false the atom order is recomputed as well every `n_steps` steps,
 #   whereas a forced rebuild only refreshes the tiles since the order is still close to
 #   optimal
 # With auto_update=true the kernels decide when to rebuild by checking the displacements,

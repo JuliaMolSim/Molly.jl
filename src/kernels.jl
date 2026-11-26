@@ -955,29 +955,29 @@ end
 end
 
 #=
-    sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
+    sort_reorder_seq!(buffers, coords, boundary, grid_bits=10)
 
 Compute a Morton (Z-order) sequence for a set of coordinates.
-The indices are stored in `buffers.morton_seq`.
+The indices are stored in `buffers.reorder_seq`.
 =#
-function sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
-    backend = get_backend(buffers.morton_seq)
+function sort_reorder_seq!(buffers, coords, boundary, grid_bits=10)
+    backend = get_backend(buffers.reorder_seq)
     n_threads_gpu = 32
-    w, masks = morton_grid(boundary, morton_bits)
-    kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
-    kernel!(buffers.morton_seq_buffer_1, coords, boundary, w, masks, morton_bits;
+    w, masks = morton_grid(boundary, grid_bits)
+    kernel! = morton_code_kernel!(backend, n_threads_gpu)
+    kernel!(buffers.reorder_codes, coords, boundary, w, masks, grid_bits;
             ndrange=length(coords))
-    # The sort reuses scratch memory kept with the buffers, see `morton_sort_workspace`
-    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
-                                 alg=morton_sort_alg(backend),
-                                 workspace=morton_sort_workspace(buffers, backend))
+    # The sort reuses scratch memory kept with the buffers, see `reorder_sort_workspace`
+    AcceleratedKernels.sortperm!(buffers.reorder_seq, buffers.reorder_codes;
+                                 alg=reorder_sort_alg(backend),
+                                 workspace=reorder_sort_workspace(buffers, backend))
     return buffers
 end
 
 #=
 The cell widths of the Morton grid and, for each axis, the number of cells minus one.
 The grid covers the box, or for a TriclinicBoundary the brick of the diagonal components
-    of the basis vectors, see `morton_coord`.
+    of the basis vectors, see `aligned_coord`.
 The number of cells along an axis is a power of two, at most 2^bits, chosen so that the
     cells are within a factor of sqrt(2) of cubic. The same number of cells along each
     axis of an elongated box would give long or flat cells, and so blocks of consecutive
@@ -998,8 +998,9 @@ function morton_grid(boundary, bits)
 end
 
 #=
-The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
-    tile search of the tiled pairwise kernels.
+The coordinate in a frame aligned with the axes, used to order atoms on the grid of the
+    space-filling curve and to bound blocks of atoms in the tile search of the tiled
+    pairwise kernels.
 Coordinates in an orthorhombic box are used as they are.
 Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
     using the basis vectors. The brick holds one image of each point, as the triclinic cell
@@ -1007,9 +1008,9 @@ Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) �
     box. Wrapping each axis with the side lengths does not move y with the x component of
     b, so atoms from distant parts of the box end up in the same blocks.
 =#
-@inline morton_coord(c, boundary) = c
+@inline aligned_coord(c, boundary) = c
 
-@inline function morton_coord(c, boundary::TriclinicBoundary)
+@inline function aligned_coord(c, boundary::TriclinicBoundary)
     bv, rs = boundary.basis_vectors, boundary.reciprocal_size
     c_wrap = c - bv[3] * floor(c[3] * rs[3])
     c_wrap -= bv[2] * floor(c_wrap[2] * rs[2])
@@ -1019,17 +1020,17 @@ end
 
 # The cell indices are taken modulo the number of cells along each axis, which wraps
 #   orthorhombic coordinates that are outside the box
-@kernel function sorted_morton_seq_kernel!(morton_seq,
-                                           @Const(coords::AbstractVector{SVector{D, C}}),
-                                           boundary,
-                                           w,
-                                           masks,
-                                           bits::Integer) where {D, C}
+@kernel function morton_code_kernel!(codes,
+                                     @Const(coords::AbstractVector{SVector{D, C}}),
+                                     boundary,
+                                     w,
+                                     masks,
+                                     bits::Integer) where {D, C}
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
-        scaled_coord = floor.(Int32, morton_coord(coords[i], boundary) ./ w)
+        scaled_coord = floor.(Int32, aligned_coord(coords[i], boundary) ./ w)
         cell = (scaled_coord .% UInt32) .& masks
-        morton_seq[i] = generalized_morton_code(cell, bits, Val(D))
+        codes[i] = generalized_morton_code(cell, bits, Val(D))
     end
 end
 

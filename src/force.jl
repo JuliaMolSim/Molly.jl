@@ -530,9 +530,10 @@ energy calculations.
 - `box_mins`, `box_maxs`: Bounding boxes for each 32-atom block.
 - `tree_mins`, `tree_maxs`: Bounding boxes of runs of consecutive blocks, the internal
   nodes of the tree searched for interacting tiles in large systems.
-- `morton_seq`, `morton_seq_buffer_1`, `morton_seq_inv`: Morton-order indices, the Morton
-  codes and the inverse order for reordering atoms on the GPU.
-- `excluded_pos`, `special_pos`: Morton position of the partner atom of each entry
+- `reorder_seq`, `reorder_codes`, `reorder_seq_inv`: the order of the atoms along the
+  space-filling curve of the [`GPUNeighborFinder`](@ref), their codes along the curve and
+  the inverse order, for reordering atoms on the GPU.
+- `excluded_pos`, `special_pos`: reordered position of the partner atom of each entry
   of the sparse excluded and special lists of a [`GPUNeighborFinder`](@ref).
 - `block_exc_min`, `block_exc_max`: for each 32-atom block, the lowest and highest
   block holding an exception partner of one of its atoms, used to rule out
@@ -553,7 +554,7 @@ energy calculations.
 - `sparse_pair_generation`: sparse-pair generation reflected in the cached masks
   and tile metadata.
 - `reorder_generation`, `tile_generation`: the [`GPUNeighborFinder`](@ref) rebuild
-  counts reflected in the cached Morton order and tile list, which
+  counts reflected in the cached atom order and tile list, which
   [`find_neighbors`](@ref) increases when they are due to be rebuilt.
 - `num_pairs`: host-side cached copy of the current interacting-tile count,
   used to size kernel launches.
@@ -565,12 +566,12 @@ energy calculations.
   time. Used by a [`GPUNeighborFinder`](@ref) with `auto_update` to decide when to
   refresh the list.
 - `tile_scratch`: scratch memory of the tiled kernels that is reused between calls, such
-  as the workspace of the sort of the Morton codes, see `TileScratch`.
+  as the workspace of the sort of the reordering curve codes, see `TileScratch`.
 
 Every buffer takes memory proportional to the number of atoms or the number of
 exceptions, apart from the interacting-tile vectors which are sized from the number
 of atom blocks.
-The Morton order, block, tile, exception and reordered buffers are only used by the
+The reordered atom order, block, tile, exception and reordered buffers are only used by the
 tiled kernels of [`GPUNeighborFinder`](@ref), so they are empty for other neighbor
 finders.
 =#
@@ -599,9 +600,9 @@ mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT,
     box_maxs::C
     tree_mins::C
     tree_maxs::C
-    morton_seq::M
-    morton_seq_buffer_1::M
-    morton_seq_inv::M
+    reorder_seq::M
+    reorder_codes::M
+    reorder_seq_inv::M
     excluded_pos::M
     special_pos::M
     block_exc_min::M
@@ -628,8 +629,8 @@ mutable struct BuffersGPU{F, P, V, VN, VS, KT, PT, C, M, IT, ITT, ITD, NIT, OIT,
 end
 
 function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, pres_tensor,
-                    box_mins, box_maxs, tree_mins, tree_maxs, morton_seq, morton_seq_buffer_1,
-                    morton_seq_inv, excluded_pos, special_pos,
+                    box_mins, box_maxs, tree_mins, tree_maxs, reorder_seq, reorder_codes,
+                    reorder_seq_inv, excluded_pos, special_pos,
                     block_exc_min, block_exc_max,
                     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
                     interacting_tiles_diag, num_interacting_tiles,
@@ -648,8 +649,8 @@ function BuffersGPU(fs_mat, pe_vec_nounits, virial, virial_nounits, kin_tensor, 
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       Ref{Any}(nothing),
-                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
-                      morton_seq_buffer_1, morton_seq_inv,
+                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, reorder_seq,
+                      reorder_codes, reorder_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
                       interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,
@@ -775,9 +776,9 @@ function init_buffers_gpu(sys::System{D, <:Any, T, TH}, n_threads,
     n_tree_nodes = block_tree_n_nodes(n_blocks)
     tree_mins = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
     tree_maxs = KernelAbstractions.zeros(backend, C, n_tree_nodes, D)
-    morton_seq = KernelAbstractions.zeros(backend, Int32, N_tiled)
-    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N_tiled)
-    morton_seq_inv = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    reorder_seq = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    reorder_codes = KernelAbstractions.zeros(backend, Int32, N_tiled)
+    reorder_seq_inv = KernelAbstractions.zeros(backend, Int32, N_tiled)
     # Sized from the sparse exception lists, which only GPUNeighborFinder reads here
     if tiled
         n_excluded_entries = length(sys.neighbor_finder.eligible.partners)
@@ -813,8 +814,8 @@ function init_buffers_gpu(sys::System{D, <:Any, T, TH}, n_threads,
                       pre_coupling_ref(), constraint_scratch_ref(), constraint_scratch_ref(),
                       constraint_scratch_ref(), constraint_scratch_ref(),
                       Ref{Any}(nothing),
-                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, morton_seq,
-                      morton_seq_buffer_1, morton_seq_inv,
+                      BufferValidity(), box_mins, box_maxs, tree_mins, tree_maxs, reorder_seq,
+                      reorder_codes, reorder_seq_inv,
                       excluded_pos, special_pos, block_exc_min, block_exc_max,
                       interacting_tiles_i,
                       interacting_tiles_j, interacting_tiles_type, interacting_tiles_diag,

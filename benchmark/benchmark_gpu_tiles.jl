@@ -84,8 +84,8 @@ function print_profile(name, force_profile, energy_profile)
         stats.overflow_count,
     )
     @printf(
-        "  force stages : morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f reverse=%7.3f\n",
-        force_times.morton_sort_ms,
+        "  force stages : order=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f reverse=%7.3f\n",
+        force_times.reorder_sort_ms,
         force_times.compress_ms,
         force_times.reorder_ms,
         force_times.bounds_ms,
@@ -96,8 +96,8 @@ function print_profile(name, force_profile, energy_profile)
     )
     energy_times = energy_profile.times
     @printf(
-        "  energy stages: morton=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f\n",
-        energy_times.morton_sort_ms,
+        "  energy stages: order=%7.3f compress=%7.3f reorder=%7.3f bounds=%7.3f tile=%7.3f prune=%7.3f kernel=%7.3f\n",
+        energy_times.reorder_sort_ms,
         energy_times.compress_ms,
         energy_times.reorder_ms,
         energy_times.bounds_ms,

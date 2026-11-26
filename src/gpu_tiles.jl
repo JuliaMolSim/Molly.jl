@@ -11,7 +11,7 @@
 # 1.  **Reordering**: Atoms are periodically reordered based on Morton (Z-order) curves
 #     to improve cache hits during pairwise interactions.
 # 2.  **Exceptions**: The sparse per-atom lists of excluded and special pairs are
-#     translated into Morton positions, so that the bitmasks of the few 32x32 tiles
+#     translated into reordered positions, so that the bitmasks of the few 32x32 tiles
 #     that contain exceptions can be built on the fly without storing a mask per tile.
 # 3.  **Tile Finding**: A kernel identifies pairs of 32x32 atom blocks (tiles) that are
 #     within the interaction cutoff, using bounding box checks, and an exact atom-pair
@@ -435,11 +435,11 @@ end
 
 #=
 Scratch memory of the tiled path kept with a set of buffers, see `tile_scratch`:
-`morton_sort` is the workspace of the sort of the Morton codes, which is reused at every
+`reorder_sort` is the workspace of the sort of the curve codes, which is reused at every
 reorder since the number of atoms does not change.
 =#
 mutable struct TileScratch
-    morton_sort::Any
+    reorder_sort::Any
 end
 
 function tile_scratch(buffers)
@@ -451,24 +451,24 @@ function tile_scratch(buffers)
     return scratch::TileScratch
 end
 
-# The algorithm of the sort of the Morton codes, see `sorted_morton_seq!`
+# The algorithm of the sort of the curve codes, see `sort_reorder_seq!`
 # On the CPU AcceleratedKernels chooses a threaded sort itself, on GPUs its merge sort is used
 #   with blocks of 512 elements
-morton_sort_alg(backend) = AcceleratedKernels.MergeSort(block_size=512)
-morton_sort_alg(::KernelAbstractions.CPU) = AcceleratedKernels.Auto()
+reorder_sort_alg(backend) = AcceleratedKernels.MergeSort(block_size=512)
+reorder_sort_alg(::KernelAbstractions.CPU) = AcceleratedKernels.Auto()
 
 #=
-The workspace of the sort of the Morton codes in `buffers`, made the first time so that the
+The workspace of the sort of the curve codes in `buffers`, made the first time so that the
 sort does not allocate scratch memory at every reorder.
 =#
-function morton_sort_workspace(buffers, backend)
+function reorder_sort_workspace(buffers, backend)
     scratch = tile_scratch(buffers)
-    ws = scratch.morton_sort
+    ws = scratch.reorder_sort
     if isnothing(ws)
-        ws = AcceleratedKernels.workspace(AcceleratedKernels.sortperm!, buffers.morton_seq,
-                                          buffers.morton_seq_buffer_1;
-                                          alg=morton_sort_alg(backend))
-        scratch.morton_sort = ws
+        ws = AcceleratedKernels.workspace(AcceleratedKernels.sortperm!, buffers.reorder_seq,
+                                          buffers.reorder_codes;
+                                          alg=reorder_sort_alg(backend))
+        scratch.reorder_sort = ws
     end
     return ws
 end
@@ -690,11 +690,11 @@ Called by every work-item of the work-group.
 end
 
 #=
-Reorder the coordinates and velocities into the current Morton order, as
+Reorder the coordinates and velocities into the current atom order, as
 `reorder_system_kernel!` does, and check the displacements of the atoms since the reference
 coordinates in the same pass, setting `skip_flag` if they are too large. `inner` is `nothing`
 or holds the check of the inner masks of the tile list, see `InnerTileMasks`, whose reference
-coordinates are in the Morton order.
+coordinates are in the atom order.
 =#
 function reorder_check_kernel!(coords_reordered, velocities_reordered, coords_var,
                                velocities_var, seq_var, ref_coords_var, result, block_maxs_1,
@@ -773,7 +773,7 @@ function launch_finish_check!(backend, scratch, n_groups, skip_flag, allowance::
 end
 
 #=
-Reorder the coordinates and velocities of `sys` into the Morton order of `buffers` and check
+Reorder the coordinates and velocities of `sys` into the atom order of `buffers` and check
 the displacements since `ref_coords`, without waiting for the check, returning the scratch
 to wait on. See above.
 =#
@@ -786,7 +786,7 @@ function launch_reorder_check!(buffers, sys, scratch::TileCheckScratch{T}, ref_c
     inner_args = inner_check_kernel_args(inner, scratch)
     launch_tile_kernel!(backend, reorder_check_kernel!, buffers.coords_reordered,
                         buffers.velocities_reordered, sys.coords, sys.velocities,
-                        buffers.morton_seq, ref_coords, scratch.result, scratch.block_maxs_1,
+                        buffers.reorder_seq, ref_coords, scratch.result, scratch.block_maxs_1,
                         scratch.block_maxs_2, scratch.counter,
                         buffers.interacting_tiles_overflow, sys.boundary, F, dist_unit,
                         allowance, inner_args, Val(N), Val(T), Val(fused);
@@ -867,7 +867,7 @@ in them whilst the list is valid, and the inner masks are found from all of thei
 The energy kernel uses the inner masks when they are current, and the masks of the list
 otherwise.
 
-`masks` are the inner masks of the tiles, found at `coords`, in the Morton order of the
+`masks` are the inner masks of the tiles, found at `coords`, in the atom order of the
 tile list, and `boundary` with the inner cutoff `cutoff`, which is without units. The
 check of the list sets `stale` on the device when the force kernel has to find the masks
 again. `valid` is whether the masks are for the current tile list, and `refresh_queued`
@@ -1027,7 +1027,7 @@ end
 end
 
 #=
-Reorder the coordinates and velocities into the current Morton order and check whether the
+Reorder the coordinates and velocities into the current atom order and check whether the
 atoms have moved far enough since the tile list in `buffers` was built that a pair within
 the cutoff of `pairwise_inters` could be missing. The check sets the overflow flag of the
 tile list if so, which makes the force and energy kernels return without doing anything,
@@ -1114,21 +1114,21 @@ function record_gpu_tiles!(buffers, sys, nf::GPUNeighborFinder, pairwise_inters)
     return buffers
 end
 
-# find_neighbors increases the rebuild counts of the neighbor finder when the Morton order
+# find_neighbors increases the rebuild counts of the neighbor finder when the atom order
 #   or the tile list is due to be rebuilt, so the cache follows the same rebuild points as
 #   the lists of the other neighbor finders
 # `moved` is whether the atoms have moved far enough to invalidate the tile list, in which
-#   case the tile list and Morton order are rebuilt
+#   case the tile list and atom order are rebuilt
 @inline function gpu_neighbor_refresh_flags(buffers, nf::GPUNeighborFinder, moved::Bool)
     first_preprocess = (buffers.step_n_preprocessed == -1)
-    needs_morton_refresh = (first_preprocess || moved ||
+    needs_order_refresh = (first_preprocess || moved ||
                             buffers.reorder_generation != nf.reorder_generation)
     sparse_changed = (buffers.sparse_pair_generation != nf.cache_generation)
     needs_reorder = true # Coordinates can be changed at any point
-    needs_sparse_refresh = (needs_morton_refresh || !nf.initialized || sparse_changed)
+    needs_sparse_refresh = (needs_order_refresh || !nf.initialized || sparse_changed)
     needs_tile_refresh = (needs_sparse_refresh ||
                           buffers.tile_generation != nf.tile_generation)
-    return needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
+    return needs_order_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh
 end
 
 function record_neighbor_refresh!(buffers, nf::GPUNeighborFinder, step_n)
@@ -1139,18 +1139,18 @@ function record_neighbor_refresh!(buffers, nf::GPUNeighborFinder, step_n)
 end
 
 #=
-Bring the Morton order, the exception data, the reordered arrays and the tile list up to
+Bring the atom order, the exception data, the reordered arrays and the tile list up to
 date as required by the flags.
 Every step is ordered on the device by the queue it is launched on, so the host does not
 wait for the reorder. It does wait for the device when the tile list is rebuilt, to find the
 number of tiles.
 =#
 function refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n, flags)
-    needs_morton_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh = flags
+    needs_order_refresh, needs_reorder, needs_sparse_refresh, needs_tile_refresh = flags
     N = length(sys.coords)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
-        if needs_morton_refresh
-            sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+        if needs_order_refresh
+            sort_reorder_seq!(buffers, sys.coords, sys.boundary)
         end
 
         if needs_sparse_refresh
@@ -1160,7 +1160,7 @@ function refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n, flags)
         end
 
         if needs_reorder
-            reorder_system_gpu!(buffers, sys, Val(needs_morton_refresh))
+            reorder_system_gpu!(buffers, sys, Val(needs_order_refresh))
         end
 
         if needs_tile_refresh
@@ -1313,17 +1313,17 @@ end
 Maintainer entry point for the tiled pairwise force path of [`GPUNeighborFinder`](@ref).
 
 Pipeline:
-1. Rebuild the Morton ordering and the Morton-ordered exception data when the
+1. Rebuild the atom order and the reordered exception data when the
    atoms have moved far enough since the last rebuild to invalidate the tile list
    with `auto_update=true`, or when [`find_neighbors`](@ref) has marked them as due
    every `n_steps` steps of the [`GPUNeighborFinder`](@ref) with `auto_update=false`.
-2. Reorder coordinates, velocities, and atoms into Morton order.
+2. Reorder coordinates, velocities, and atoms into the atom order.
 3. Recompute the compact list of interacting 32x32 tiles when the order changed
    or [`find_neighbors`](@ref) forced a rebuild, growing it if it overflows.
 4. Launch `force_kernel!` over that compact tile list and reverse the reorder.
 
 Cache contract:
-- The Morton order and tile list are rebuilt when [`find_neighbors`](@ref) has
+- The atom order and tile list are rebuilt when [`find_neighbors`](@ref) has
   increased the rebuild counts of the [`GPUNeighborFinder`](@ref) since they were
   last built, when `buffers.step_n_preprocessed` is `-1` for new buffers, or with
   `auto_update=true` when the displacement check against `buffers.neighbor_reference`
@@ -1336,7 +1336,7 @@ Cache contract:
   it, calculates the forces again if it failed and reverses the reorder.
 - `buffers.num_pairs` is the host-side cached interacting-tile count used to
   size the force-kernel launch.
-- `sys.neighbor_finder.initialized` only indicates whether the Morton-ordered
+- `sys.neighbor_finder.initialized` only indicates whether the reordered
   exception data is current.
 
 This works on any backend that `supports_tiled_kernels`, for any array type, which
@@ -1371,7 +1371,7 @@ end
 
 Maintainer entry point for the tiled pairwise energy path of [`GPUNeighborFinder`](@ref).
 
-This follows the same Morton reorder -> exception translation -> tile search
+This follows the same reorder -> exception translation -> tile search
 pipeline as `tiled_pairwise_forces!`, including the displacement check, but launches
 `energy_kernel!` instead of the force kernel. Energy evaluation reuses any preprocessing
 already performed since the last rebuild, so forces and energies share the same cached
@@ -1542,7 +1542,7 @@ function compute_block_bounds!(buffers, sys::System{D}, N::Integer) where D
     n_blocks = cld(N, TILE_WIDTH)
     backend = get_backend(sys.coords)
     launch_kernel!(kernel_min_max!(backend, TILE_WIDTH), buffers.box_mins, buffers.box_maxs,
-                   buffers.morton_seq, sys.coords, Val(N), sys.boundary, Val(D);
+                   buffers.reorder_seq, sys.coords, Val(N), sys.boundary, Val(D);
                    ndrange=n_blocks * TILE_WIDTH)
     return buffers
 end
@@ -1832,7 +1832,7 @@ end
     reorder_system_gpu!(buffers, sys)
 
 Reorders `coords`, `velocities`, and `atoms` into `_reordered` buffers
-according to the Morton sequence to improve spatial cache locality.
+according to the reorder sequence to improve spatial cache locality.
 =#
 function reorder_system_gpu!(buffers, sys)
     return reorder_system_gpu!(buffers, sys, Val(true))
@@ -1843,7 +1843,7 @@ function reorder_system_gpu!(buffers, sys, ::Val{reorder_atoms}) where reorder_a
     backend = get_backend(sys.coords)
     launch_kernel!(reorder_system_kernel!(backend, 256),
         buffers.coords_reordered, buffers.velocities_reordered, buffers.atoms_reordered,
-        sys.coords, sys.velocities, sys.atoms, buffers.morton_seq, Val(reorder_atoms);
+        sys.coords, sys.velocities, sys.atoms, buffers.reorder_seq, Val(reorder_atoms);
         ndrange=N)
     return nothing
 end
@@ -1858,7 +1858,7 @@ function reverse_reorder_forces_gpu!(buffers, sys::System{D}) where D
     N = length(sys)
     backend = get_backend(sys.coords)
     launch_kernel!(reverse_reorder_forces_kernel!(backend, 256),
-        buffers.fs_mat, buffers.fs_mat_reordered, buffers.morton_seq, Val(D); ndrange=N)
+        buffers.fs_mat, buffers.fs_mat_reordered, buffers.reorder_seq, Val(D); ndrange=N)
     return nothing
 end
 
@@ -1866,15 +1866,15 @@ end
 The exclusions and special pairs read by the tiled kernels.
 The per-atom lists of `nf.eligible` and `nf.special`, which are SparsePairMatrix values
 on the device, are indexed by original atom index. `buffers.excluded_pos` and
-`buffers.special_pos` hold, for each list entry, the Morton position of the partner atom,
-refreshed by `refresh_tile_exceptions!` whenever the Morton order changes. This takes
+`buffers.special_pos` hold, for each list entry, the reordered position of the partner atom,
+refreshed by `refresh_tile_exceptions!` whenever the atom order changes. This takes
 memory proportional to the number of exceptions, where a mask per tile takes memory
 proportional to `n_atoms^2`.
 The NamedTuple is converted to device arrays when a kernel is launched.
 =#
 function tile_exceptions(buffers, nf::GPUNeighborFinder)
     return (
-        morton_seq=buffers.morton_seq,
+        reorder_seq=buffers.reorder_seq,
         excluded_starts=nf.eligible.starts,
         excluded_pos=buffers.excluded_pos,
         special_starts=nf.special.starts,
@@ -1886,19 +1886,19 @@ end
     refresh_tile_exceptions!(buffers, nf, N)
 
 Translate the sparse exception lists stored on [`GPUNeighborFinder`](@ref) into the
-Morton-ordered form read by the tiled pairwise kernels.
+reordered form read by the tiled pairwise kernels.
 
-This needs work proportional to the number of atoms and exceptions: the inverse Morton
-map is updated, the partner of each exception is converted to its Morton position and
+This needs work proportional to the number of atoms and exceptions: the inverse reorder
+map is updated, the partner of each exception is converted to its reordered position and
 the range of blocks holding the partners of the atoms of each 32-atom block is found,
 which lets the tile search mark most tiles as free of exceptions without looking at
 the atoms.
 =#
 function refresh_tile_exceptions!(buffers, nf::GPUNeighborFinder, ::Val{N}) where N
     n_blocks = cld(N, TILE_WIDTH)
-    backend = get_backend(buffers.morton_seq)
-    launch_kernel!(update_inv_morton_kernel!(backend, 256), buffers.morton_seq_inv,
-                   buffers.morton_seq; ndrange=N)
+    backend = get_backend(buffers.reorder_seq)
+    launch_kernel!(update_reorder_seq_inv_kernel!(backend, 256), buffers.reorder_seq_inv,
+                   buffers.reorder_seq; ndrange=N)
 
     # The number of exceptions changes when pairs are added to the neighbor finder
     if length(buffers.excluded_pos) != length(nf.eligible.partners)
@@ -1916,8 +1916,8 @@ function refresh_tile_exceptions!(buffers, nf::GPUNeighborFinder, ::Val{N}) wher
     launch_kernel!(tile_exceptions_kernel!(backend, n_items),
         buffers.excluded_pos, buffers.special_pos, buffers.block_exc_min,
         buffers.block_exc_max, nf.eligible.starts, nf.eligible.partners,
-        nf.special.starts, nf.special.partners, buffers.morton_seq,
-        buffers.morton_seq_inv, Val(N), Val(n_blocks), tile_sub_group_width(backend);
+        nf.special.starts, nf.special.partners, buffers.reorder_seq,
+        buffers.reorder_seq_inv, Val(N), Val(n_blocks), tile_sub_group_width(backend);
         ndrange=cld(N, n_items) * n_items)
     return buffers
 end
@@ -1942,7 +1942,7 @@ end
 end
 
 #=
-The block bounds of a triclinic box are in the brick coordinates of `morton_coord`.
+The block bounds of a triclinic box are in the brick coordinates of `aligned_coord`.
 A displacement from a point in box 1 to a point in box 2 lies in the box
 [r2_min - r1_max, r2_max - r1_min], and its periodic images add n1 * a + n2 * b + n3 * c for
 integers n1, n2 and n3. As a has no y or z component and b has no z component, the z range of
@@ -2007,7 +2007,7 @@ of 32 work-items, a single sub-group, per block. The bounds are found with a sub
 reduction, which needs no local memory and no barrier. With 64-wide sub-groups the
 sub-group of a work-group is partial, which the reduction takes into account.
 For a triclinic boundary the coordinates are first wrapped into the brick of the
-diagonal components of the basis vectors, see `morton_coord`.
+diagonal components of the basis vectors, see `aligned_coord`.
 These bounds are used for fast bounding-box intersection tests during tile finding
 to skip non-interacting tile pairs.
 =#
@@ -2020,7 +2020,7 @@ to skip non-interacting tile pairs.
     # Very large (arbitrary) bounds, which the lanes past the last atom contribute
     big = SVector{D, C}(ntuple(k -> 10 * box_sides(boundary, k), Val(D)))
     if i <= N
-        r = morton_coord(coords[sorted_seq[i]], boundary)
+        r = aligned_coord(coords[sorted_seq[i]], boundary)
         lo, hi = r, r
     else
         lo, hi = big, -big
@@ -2036,15 +2036,16 @@ to skip non-interacting tile pairs.
 end
 
 #=
-    update_inv_morton_kernel!(inv_morton_seq, morton_seq)
+    update_reorder_seq_inv_kernel!(inv_reorder_seq, reorder_seq)
 
-Generate the inverse Morton mapping.
-Scatters the dense `1:N` original atom indices into their new Morton-ordered
-positions in `inv_morton_seq`.
+Generate the inverse reorder mapping.
+Scatters the dense `1:N` original atom indices into their new reordered
+positions in `inv_reorder_seq`.
 =#
-@kernel inbounds=true function update_inv_morton_kernel!(inv_morton_seq, @Const(morton_seq))
+@kernel inbounds=true function update_reorder_seq_inv_kernel!(inv_reorder_seq,
+                                                               @Const(reorder_seq))
     i = @index(Global, Linear)
-    inv_morton_seq[morton_seq[i]] = i
+    inv_reorder_seq[reorder_seq[i]] = i
 end
 
 @kernel inbounds=true function reorder_system_kernel!(coords_reordered, velocities_reordered,
@@ -2081,14 +2082,14 @@ end
     return eligible_bitmask, UInt32(0x00000000)
 end
 
-# Convert the partners of one atom's exception list to Morton positions, returning the
+# Convert the partners of one atom's exception list to reordered positions, returning the
 #   lowest and highest block they fall in
-@inline function translate_exception_list!(pos, starts, partners, morton_seq_inv, atom_i,
+@inline function translate_exception_list!(pos, starts, partners, reorder_seq_inv, atom_i,
                                            min_block, max_block)
     @inbounds k_start, k_end = starts[atom_i], starts[atom_i + Int32(1)]
     k = k_start
     @inbounds while k < k_end
-        q = morton_seq_inv[partners[k]]
+        q = reorder_seq_inv[partners[k]]
         pos[k] = q
         block_q = ((q - Int32(1)) >> 5) + Int32(1)
         min_block = min(min_block, block_q)
@@ -2101,16 +2102,16 @@ end
 @inline min_max_block_op(a, b) = (min(a[1], b[1]), max(a[2], b[2]))
 
 #=
-One work-item per Morton position `p`, so that each segment of a sub-group covers one
+One work-item per reordered position `p`, so that each segment of a sub-group covers one
 32-atom block, see `tile_lane`. The work-item converts the exception partners of the atom
-at `p` to Morton positions, writing each list entry once since each atom belongs to one
+at `p` to reordered positions, writing each list entry once since each atom belongs to one
 position. The segment then reduces the lowest and highest block holding a partner of any
 atom in the block, which is `typemax(Int32)` and `0` for a block without exceptions.
 =#
 @kernel unsafe_indices=true inbounds=true function tile_exceptions_kernel!(excluded_pos,
                     special_pos, block_exc_min, block_exc_max, @Const(excluded_starts),
                     @Const(excluded_partners), @Const(special_starts),
-                    @Const(special_partners), @Const(morton_seq), @Const(morton_seq_inv),
+                    @Const(special_partners), @Const(reorder_seq), @Const(reorder_seq_inv),
                     ::Val{N}, ::Val{n_blocks}, ::Val{W}) where {N, n_blocks, W}
     lane = tile_lane(Val(W))
     tiles_per_group = KI.get_local_size(Int32).x ÷ Int32(TILE_WIDTH)
@@ -2119,11 +2120,11 @@ atom in the block, which is `typemax(Int32)` and `0` for a block without excepti
     min_block = typemax(Int32)
     max_block = Int32(0)
     if p <= N
-        atom_i = morton_seq[p]
+        atom_i = reorder_seq[p]
         min_block, max_block = translate_exception_list!(excluded_pos, excluded_starts,
-                    excluded_partners, morton_seq_inv, atom_i, min_block, max_block)
+                    excluded_partners, reorder_seq_inv, atom_i, min_block, max_block)
         min_block, max_block = translate_exception_list!(special_pos, special_starts,
-                    special_partners, morton_seq_inv, atom_i, min_block, max_block)
+                    special_partners, reorder_seq_inv, atom_i, min_block, max_block)
     end
 
     # Every work-item of the segment takes part, including those past the last atom
@@ -2135,16 +2136,16 @@ atom in the block, which is `typemax(Int32)` and `0` for a block without excepti
     end
 end
 
-# Whether the atom at Morton position `p` has an exclusion or special pair with an atom
+# Whether the atom at reordered position `p` has an exclusion or special pair with an atom
 #   in block `block_i`
 @inline function atom_has_partner_in_block(tile_exceptions, p, block_i)
-    morton_seq = KernelAbstractions.constify(tile_exceptions.morton_seq)
+    reorder_seq = KernelAbstractions.constify(tile_exceptions.reorder_seq)
     excluded_starts = KernelAbstractions.constify(tile_exceptions.excluded_starts)
     excluded_pos = KernelAbstractions.constify(tile_exceptions.excluded_pos)
     special_starts = KernelAbstractions.constify(tile_exceptions.special_starts)
     special_pos = KernelAbstractions.constify(tile_exceptions.special_pos)
 
-    @inbounds atom_i = morton_seq[p]
+    @inbounds atom_i = reorder_seq[p]
     found = false
     @inbounds for k in excluded_starts[atom_i]:(excluded_starts[atom_i + Int32(1)] - Int32(1))
         found |= (((excluded_pos[k] - Int32(1)) >> 5) + Int32(1) == block_i)
@@ -2169,13 +2170,13 @@ a diagonal tile, may be set as the exception lists hold each pair under both ato
     eligible_bitmask, special_bitmask = pristine_tile_masks(i, j, lane, n_blocks, r)
     p = (i - Int32(1)) * Int32(32) + lane
     if p <= N
-        morton_seq = KernelAbstractions.constify(tile_exceptions.morton_seq)
+        reorder_seq = KernelAbstractions.constify(tile_exceptions.reorder_seq)
         excluded_starts = KernelAbstractions.constify(tile_exceptions.excluded_starts)
         excluded_pos = KernelAbstractions.constify(tile_exceptions.excluded_pos)
         special_starts = KernelAbstractions.constify(tile_exceptions.special_starts)
         special_pos = KernelAbstractions.constify(tile_exceptions.special_pos)
 
-        @inbounds atom_i = morton_seq[p]
+        @inbounds atom_i = reorder_seq[p]
         j_0 = (j - Int32(1)) * Int32(32)
         @inbounds for k in excluded_starts[atom_i]:(excluded_starts[atom_i + Int32(1)] - Int32(1))
             slot = excluded_pos[k] - j_0
@@ -2200,7 +2201,7 @@ end
                                     r_cut2, N_blocks, D, max_total_tiles,
                                     block_exc_min, block_exc_max)
 
-Scan the upper-triangular matrix of 32x32 Morton-ordered atom tiles and append
+Scan the upper-triangular matrix of 32x32 reordered atom tiles and append
 only those whose bounding boxes fall within `r_cut`.
 
 A full off-diagonal tile is marked clean, i.e. free of exclusions and special pairs,
@@ -2260,7 +2261,7 @@ Tree search for the interacting tiles.
 
 The brute-force search above tests all `n_blocks^2 / 2` pairs of blocks, which dominates
 the run time from about a million atoms. Since the blocks are consecutive runs of
-Morton-ordered atoms, runs of consecutive blocks are spatially compact, so the bounding
+reordered atoms, runs of consecutive blocks are spatially compact, so the bounding
 boxes of the blocks can be merged pairwise into an implicit binary tree: level 0 holds
 the blocks and node `n` of level `k` holds the union of the boxes of blocks
 `(n - 1) * 2^k + 1` to `n * 2^k`. One work-item per block `i` then walks the tree from the
