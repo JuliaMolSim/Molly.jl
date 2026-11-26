@@ -8,7 +8,8 @@
 #   KernelAbstractions, which runs them without a GPU.
 #
 # The pipeline generally follows these steps:
-# 1.  **Reordering**: Atoms are periodically reordered based on Morton (Z-order) curves
+# 1.  **Reordering**: Atoms are periodically reordered along a space-filling curve (Morton
+#     or Hilbert, see `GPUNeighborFinder`)
 #     to improve cache hits during pairwise interactions.
 # 2.  **Exceptions**: The sparse per-atom lists of excluded and special pairs are
 #     translated into reordered positions, so that the bitmasks of the few 32x32 tiles
@@ -1150,7 +1151,7 @@ function refresh_gpu_tiles!(buffers, sys, nf, pairwise_inters, step_n, flags)
     N = length(sys.coords)
     if needs_reorder || needs_sparse_refresh || needs_tile_refresh
         if needs_order_refresh
-            sort_reorder_seq!(buffers, sys.coords, sys.boundary)
+            sort_reorder_seq!(buffers, sys.coords, sys.boundary; curve=nf.curve)
         end
 
         if needs_sparse_refresh

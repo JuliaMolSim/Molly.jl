@@ -362,8 +362,9 @@ end
         end
 
         @testset "Triclinic Boundary with negative off-diagonal components" begin
-            # Wrapped coordinates can be negative in these boxes, which the atom order
-            #   and the block bounds of the tile search have to handle
+            # Wrapped coordinates can be negative in these boxes, which the ordering along
+            #   both space-filling curves and the block bounds of the tile search have to
+            #   handle
             T = Float64
             d = T(4.0)
             boundaries = (
@@ -375,7 +376,7 @@ end
                 ),
                 TriclinicBoundary(SVector(d, d, d), deg2rad.(SVector(T(100), T(80), T(120)))),
             )
-            for boundary in boundaries
+            for boundary in boundaries, curve in (:morton, :hilbert)
                 n_atoms = 1_000
                 coords = place_atoms(n_atoms, boundary; min_dist=T(0.1), rng=Xoshiro(1))
                 @test minimum(c -> c[1], coords) < zero(T)
@@ -391,6 +392,7 @@ end
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=r_cut,
+                        curve=curve,
                         array_type=AT,
                     ),
                     force_units=NoUnits,
@@ -588,6 +590,14 @@ end
                     gpu_sys_shifted = System(gpu_sys; coords=AT(coords_shifted))
                     fs_gpu = Array(forces(gpu_sys_shifted, nothing))
                     @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                    # The same along the Hilbert curve, whose cells wrap the coordinates
+                    #   into the brick of `aligned_coord` again; the curve is kept when the
+                    #   system is converted
+                    gpu_sys_shifted.neighbor_finder.curve = :hilbert
+                    fs_gpu = Array(forces(gpu_sys_shifted, nothing))
+                    @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                    sys_converted = System(gpu_sys_shifted; coords=AT(coords))
+                    @test sys_converted.neighbor_finder.curve == :hilbert
 
                     # The triclinic box test is exact, checked against the distance between
                     #   the boxes over all images up to three lattice vectors away

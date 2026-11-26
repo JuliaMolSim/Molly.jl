@@ -70,6 +70,8 @@ struct LaunchAutotuneKey
     r_cut::Float64
     interaction_signature::Tuple
     force_maxregs::Union{Nothing, Int}
+    # The curve sets the order of the atoms and so the tile list the kernels run on
+    curve::Symbol
 end
 
 const TILE_LAUNCH_AUTOTUNE_CACHE = Dict{LaunchAutotuneKey, TileLaunchConfig}()
@@ -138,6 +140,7 @@ function autotune_key(sys::System{D}, backend, pairwise_inters,
         autotune_scalar(sys.neighbor_finder.dist_cutoff),
         Tuple(map(autotune_interaction_signature, pairwise_inters)),
         force_maxregs_override,
+        sys.neighbor_finder.curve,
     )
 end
 
@@ -174,7 +177,7 @@ function autotune_benchmark_ms!(prepare!::F, run!::G, backend;
 end
 
 function autotune_prepare_common_state!(buffers, sys, N::Int)
-    sort_reorder_seq!(buffers, sys.coords, sys.boundary)
+    sort_reorder_seq!(buffers, sys.coords, sys.boundary; curve=sys.neighbor_finder.curve)
     refresh_tile_exceptions!(buffers, sys.neighbor_finder, Val(N))
     buffers.sparse_pair_generation = sys.neighbor_finder.cache_generation
     reorder_system_gpu!(buffers, sys)

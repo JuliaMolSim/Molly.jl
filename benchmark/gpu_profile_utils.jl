@@ -46,7 +46,7 @@ function profile_gpu_tile_rebuild!(sys::System{D}, buffers) where D
     N = length(sys.coords)
     nf = sys.neighbor_finder
     reorder_sort_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
-        sort_reorder_seq!(buffers, sys.coords, sys.boundary)
+        sort_reorder_seq!(buffers, sys.coords, sys.boundary; curve=nf.curve)
     end
     compress_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.refresh_tile_exceptions!(buffers, nf, Val(N))

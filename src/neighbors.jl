@@ -856,10 +856,11 @@ end
 
 """
     GPUNeighborFinder(; n_atoms, dist_cutoff, excluded_pairs=(), special_pairs=(),
-                      auto_update=true, n_steps=10, array_type, initialized=false,
-                      strictness=:warn)
+                      auto_update=true, n_steps=10, curve=:morton, array_type,
+                      initialized=false, strictness=:warn)
     GPUNeighborFinder(; eligible, dist_cutoff, special=nothing, auto_update=true,
-                      n_steps=10, array_type=nothing, initialized=false, strictness=:warn)
+                      n_steps=10, curve=:morton, array_type=nothing, initialized=false,
+                      strictness=:warn)
 
 Neighbor finder for GPU systems that uses Molly's tiled pairwise kernels.
 These need a KernelAbstractions backend that supports atomics and sub-groups of 32
@@ -870,8 +871,9 @@ atomics (Metal 4.1 and later).
 
 See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.
-Instead, the tiled pairwise force and energy paths reorder atoms on a Morton
-curve and build a compact list of interacting 32x32 tiles directly on the device.
+Instead, the tiled pairwise force and energy paths reorder atoms along a space-filling
+curve, so that blocks of 32 consecutive atoms are close in space, and build a compact list
+of interacting 32x32 tiles directly on the device.
 The exclusions and special pairs are read from per-atom sparse lists inside the
 tiles that contain them, so the memory used grows linearly with the number of
 atoms.
@@ -911,6 +913,14 @@ The exceptions are stored in the `eligible` and `special` fields as
   the coordinates, refreshes the tile list without changing the atom order. The
   buffer distance should then be larger than the distance an atom can move in that
   time.
+- `curve=:morton`: the space-filling curve the atoms are ordered along, `:morton` for the
+  Morton (Z-order) curve or `:hilbert` for the Hilbert curve. The Hilbert curve does not
+  jump between distant parts of the box, so its blocks of 32 atoms are more compact and
+  fewer tiles interact. The field can be changed on an existing neighbor finder, and the
+  atoms are ordered along the new curve at the next force or energy calculation. The
+  launch parameters tuned by [`optimize_tile_launch_config!`](@ref) are not tuned again,
+  for that call `Molly.reset_tile_launch_config!(sys)` and then
+  `optimize_tile_launch_config!(sys)`.
 - `array_type`: the array type used to store the excluded and special pairs on
   the GPU, for example `CuArray`. It is required unless `eligible` is given on
   the GPU, in which case its array type is used.
@@ -930,6 +940,7 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     dist_cutoff_2::D2
     auto_update::Bool
     n_steps::Int
+    curve::Symbol
     initialized::Bool
     cache_generation::UInt64
     reorder_generation::UInt64
@@ -939,6 +950,24 @@ mutable struct GPUNeighborFinder{B, D, D2, E}
     # Counts the tile list refreshes and checks, and holds the buffers of the check, the
     #   coordinates the tile list was built from are kept in the GPU buffers that hold it
     tracker::DisplacementTracker
+end
+
+# A new curve is checked, and the atoms are ordered along it at the next force or energy
+#   calculation
+function Base.setproperty!(nf::GPUNeighborFinder, name::Symbol, x)
+    if name === :curve
+        check_curve(x)
+        if x !== nf.curve
+            nf.reorder_generation += one(UInt64)
+        end
+    end
+    return setfield!(nf, name, convert(fieldtype(typeof(nf), name), x))
+end
+
+function check_curve(curve)
+    curve in (:morton, :hilbert) ||
+        throw(ArgumentError("curve must be :morton or :hilbert, got $curve"))
+    return curve
 end
 
 auto_dist_buffer(::Type{GPUNeighborFinder}) = 0.3u"nm"
@@ -1033,6 +1062,7 @@ function GPUNeighborFinder(;
                             special_pairs=(),
                             auto_update::Bool=true,
                             n_steps=10,
+                            curve::Symbol=:morton,
                             array_type=nothing,
                             eligible=nothing,
                             special=nothing,
@@ -1051,9 +1081,11 @@ function GPUNeighborFinder(;
     special_sparse = sparse_special(special_given, n_atoms_used, AT)
     dist_cutoff_2 = dist_cutoff^2
     n_steps > 0 || throw(ArgumentError("n_steps must be positive, got $n_steps"))
+    check_curve(curve)
     return GPUNeighborFinder{Int, typeof(dist_cutoff), typeof(dist_cutoff_2), typeof(eligible_sparse)}(
                 Int(n_atoms_used), dist_cutoff, dist_cutoff_2, auto_update, Int(n_steps),
-                initialized, 0, 0, 0, eligible_sparse, special_sparse, DisplacementTracker())
+                curve, initialized, 0, 0, 0, eligible_sparse, special_sparse,
+                DisplacementTracker())
 end
 
 # The interacting tile list is built within the tiled pairwise kernels, so this only records
@@ -3254,6 +3286,7 @@ function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder, DistanceNei
     println(io, "  n_excluded = " , n_excluded)
     println(io, "  n_special = " , n_true_pairs(neighbor_finder.special))
     show_update_settings(io, neighbor_finder)
+    neighbor_finder isa GPUNeighborFinder && println(io, "  curve = ", neighbor_finder.curve)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
@@ -3282,7 +3315,7 @@ function convert_component(c::SystemConversion{<:Any, AT},
     if c.same_device
         if nf isa GPUNeighborFinder && gpu_nf_allowed
             return GPUNeighborFinder(; matrices..., update..., dist_cutoff=dist_cutoff,
-                                     array_type=AT)
+                                     curve=nf.curve, array_type=AT)
         elseif nf isa GPUCellListNeighborFinder && on_gpu
             return GPUCellListNeighborFinder(; matrices..., update...,
                                              dist_cutoff=dist_cutoff, array_type=AT,

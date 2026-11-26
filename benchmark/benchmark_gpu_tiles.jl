@@ -1,6 +1,8 @@
 # Benchmark of the tiled pairwise kernels of GPUNeighborFinder on a GPU backend chosen with
 #   MOLLY_BENCH_GPU, CUDA (the default), AMDGPU, oneAPI or Metal, and the device with
-#   MOLLY_BENCH_DEVICE, starting from 1
+#   MOLLY_BENCH_DEVICE, starting from 1. Each case is run with the atoms ordered along both
+#   space-filling curves of GPUNeighborFinder, as changes to the kernels can affect them
+#   differently.
 const gpu_package = get(ENV, "MOLLY_BENCH_GPU", "CUDA")
 if gpu_package == "CUDA"
     using CUDA
@@ -32,7 +34,8 @@ function setup_benchmark_system(n_atoms;
                                 r_cut=1.2u"nm",
                                 density=1400.0u"kg/m^3",
                                 box_multiplier=1.0,
-                                seed=42)
+                                seed=42,
+                                curve=:morton)
     T = Float32
     atom_mass = T(39.948)u"g/mol" # Argon
     σ = T(0.34)u"nm"
@@ -61,6 +64,7 @@ function setup_benchmark_system(n_atoms;
             excluded_pairs=(),
             special_pairs=(),
             dist_cutoff=r_cut,
+            curve=curve,
             array_type=AT,
         ),
         force_units=u"kJ * mol^-1 * nm^-1",
@@ -74,7 +78,7 @@ function print_profile(name, force_profile, energy_profile)
     force_times = force_profile.times
     stats = force_profile.tile_stats
     @printf(
-        "%-14s tiles=%7d candidates=%7d clean=%7d masked=%7d frac=%7.4f overflow=%d\n",
+        "%-18s tiles=%7d candidates=%7d clean=%7d masked=%7d frac=%7.4f overflow=%d\n",
         name,
         stats.num_tiles,
         stats.num_candidates,
@@ -114,16 +118,22 @@ function run_benchmark()
     n_atoms = env_int("MOLLY_TILE_BENCH_ATOMS", 4096)
 
     cases = [
-        (
-            name = "dense_f32",
-            description = "High-density cutoff regime",
-            sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3", box_multiplier=1.0, seed=42),
-        ),
-        (
-            name = "sparse_f32",
-            description = "Sparse cutoff regime",
-            sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3", box_multiplier=4.0, seed=43),
-        ),
+        case
+        for curve in (:morton, :hilbert)
+        for case in (
+            (
+                name = "dense_f32_$(curve)",
+                description = "High-density cutoff regime",
+                sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3",
+                                             box_multiplier=1.0, seed=42, curve=curve),
+            ),
+            (
+                name = "sparse_f32_$(curve)",
+                description = "Sparse cutoff regime",
+                sys = setup_benchmark_system(n_atoms; density=1400.0u"kg/m^3",
+                                             box_multiplier=4.0, seed=43, curve=curve),
+            ),
+        )
     ]
 
 
@@ -134,7 +144,7 @@ function run_benchmark()
     println("Benchmark samples per case: ", samples)
     println()
 
-    println(rpad("Case", 14), " | ", rpad("Forces median", 14), " | ", rpad("PE median", 12), " | Interacting tiles")
+    println(rpad("Case", 18), " | ", rpad("Forces median", 14), " | ", rpad("PE median", 12), " | Interacting tiles")
     println("-"^80)
 
     for case in cases
@@ -171,7 +181,7 @@ function run_benchmark()
         end samples=samples evals=1
 
         println(
-            rpad(case.name, 14), " | ",
+            rpad(case.name, 18), " | ",
             @sprintf("%10.3f ms", forces_ms), " | ",
             @sprintf("%8.3f ms", pe_ms), " | ",
             string(energy_profile.tile_stats.num_tiles),

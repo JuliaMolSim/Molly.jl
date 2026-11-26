@@ -39,12 +39,15 @@
         return fs, from_device(buffers.virial_nounits), sum(from_device(pe_vec))
     end
 
+    # The kernels are tested with the atoms ordered along both space-filling curves
+    curves = (:morton, :hilbert)
+
     for AT in tiled_array_types, width in sub_group_widths(AT), (n_atoms, boundary) in (
                 (20, CubicBoundary(3.0)),
                 (1000, CubicBoundary(3.0)),
                 (900, TriclinicBoundary(SVector(3.0, 0.0, 0.0), SVector(0.4, 3.0, 0.0),
                                         SVector(0.3, 0.5, 3.0))),
-            )
+            ), curve in curves
         Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
         Random.seed!(n_atoms)
         r_cut = 1.0
@@ -73,7 +76,7 @@
                            boundary=boundary, pairwise_inters=pairwise_inters,
                            neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
                                 dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
-                                special_pairs=special_pairs, array_type=AT),
+                                special_pairs=special_pairs, curve=curve, array_type=AT),
                            force_units=NoUnits, energy_units=NoUnits)
 
         fs_ref, vir_ref = forces_virial(cpu_sys)
@@ -106,7 +109,7 @@
         return fs, from_device(buffers.virial_nounits), sum(from_device(buffers.pe_vec_nounits))
     end
 
-    for AT in tiled_array_types, width in sub_group_widths(AT), D in (3, 2)
+    for AT in tiled_array_types, width in sub_group_widths(AT), D in (3, 2), curve in curves
         (D == 2 && AT == Array) && continue
         Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
         Random.seed!(D)
@@ -140,7 +143,7 @@
                            boundary=boundary, pairwise_inters=pairwise_inters,
                            neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
                                 dist_cutoff=(r_cut + 0.3), excluded_pairs=excluded_pairs,
-                                special_pairs=special_pairs, array_type=AT),
+                                special_pairs=special_pairs, curve=curve, array_type=AT),
                            force_units=NoUnits, energy_units=NoUnits)
         nf = tiled_sys.neighbor_finder
         buffers = Molly.init_buffers_gpu(tiled_sys, 1)
@@ -187,7 +190,7 @@
     tiled_gpu_array_types_f32 = filter(AT -> AT <: AbstractGPUArray &&
                             Molly.supports_tiled_kernels(Molly.array_type_backend(AT)),
                         array_list_metal)
-    for AT in tiled_gpu_array_types_f32, width in sub_group_widths(AT)
+    for AT in tiled_gpu_array_types_f32, width in sub_group_widths(AT), curve in curves
         Molly.TILE_SUB_GROUP_WIDTH_OVERRIDE[] = width
         Random.seed!(32)
         n_atoms = 1000
@@ -222,7 +225,7 @@
                            boundary=boundary, pairwise_inters=pairwise_inters,
                            neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
                                 dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
-                                special_pairs=special_pairs, array_type=AT),
+                                special_pairs=special_pairs, curve=curve, array_type=AT),
                            force_units=NoUnits, energy_units=NoUnits)
 
         fs_ref, vir_ref = forces_virial(cpu_sys)
@@ -238,7 +241,7 @@
     #   CoulombReactionField, so that the pair energies are Float64 while the energy is
     #   accumulated in Float32: the accumulator must not become a `Union` that is only
     #   Float64 on some work-items, which gave a NaN energy on the CPU backend
-    for AT in tiled_array_types
+    for AT in tiled_array_types, curve in curves
         Random.seed!(777)
         n_atoms = 777
         boundary = CubicBoundary(2.8f0u"nm")
@@ -268,7 +271,7 @@
                            boundary=boundary, pairwise_inters=pairwise_inters,
                            neighbor_finder=GPUNeighborFinder(n_atoms=n_atoms,
                                 dist_cutoff=r_cut, excluded_pairs=excluded_pairs,
-                                special_pairs=special_pairs, array_type=AT))
+                                special_pairs=special_pairs, curve=curve, array_type=AT))
 
         fs_ref = ustrip_vec.(forces(cpu_sys))
         pe_ref = ustrip(potential_energy(cpu_sys))

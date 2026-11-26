@@ -983,7 +983,8 @@ function RelativeFESystem(sysA::System, sysB::System, global_λ, mapping, core_m
         nf = nothing
     elseif nf_A isa GPUNeighborFinder && uses_gpu_neighbor_finder(AT) && !grad_safe
         nf = GPUNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
-                               auto_update=nf_A.auto_update, n_steps=nf_A.n_steps, array_type=AT)
+                               auto_update=nf_A.auto_update, n_steps=nf_A.n_steps,
+                               curve=nf_A.curve, array_type=AT)
     elseif nf_A isa DistanceNeighborFinder &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(Boundary))
         nf = DistanceNeighborFinder(dist_cutoff=nf_A.dist_cutoff, eligible=eligible, special=special,
