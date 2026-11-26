@@ -45,7 +45,7 @@
 const TILE_WIDTH = 32
 # Values stored in `interacting_tiles_type`: a tile is either free of exclusions and
 #   special pairs (0), mask-backed (1), or known to hold no in-cutoff atom pair at all
-#   and skipped entirely by the force/energy kernels (`TILE_DEAD`)
+#   and removed from the list by `compact_interacting_tiles!` (`TILE_DEAD`)
 const TILE_DEAD = UInt8(2)
 const MAX_BLOCK_Y = 32
 const DEFAULT_BLOCK_Y = 4
@@ -1482,7 +1482,7 @@ function launch_force_tiles!(kernel_backend, options, buffers, sys::System{D, <:
             tile_exceptions(buffers, sys.neighbor_finder), Val(needs_vir), Val(T), Val(TH),
             Val(D), Val(block_y), Val(W), Val(uses_vel), buffers.interacting_tiles_i,
             buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
+            buffers.interacting_tiles_diag, Int32(buffers.num_pairs),
             buffers.interacting_tiles_overflow, inner)
     kernel = tile_kernel(kernel_backend, force_kernel!, args, options)
     # A kernel with many registers can allow fewer work-items than the requested tiles
@@ -1523,7 +1523,7 @@ function launch_energy_tiles!(kernel_backend, options, pe_vec_nounits, buffers,
             tile_exceptions(buffers, sys.neighbor_finder), Val(T), Val(TH), Val(D),
             Val(block_y), Val(W), Val(uses_vel), buffers.interacting_tiles_i,
             buffers.interacting_tiles_j, buffers.interacting_tiles_type,
-            buffers.interacting_tiles_diag, buffers.num_interacting_tiles,
+            buffers.interacting_tiles_diag, Int32(buffers.num_pairs),
             buffers.interacting_tiles_overflow, inner)
     kernel = tile_kernel(kernel_backend, energy_kernel!, args, options)
     if TILE_WIDTH * block_y > KI.max_work_group_size(kernel)
@@ -1565,7 +1565,7 @@ function prune_interacting_tiles!(buffers, sys, N::Int)
         launch_tile_kernel!(backend, prune_interacting_tiles_kernel!,
             buffers.interacting_tiles_i, buffers.interacting_tiles_j,
             buffers.interacting_tiles_type, buffers.interacting_tiles_diag,
-            buffers.num_interacting_tiles,
+            Int32(buffers.num_pairs),
             buffers.coords_reordered, Val(N), Val(sys.neighbor_finder.dist_cutoff_2),
             Val(n_blocks), sys.boundary, tile_exceptions(buffers, sys.neighbor_finder),
             Val(prune_y), tile_sub_group_width(backend);
@@ -2445,21 +2445,19 @@ holding an exclusion or special pair are checked exactly here, and marked clean 
 none of their atom pairs is an exception.
 =#
 function prune_interacting_tiles_kernel!(interacting_tiles_i, interacting_tiles_j,
-                    interacting_tiles_type, interacting_tiles_diag, num_interacting_tiles,
+                    interacting_tiles_type, interacting_tiles_diag, num_pairs::Int32,
                     coords_var, ::Val{N}, ::Val{r_cut2}, ::Val{n_blocks}, boundary,
                     tile_exceptions, ::Val{block_y},
                     ::Val{W}) where {N, r_cut2, n_blocks, block_y, W}
     coords = KernelAbstractions.constify(coords_var)
     tiles_i_ro = KernelAbstractions.constify(interacting_tiles_i)
     tiles_j_ro = KernelAbstractions.constify(interacting_tiles_j)
-    num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
 
     a = Int32(1)
     lane = tile_lane(Val(W))
     idx = (KI.get_group_id(Int32).x - a) * Int32(block_y) + group_tile(Val(W))
 
     # The tile is uniform across the segment, so it returns as a whole
-    @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
         return nothing
     end
@@ -2647,7 +2645,7 @@ end
     force_kernel!(fs_mat, global_virial, coords, velocities, atoms, N, r_cut2, force_units,
                   inters_tuple, boundary, step_n, tile_exceptions, needs_vir, T, TH, D,
                   block_y, W, uses_vel, interacting_tiles_i, interacting_tiles_j,
-                  interacting_tiles_type, interacting_tiles_diag, num_interacting_tiles,
+                  interacting_tiles_type, interacting_tiles_diag, num_pairs,
                   interacting_tiles_overflow, inner)
 
 Compute pairwise forces for the compact list of interacting 32x32 tiles produced
@@ -2701,7 +2699,7 @@ function force_kernel!(
     ::Val{W},
     ::Val{uses_vel},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    interacting_tiles_diag, num_interacting_tiles,
+    interacting_tiles_diag, num_pairs,
     interacting_tiles_overflow, inner) where {N, r_cut2, A, force_units, needs_vir, T, TH, D,
                                               block_y, W, uses_vel}
 
@@ -2715,7 +2713,6 @@ function force_kernel!(
     tiles_j_ro = KernelAbstractions.constify(interacting_tiles_j)
     tiles_type_ro = KernelAbstractions.constify(interacting_tiles_type)
     tiles_diag_ro = KernelAbstractions.constify(interacting_tiles_diag)
-    num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
     interacting_tiles_overflow_ro = KernelAbstractions.constify(interacting_tiles_overflow)
 
     lane = tile_lane(Val(W))
@@ -2734,25 +2731,19 @@ function force_kernel!(
     sh_vel = uses_vel ? KI.localmemory(eltype(velocities_var), Val((TILE_WIDTH, block_y))) :
                         nothing
 
-    # The conditions of these returns are uniform across the segment
-    @inbounds if interacting_tiles_overflow_ro[1] != 0
-        return nothing
-    end
-
-    @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
         return nothing
     end
 
+    # Loaded together, so that the tile waits for memory once instead of once per check.
+    @inbounds overflow = interacting_tiles_overflow_ro[1]
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
     @inbounds type = tiles_type_ro[idx]
-
-    # `prune_interacting_tiles_kernel!` proved this tile holds no in-cutoff pair
-    if type == TILE_DEAD
+    @inbounds diag_mask = tiles_diag_ro[idx]
+    if overflow != 0
         return nothing
     end
-    @inbounds diag_mask = tiles_diag_ro[idx]
 
     # The inner masks of the dynamic pruning are used for the full tiles, the only ones
     #   with masks, unless they have to be found again, see `InnerTileMasks`
@@ -3005,7 +2996,7 @@ end
     energy_kernel!(energy_nounits, coords, velocities, atoms, N, r_cut2, energy_units,
                    inters_tuple, boundary, step_n, tile_exceptions, T, TH, D, block_y, W,
                    uses_vel, interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-                   interacting_tiles_diag, num_interacting_tiles, interacting_tiles_overflow,
+                   interacting_tiles_diag, num_pairs, interacting_tiles_overflow,
                    inner)
 
 Compute pairwise potential energies for the compact list of interacting 32x32
@@ -3040,7 +3031,7 @@ function energy_kernel!(
     ::Val{W},
     ::Val{uses_vel},
     interacting_tiles_i, interacting_tiles_j, interacting_tiles_type,
-    interacting_tiles_diag, num_interacting_tiles,
+    interacting_tiles_diag, num_pairs,
     interacting_tiles_overflow, inner) where {N, r_cut2, A, energy_units, T, TH, D, block_y,
                                               W, uses_vel}
 
@@ -3054,7 +3045,6 @@ function energy_kernel!(
     tiles_j_ro = KernelAbstractions.constify(interacting_tiles_j)
     tiles_type_ro = KernelAbstractions.constify(interacting_tiles_type)
     tiles_diag_ro = KernelAbstractions.constify(interacting_tiles_diag)
-    num_interacting_tiles_ro = KernelAbstractions.constify(num_interacting_tiles)
     interacting_tiles_overflow_ro = KernelAbstractions.constify(interacting_tiles_overflow)
 
     lane = tile_lane(Val(W))
@@ -3069,24 +3059,18 @@ function energy_kernel!(
     sh_vel = uses_vel ? KI.localmemory(eltype(velocities_var), Val((TILE_WIDTH, block_y))) :
                         nothing
 
-    @inbounds if interacting_tiles_overflow_ro[1] != 0
-        return nothing
-    end
-
-    @inbounds num_pairs = num_interacting_tiles_ro[1]
     if idx > num_pairs
         return nothing
     end
 
+    @inbounds overflow = interacting_tiles_overflow_ro[1]
     @inbounds i = tiles_i_ro[idx]
     @inbounds j = tiles_j_ro[idx]
     @inbounds type = tiles_type_ro[idx]
-
-    # `prune_interacting_tiles_kernel!` proved this tile holds no in-cutoff pair
-    if type == TILE_DEAD
+    @inbounds diag_mask = tiles_diag_ro[idx]
+    if overflow != 0
         return nothing
     end
-    @inbounds diag_mask = tiles_diag_ro[idx]
 
     # The inner masks of the dynamic pruning are used for the full tiles, the only ones
     #   with masks, when they are current, see `InnerTileMasks`
