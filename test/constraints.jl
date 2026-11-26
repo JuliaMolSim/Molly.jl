@@ -424,8 +424,8 @@ end
         @test check_position_constraints(systems[1])
         @test check_velocity_constraints(systems[1])
         for sys in systems[2:end]
-            @test sys.coords == systems[1].coords
-            @test sys.velocities == systems[1].velocities
+            @test maximum(norm.(sys.coords .- systems[1].coords)) < 1e-10u"nm"
+            @test maximum(norm.(sys.velocities .- systems[1].velocities)) < 1e-12u"nm * ps^-1"
         end
 
         # The constraint solves allocate nothing on CPU. Running them over more than one

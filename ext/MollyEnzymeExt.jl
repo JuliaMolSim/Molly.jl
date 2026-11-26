@@ -15,8 +15,9 @@ const GPUArraysCore = GPUArrays.GPUArraysCore
 function __init__()
     # On Julia 1.11 the LLVM Attributor that Enzyme runs before differentiating marks the
     #   pointer arguments of calls that are not inlined in GPU kernels as readnone, so the
-    #   gradient through the call is silently dropped. Later versions do not run it.
-    @static if v"1.11" <= VERSION < v"1.12"
+    #   gradient through the call is silently dropped. On Julia 1.10 it overflows the stack
+    #   on the ReaxFF gradient. Later versions do not run it.
+    @static if VERSION < v"1.12"
         Enzyme.Compiler.RunAttributor[] = false
     end
     return nothing

@@ -1216,7 +1216,7 @@ end
                 T = eltype(eltype(coords_cpu))
 
                 atoms = to_device([
-                    Molly.Atom(index=i, mass=one(T))
+                    Molly.Atom(index=i, mass=one(T), charge=zero(T), σ=zero(T), ϵ=zero(T), λ=one(T))
                     for i in 1:n_atoms
                 ], AT)
 
@@ -1761,7 +1761,8 @@ end
                 specials = [(i, i + 7) for i in 1:(n_atoms - 7)]
                 eligible = SparsePairMatrix(n_atoms, excluded; listed=false, array_type=AT)
                 special = SparsePairMatrix(n_atoms, specials; listed=true, array_type=AT)
-                atoms = to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:n_atoms], AT)
+                atoms = to_device([Molly.Atom(index=i, mass=1.0f0, charge=0.0f0, σ=0.0f0,
+                                              ϵ=0.0f0, λ=1.0f0) for i in 1:n_atoms], AT)
                 for boundary in (CubicBoundary(4.0f0), TriclinicBoundary(SVector(
                                     SVector{3,Float32}(4.0, 0.0, 0.0),
                                     SVector{3,Float32}(0.4, 4.2, 0.0),
@@ -2066,7 +2067,8 @@ end
 
                 # Ragged output has no pair list for the pairwise interactions
                 @test_throws ArgumentError System(
-                    atoms=to_device([Molly.Atom(index=i, mass=1.0f0) for i in 1:2], AT),
+                    atoms=to_device([Molly.Atom(index=i, mass=1.0f0, charge=0.0f0, σ=0.0f0,
+                                                ϵ=0.0f0, λ=1.0f0) for i in 1:2], AT),
                     coords=to_device([
                         SVector{3,Float32}(1.0, 1.0, 1.0),
                         SVector{3,Float32}(2.0, 1.0, 1.0),
