@@ -2575,14 +2575,14 @@ With `refresh_inner` the inner masks of the dynamic pruning are found too, from 
 within the squared inner cutoff `r_inner2`, see `InnerTileMasks`, and returned with the
 accumulators.
 =#
-@inline function tile_pair_forces(force_i, vir, fj, sh_stage, sh_vel, diag_mask,
-                        eligible_bitmask, special_bitmask, ::Val{has_exceptions},
+@inline function tile_pair_forces(::Val{refresh_inner}, force_i, vir, fj, sh_stage, sh_vel,
+                        diag_mask, eligible_bitmask, special_bitmask, ::Val{has_exceptions},
                         ::Val{single_image}, lane, segment, coords_i, coords_i_image, atoms_i,
                         vel_i, ::Type{A}, shuf_syms, ::Val{uses_vel}, inters_tuple, boundary,
-                        step_n, ::Val{r_cut2}, refresh_inner, r_inner2, ::Val{force_units},
+                        step_n, ::Val{r_cut2}, r_inner2, ::Val{force_units},
                         ::Val{needs_vir}, ::Val{D}, ::Type{T},
-                        ::Val{W}) where {has_exceptions, single_image, A, uses_vel, r_cut2,
-                                         force_units, needs_vir, D, T, W}
+                        ::Val{W}) where {refresh_inner, has_exceptions, single_image, A,
+                                         uses_vel, r_cut2, force_units, needs_vir, D, T, W}
     a = Int32(1)
     w = Int32(TILE_WIDTH)
     inner_mask = UInt32(0)
@@ -2630,6 +2630,15 @@ accumulators.
         end
     end
     return force_i, vir, fj, inner_mask
+end
+
+# The loop is compiled for each value of `refresh_inner`, which is tested here once per tile
+#   rather than in every iteration: the compiler does not move the test out of loops with
+#   sub-group operations such as `tile_any` and `tile_shfl` itself. `refresh_inner` has to be
+#   the same for the work-items of a segment.
+@inline function tile_pair_forces(refresh_inner::Bool, args::Vararg{Any, N}) where N
+    return refresh_inner ? tile_pair_forces(Val(true), args...) :
+                           tile_pair_forces(Val(false), args...)
 end
 
 # The cutoff for `tile_single_image` in the force kernel, and the squared inner cutoff and
@@ -2801,30 +2810,30 @@ function force_kernel!(
         #   does not handle the masks
         if type == UInt8(0) # CLEAN
             if single_image
-                force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
-                            sh_vel, diag_mask, UInt32(0), UInt32(0), Val(false), Val(true),
-                            lane, segment, coords_i, coords_i_image, atoms_i, vel_i, A,
-                            shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
-                            Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                            Val(needs_vir), Val(D), T, Val(W))
+                force_i, vir, fj, inner_mask = tile_pair_forces(refresh_inner,
+                            force_i, vir, fj, sh_stage, sh_vel, diag_mask, UInt32(0),
+                            UInt32(0), Val(false), Val(true), lane, segment, coords_i,
+                            coords_i_image, atoms_i, vel_i, A, shuf_syms, Val(uses_vel),
+                            inters_tuple, boundary, step_n, Val(r_cut2), r_inner2,
+                            Val(force_units), Val(needs_vir), Val(D), T, Val(W))
             else
-                force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
-                            sh_vel, diag_mask, UInt32(0), UInt32(0), Val(false), Val(false),
-                            lane, segment, coords_i, coords_i_image, atoms_i, vel_i, A,
-                            shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
-                            Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                            Val(needs_vir), Val(D), T, Val(W))
+                force_i, vir, fj, inner_mask = tile_pair_forces(refresh_inner,
+                            force_i, vir, fj, sh_stage, sh_vel, diag_mask, UInt32(0),
+                            UInt32(0), Val(false), Val(false), lane, segment, coords_i,
+                            coords_i_image, atoms_i, vel_i, A, shuf_syms, Val(uses_vel),
+                            inters_tuple, boundary, step_n, Val(r_cut2), r_inner2,
+                            Val(force_units), Val(needs_vir), Val(D), T, Val(W))
             end
         else # EXCLUDED
             # These tiles are few enough that the minimum image of each pair is used
             eligible_bitmask, special_bitmask = tile_exception_masks(tile_exceptions, i, j,
                                                         lane, n_blocks, r, Val(N))
-            force_i, vir, fj, inner_mask = tile_pair_forces(force_i, vir, fj, sh_stage,
-                        sh_vel, diag_mask, eligible_bitmask, special_bitmask, Val(true),
-                        Val(false), lane, segment, coords_i, coords_i_image, atoms_i, vel_i,
-                        A, shuf_syms, Val(uses_vel), inters_tuple, boundary, step_n,
-                        Val(r_cut2), refresh_inner, r_inner2, Val(force_units),
-                        Val(needs_vir), Val(D), T, Val(W))
+            force_i, vir, fj, inner_mask = tile_pair_forces(refresh_inner,
+                        force_i, vir, fj, sh_stage, sh_vel, diag_mask, eligible_bitmask,
+                        special_bitmask, Val(true), Val(false), lane, segment, coords_i,
+                        coords_i_image, atoms_i, vel_i, A, shuf_syms, Val(uses_vel),
+                        inters_tuple, boundary, step_n, Val(r_cut2), r_inner2,
+                        Val(force_units), Val(needs_vir), Val(D), T, Val(W))
         end
         if refresh_inner && lane == a
             store_inner_mask!(inner, idx, inner_mask)
