@@ -51,6 +51,7 @@ GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 KernelDensity = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b"
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
 [extensions]
@@ -59,6 +60,7 @@ MollyEnzymeExt = "Enzyme"
 MollyGLMakieExt = ["GLMakie", "Colors"]
 MollyKernelDensityExt = "KernelDensity"
 MollyLuxExt = ["Lux", "HDF5"]
+MollyMetalExt = "Metal"
 MollyPythonCallExt = "PythonCall"
 
 [compat]
@@ -91,6 +93,7 @@ KernelInterface = "0.4"
 LazyArtifacts = "1"
 LinearAlgebra = "1.10"
 Lux = "1"
+Metal = "1.12"
 NearestNeighbors = "0.4"
 PeriodicTable = "1.1"
 PhiloxRNG = "1"

@@ -865,8 +865,8 @@ Neighbor finder for GPU systems that uses Molly's tiled pairwise kernels.
 These need a KernelAbstractions backend that supports atomics and sub-groups of 32
 work-items with shuffles, or of 64 work-items that can diverge in halves, which
 `Molly.supports_tiled_kernels(backend)` checks. This is the case for CUDA.jl, AMDGPU.jl,
-oneAPI.jl on devices with sub-groups of 32 work-items and Metal.jl where it supports
-atomics (Metal 4.1 and later).
+oneAPI.jl on devices with sub-groups of 32 work-items and Metal.jl, where the atomics that
+the kernels use are enabled by the Metal extension of Molly.
 
 See [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413).
 `GPUNeighborFinder` does not materialize a conventional per-atom neighbor list.

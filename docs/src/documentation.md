@@ -187,7 +187,7 @@ Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples]
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
 The GPU code of Molly is written with [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), so the same kernels run on all of these backends, though backends other than CUDA are less well-tested with Molly.
 The tiled neighbor finder [`GPUNeighborFinder`](@ref) is used by default when setting up a system from a file on GPUs that support its kernels.
-This includes NVIDIA and AMD GPUs, Intel GPUs with sub-groups of 32 work-items and Apple GPUs with Metal 4.1 or later, and `Molly.supports_tiled_kernels(backend)` returns whether a backend supports them.
+This includes NVIDIA and AMD GPUs, Intel GPUs with sub-groups of 32 work-items and Apple GPUs with Metal 3.2 or later, and `Molly.supports_tiled_kernels(backend)` returns whether a backend supports them.
 On other GPUs the `O(N)` cell list [`GPUCellListNeighborFinder`](@ref) is used instead, and it can also be chosen with `neighbor_finder_type=GPUCellListNeighborFinder`.
 
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
