@@ -8,7 +8,7 @@
         T = Molly.default_float_type(AT, Float64)
         coords = [SVector{D, T}(0.1 * i, 0.1 * i, 0.1 * i) for i in 1:n_atoms]
         boundary = CubicBoundary(T(20.0), T(20.0), T(20.0))
-        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms]
+        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0), λ=T(1.0)) for i in 1:n_atoms]
         
         sys = System(
             atoms=AT(atoms),
@@ -140,7 +140,7 @@
             auto_sys = setup_sys()
             auto_cfg = Molly.tile_launch_config(auto_sys)
             @test auto_sys.neighbor_finder isa GPUNeighborFinder
-            @test auto_sys.neighbor_finder.dist_cutoff == 0.7u"nm"
+            @test auto_sys.neighbor_finder.dist_cutoff ≈ T(0.7)u"nm"
             @test Molly.config_force_block_y(auto_cfg) in Molly.AUTOTUNE_FORCE_BLOCK_Y_CANDIDATES
             @test Molly.config_energy_block_y(auto_cfg) in Molly.AUTOTUNE_ENERGY_BLOCK_Y_CANDIDATES
             @test Molly.config_tile_threads(auto_cfg) in Molly.AUTOTUNE_TILE_THREAD_CANDIDATES
@@ -178,7 +178,7 @@
                 SVector(T(1.5), T(11.0), T(0.0)),
                 SVector(T(0.5), T(1.0), T(10.0)),
             )
-            atoms_tri = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0)) for i in 1:n_atoms_tri]
+            atoms_tri = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0), λ=T(1.0)) for i in 1:n_atoms_tri]
 
             sys_tri = System(
                 atoms=AT(atoms_tri),
@@ -293,7 +293,7 @@ end
         T = Molly.default_float_type(AT, Float64)
         coords = place_atoms(n_atoms, CubicBoundary(T(3.0)); min_dist=T(0.25),
                              rng=Xoshiro(10))
-        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0))
+        atoms = [Atom(index=i, mass=T(1.0), charge=T(0.0), σ=T(0.3), ϵ=T(1.0), λ=T(1.0))
                  for i in 1:n_atoms]
         c1 = ConstantForceInter(SVector(T(1.0), T(2.0), T(3.0)), true)
         c2 = ConstantForceInter(SVector(T(10.0), T(20.0), T(30.0)), true)

@@ -63,12 +63,23 @@ work-items wide and able to diverge in segments of 32 work-items, see
 `supports_tile_sub_group_width`. This is what the backend reports for the active device.
 =#
 function supports_tiled_kernels(backend)
-    KI.supports_atomics(backend) || return false
+    supports_kernel_atomics(backend) || return false
     KI.supports_subgroups(backend) || return false
     KI.supports_linear_subgroups(backend) || return false
     supports_tile_sub_group_width(backend) || return false
     return all(T -> KI.supports_shuffle(backend, T), (Int32, UInt32, Float32))
 end
+
+#=
+    supports_kernel_atomics(backend)
+
+Whether the GPU kernels of Molly can use atomics on `backend`. They use adds, loads and
+fetch-adds of 32-bit integers and floats in global memory, most of them relaxed. This is
+`KI.supports_atomics(backend)`, unless a backend extension knows that the device supports
+these although the backend does not report `KI.supports_atomics`, which also covers
+operations that Molly does not use.
+=#
+supports_kernel_atomics(backend) = KI.supports_atomics(backend)
 
 #=
 Whether the sub-groups of `backend` can process the tiles: either they are `TILE_WIDTH`
@@ -86,7 +97,7 @@ end
 # Throw an error if the tiled kernels can not run on `backend` with coordinates of float
 #   type `T`, called when the buffers of a GPUNeighborFinder system are made
 function check_tiled_backend(backend, ::Type{T}) where T
-    if !KI.supports_atomics(backend)
+    if !supports_kernel_atomics(backend)
         throw(ArgumentError("GPUNeighborFinder needs a backend that supports atomics, " *
                             "$backend does not, use GPUCellListNeighborFinder or " *
                             "DistanceNeighborFinder instead"))
@@ -208,6 +219,27 @@ end
     end
     return x
 end
+
+#=
+The value of `val` held by the lane `m` lanes before this one in its segment, wrapping
+around, with `lane` the lane of this work-item, see `tile_lane`. `m` is the same for all
+the lanes of the segment, so this rotates the values of the segment by `m` lanes.
+Backend extensions can define a method for the device with a rotation that is faster than
+a shuffle from an arbitrary lane, see the Metal extension.
+=#
+@inline function tile_rotate(val, m, lane, ::Val{W}) where W
+    src = ((lane - Int32(1) - m) & Int32(TILE_WIDTH - 1)) + Int32(1)
+    return tile_shfl(val, src, Val(W))
+end
+
+#=
+Whether an iteration of the loop over the pairs of a full tile evaluates the pairs, from
+whether the pair of this lane is evaluated, `condition`. The iterations in which no lane of
+the segment evaluates a pair are skipped. Backend extensions can define a method for the
+device that evaluates every iteration, where that costs less than the vote and the branch,
+see the Metal extension. The pairs that are not evaluated then give zero forces.
+=#
+@inline tile_evaluates_pairs(condition, ::Val{W}) where {W} = tile_any(condition, Val(W))
 
 #=
     tile_kernel_config(backend, T, maxregs)
@@ -2613,7 +2645,7 @@ accumulators.
             inner_mask |= UInt32(1) << m
         end
 
-        if tile_any(condition, Val(W))
+        if tile_evaluates_pairs(condition, Val(W))
             f = condition ? sum_pairwise_forces_gpu(
                 inters_tuple, dr, atoms_i, atoms_j, Val(force_units),
                 special, coords_i, coords_j, boundary, vel_i, vel_j, step_n
@@ -2621,9 +2653,9 @@ accumulators.
 
             fi = stripped_force(f, Val(D), T)
             force_i += fi
-            # Lane `src` evaluated the pair with the j atom of this lane
-            src = ((lane - a - m) & Int32(31)) + a
-            fj += tile_shfl(fi, src, Val(W))
+            # The lane `m` lanes before this one evaluated the pair with the j atom of this
+            #   lane
+            fj += tile_rotate(fi, m, lane, Val(W))
             if needs_vir
                 vir = add_pair_virial(vir, fi, dr)
             end
@@ -2936,7 +2968,7 @@ function force_kernel!(
             end
             # Lanes `lane <= t` have no lane `lane - t`, they get the value of another lane
             #   which is not used
-            f_recv = tile_shfl(fi, ((lane - a - t) & Int32(31)) + a, Val(W))
+            f_recv = tile_rotate(fi, t, lane, Val(W))
             if lane > t
                 fj += f_recv
             end
@@ -3408,7 +3440,7 @@ end
 # The kernels need atomics, otherwise the reduction of GPUArrays is used
 function remove_CM_motion!(sys::System{D, <:AbstractGPUArray, T}) where {D, T}
     backend = get_backend(sys.velocities)
-    if !KI.supports_atomics(backend)
+    if !supports_kernel_atomics(backend)
         remove_CM_motion!(sys.velocities, sys)
         return sys
     end

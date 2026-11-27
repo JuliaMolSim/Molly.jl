@@ -176,7 +176,7 @@
         boundary = CubicBoundary(3.0f0)
         coords = place_atoms(n_atoms, boundary; min_dist=0.1f0)
         atoms = [Atom(index=i, mass=10.0f0, charge=(isodd(i) ? 0.2f0 : -0.2f0), σ=0.2f0,
-                      ϵ=0.2f0) for i in 1:n_atoms]
+                      ϵ=0.2f0, λ=1.0f0) for i in 1:n_atoms]
         pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(r_cut),
                                         weight_special=0.5f0),
                            CoulombReactionField(dist_cutoff=r_cut, use_neighbors=true,
