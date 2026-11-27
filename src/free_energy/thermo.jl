@@ -269,6 +269,7 @@ function build_neighbor_finder(ref_nfinder, eligible, special; reuse_neighbors::
                 special = special,
                 auto_update = false,
                 n_steps = 1,
+                curve = ref_nfinder.curve,
                 initialized = ref_nfinder.initialized,
                 strictness = :nowarn,
             )

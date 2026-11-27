@@ -205,10 +205,10 @@
         end
 
         @testset "Morton Code Granularity (Phase 1)" begin
-            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+            Molly.sort_reorder_seq!(buffers, sys.coords, sys.boundary)
             
-            morton_codes = Array(buffers.morton_seq_buffer_1)
-            @test length(unique(morton_codes)) == n_atoms
+            reorder_codes = Array(buffers.reorder_codes)
+            @test length(unique(reorder_codes)) == n_atoms
 
             # Each axis has a power of two cells, chosen so that the cells are close to cubic
             w, n_cells_m1 = Molly.morton_grid(sys.boundary, 10)
@@ -224,28 +224,29 @@
         end
         
         @testset "Physical Data Reordering (Phase 2)" begin
-            Molly.sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+            Molly.sort_reorder_seq!(buffers, sys.coords, sys.boundary)
             
             backend = Molly.get_backend(sys.coords)
             Molly.reorder_kernel!(backend, n_threads)(buffers.coords_reordered, sys.coords,
-                                                      buffers.morton_seq; ndrange=n_atoms)
+                                                      buffers.reorder_seq; ndrange=n_atoms)
 
             reordered_coords = Array(buffers.coords_reordered)
             orig_coords = Array(sys.coords)
-            morton_seq = Array(buffers.morton_seq)
+            reorder_seq = Array(buffers.reorder_seq)
             
             for i in 1:n_atoms
-                @test reordered_coords[i] ≈ orig_coords[morton_seq[i]]
+                @test reordered_coords[i] ≈ orig_coords[reorder_seq[i]]
             end
             
             fill!(buffers.fs_mat, 0.0)
             fill!(buffers.fs_mat_reordered, 1.0)
             Molly.reverse_reorder_forces_kernel!(backend, n_threads)(buffers.fs_mat,
-                        buffers.fs_mat_reordered, buffers.morton_seq, Val(3); ndrange=n_atoms)
+                        buffers.fs_mat_reordered, buffers.reorder_seq, Val(3);
+                        ndrange=n_atoms)
 
             fs_mat = Array(buffers.fs_mat)
             for i in 1:n_atoms
-                orig_idx = morton_seq[i]
+                orig_idx = reorder_seq[i]
                 @test fs_mat[1, orig_idx] ≈ 1.0
                 @test fs_mat[2, orig_idx] ≈ 1.0
                 @test fs_mat[3, orig_idx] ≈ 1.0

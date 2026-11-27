@@ -1,5 +1,5 @@
 using Molly
-using Molly: sorted_morton_seq!
+using Molly: sort_reorder_seq!
 using KernelAbstractions
 using StaticArrays
 
@@ -40,13 +40,13 @@ function neighbor_pairwise_inters(sys)
     return pairwise_inters
 end
 
-# Rebuild the Morton order, the exception data and the tile list of `buffers` from the
+# Rebuild the atom order, the exception data and the tile list of `buffers` from the
 #   coordinates of `sys`, timing each stage
 function profile_gpu_tile_rebuild!(sys::System{D}, buffers) where D
     N = length(sys.coords)
     nf = sys.neighbor_finder
-    morton_sort_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
-        sorted_morton_seq!(buffers, sys.coords, sys.boundary)
+    reorder_sort_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
+        sort_reorder_seq!(buffers, sys.coords, sys.boundary; curve=nf.curve)
     end
     compress_ms = gpu_stage_time_ms!(get_backend(sys.coords)) do
         Molly.refresh_tile_exceptions!(buffers, nf, Val(N))
@@ -67,7 +67,7 @@ function profile_gpu_tile_rebuild!(sys::System{D}, buffers) where D
     end
     Molly.throw_if_interacting_tiles_overflowed(buffers)
     return (
-        morton_sort_ms = morton_sort_ms,
+        reorder_sort_ms = reorder_sort_ms,
         compress_ms = compress_ms,
         reorder_ms = reorder_ms,
         bounds_ms = bounds_ms,

@@ -1717,7 +1717,7 @@ function System(T, TH, AT, atoms, coords, boundary, velocities, atoms_data, virt
         excluded_pairs, special_pairs = dense_masks_to_pair_lists(eligible, special)
         neighbor_finder = GPUNeighborFinder(
             n_atoms=size(eligible, 1),
-            # GPUNeighborFinder reuses Morton ordering and tile metadata across
+            # GPUNeighborFinder reuses atom order and tile metadata across
             # `n_steps`, so its search radius needs the same buffer as the other
             # neighbor finders
             dist_cutoff=dist_neighbors,

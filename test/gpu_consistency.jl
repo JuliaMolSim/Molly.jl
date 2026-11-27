@@ -265,9 +265,9 @@ end
                     buffers.box_maxs,
                     buffers.tree_mins,
                     buffers.tree_maxs,
-                    buffers.morton_seq,
-                    buffers.morton_seq_buffer_1,
-                    buffers.morton_seq_inv,
+                    buffers.reorder_seq,
+                    buffers.reorder_codes,
+                    buffers.reorder_seq_inv,
                     buffers.excluded_pos,
                     buffers.special_pos,
                     buffers.block_exc_min,
@@ -362,8 +362,9 @@ end
         end
 
         @testset "Triclinic Boundary with negative off-diagonal components" begin
-            # Wrapped coordinates can be negative in these boxes, which the Morton ordering
-            #   and the block bounds of the tile search have to handle
+            # Wrapped coordinates can be negative in these boxes, which the ordering along
+            #   both space-filling curves and the block bounds of the tile search have to
+            #   handle
             T = Float64
             d = T(4.0)
             boundaries = (
@@ -375,7 +376,7 @@ end
                 ),
                 TriclinicBoundary(SVector(d, d, d), deg2rad.(SVector(T(100), T(80), T(120)))),
             )
-            for boundary in boundaries
+            for boundary in boundaries, curve in (:morton, :hilbert)
                 n_atoms = 1_000
                 coords = place_atoms(n_atoms, boundary; min_dist=T(0.1), rng=Xoshiro(1))
                 @test minimum(c -> c[1], coords) < zero(T)
@@ -391,6 +392,7 @@ end
                     neighbor_finder=GPUNeighborFinder(
                         n_atoms=n_atoms,
                         dist_cutoff=r_cut,
+                        curve=curve,
                         array_type=AT,
                     ),
                     force_units=NoUnits,
@@ -580,7 +582,7 @@ end
 
                 if boundary isa TriclinicBoundary
                     # Coordinates moved by lattice vectors give the same forces, since the
-                    #   Morton order and the block bounds wrap them into the box
+                    #   atom order and the block bounds wrap them into the box
                     B = Molly.box_matrix(boundary)
                     rng = Xoshiro(8)
                     coords_shifted = [c + B * SVector{3, T}(rand(rng, -2:2), rand(rng, -2:2),
@@ -588,6 +590,14 @@ end
                     gpu_sys_shifted = System(gpu_sys; coords=AT(coords_shifted))
                     fs_gpu = Array(forces(gpu_sys_shifted, nothing))
                     @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                    # The same along the Hilbert curve, whose cells wrap the coordinates
+                    #   into the brick of `aligned_coord` again; the curve is kept when the
+                    #   system is converted
+                    gpu_sys_shifted.neighbor_finder.curve = :hilbert
+                    fs_gpu = Array(forces(gpu_sys_shifted, nothing))
+                    @test maximum(norm.(fs_gpu .- fs_cpu)) < 1e-8 * maximum(norm.(fs_cpu))
+                    sys_converted = System(gpu_sys_shifted; coords=AT(coords))
+                    @test sys_converted.neighbor_finder.curve == :hilbert
 
                     # The triclinic box test is exact, checked against the distance between
                     #   the boxes over all images up to three lattice vectors away

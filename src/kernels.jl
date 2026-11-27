@@ -955,29 +955,45 @@ end
 end
 
 #=
-    sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
+    sort_reorder_seq!(buffers, coords, boundary, grid_bits=10; curve=:morton)
 
-Compute a Morton (Z-order) sequence for a set of coordinates.
-The indices are stored in `buffers.morton_seq`.
+Compute the order of a set of coordinates along a space-filling curve, the Morton (Z-order)
+curve for `curve=:morton` or the Hilbert curve for `curve=:hilbert`, see
+[`GPUNeighborFinder`](@ref). `grid_bits` is the number of bits of the cell index along
+the longest side of the box. The indices are stored in `buffers.reorder_seq` and the codes
+along the curve in `buffers.reorder_codes`.
 =#
-function sorted_morton_seq!(buffers, coords, boundary, morton_bits=10)
-    backend = get_backend(buffers.morton_seq)
+function sort_reorder_seq!(buffers, coords, boundary, grid_bits=10; curve::Symbol=:morton)
+    backend = get_backend(buffers.reorder_seq)
     n_threads_gpu = 32
-    w, masks = morton_grid(boundary, morton_bits)
-    kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
-    kernel!(buffers.morton_seq_buffer_1, coords, boundary, w, masks, morton_bits;
-            ndrange=length(coords))
-    # The sort reuses scratch memory kept with the buffers, see `morton_sort_workspace`
-    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
-                                 alg=morton_sort_alg(backend),
-                                 workspace=morton_sort_workspace(buffers, backend))
+    if curve === :hilbert
+        # The codes are stored as Int32
+        D = length(eltype(coords))
+        D * grid_bits <= 31 || throw(ArgumentError("the Hilbert curve needs " *
+                    "D * grid_bits <= 31, got D = $D and grid_bits = $grid_bits"))
+        w, finite_sides = hilbert_grid(boundary, grid_bits)
+        kernel! = hilbert_code_kernel!(backend, n_threads_gpu)
+        kernel!(buffers.reorder_codes, coords, boundary, box_sides(boundary), w,
+                finite_sides, grid_bits; ndrange=length(coords))
+    elseif curve === :morton
+        w, masks = morton_grid(boundary, grid_bits)
+        kernel! = morton_code_kernel!(backend, n_threads_gpu)
+        kernel!(buffers.reorder_codes, coords, boundary, w, masks, grid_bits;
+                ndrange=length(coords))
+    else
+        throw(ArgumentError("curve must be :morton or :hilbert, got $curve"))
+    end
+    # The sort reuses scratch memory kept with the buffers, see `reorder_sort_workspace`
+    AcceleratedKernels.sortperm!(buffers.reorder_seq, buffers.reorder_codes;
+                                 alg=reorder_sort_alg(backend),
+                                 workspace=reorder_sort_workspace(buffers, backend))
     return buffers
 end
 
 #=
 The cell widths of the Morton grid and, for each axis, the number of cells minus one.
 The grid covers the box, or for a TriclinicBoundary the brick of the diagonal components
-    of the basis vectors, see `morton_coord`.
+    of the basis vectors, see `aligned_coord`.
 The number of cells along an axis is a power of two, at most 2^bits, chosen so that the
     cells are within a factor of sqrt(2) of cubic. The same number of cells along each
     axis of an elongated box would give long or flat cells, and so blocks of consecutive
@@ -998,8 +1014,9 @@ function morton_grid(boundary, bits)
 end
 
 #=
-The coordinate used to order atoms on the Morton grid and to bound blocks of atoms in the
-    tile search of the tiled pairwise kernels.
+The coordinate in a frame aligned with the axes, used to order atoms on the grid of the
+    space-filling curve and to bound blocks of atoms in the tile search of the tiled
+    pairwise kernels.
 Coordinates in an orthorhombic box are used as they are.
 Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) × [0, c_z)
     using the basis vectors. The brick holds one image of each point, as the triclinic cell
@@ -1007,9 +1024,9 @@ Coordinates in a triclinic box are wrapped into the brick [0, a_x) × [0, b_y) �
     box. Wrapping each axis with the side lengths does not move y with the x component of
     b, so atoms from distant parts of the box end up in the same blocks.
 =#
-@inline morton_coord(c, boundary) = c
+@inline aligned_coord(c, boundary) = c
 
-@inline function morton_coord(c, boundary::TriclinicBoundary)
+@inline function aligned_coord(c, boundary::TriclinicBoundary)
     bv, rs = boundary.basis_vectors, boundary.reciprocal_size
     c_wrap = c - bv[3] * floor(c[3] * rs[3])
     c_wrap -= bv[2] * floor(c_wrap[2] * rs[2])
@@ -1019,18 +1036,119 @@ end
 
 # The cell indices are taken modulo the number of cells along each axis, which wraps
 #   orthorhombic coordinates that are outside the box
-@kernel function sorted_morton_seq_kernel!(morton_seq,
-                                           @Const(coords::AbstractVector{SVector{D, C}}),
-                                           boundary,
-                                           w,
-                                           masks,
-                                           bits::Integer) where {D, C}
+@kernel function morton_code_kernel!(codes,
+                                     @Const(coords::AbstractVector{SVector{D, C}}),
+                                     boundary,
+                                     w,
+                                     masks,
+                                     bits::Integer) where {D, C}
     i = @index(Global, Linear)
     @inbounds if i <= length(coords)
-        scaled_coord = floor.(Int32, morton_coord(coords[i], boundary) ./ w)
+        scaled_coord = floor.(Int32, aligned_coord(coords[i], boundary) ./ w)
         cell = (scaled_coord .% UInt32) .& masks
-        morton_seq[i] = generalized_morton_code(cell, bits, Val(D))
+        codes[i] = generalized_morton_code(cell, bits, Val(D))
     end
+end
+
+#=
+The cell width of the grid of the Hilbert curve, and for each axis whether the side is
+finite. The Hilbert curve visits a cube of 2^bits cells along each axis, so the cells are
+cubic, with 2^bits of them along the longest side of the box, and fewer along the others.
+The cells beyond a shorter side are empty, which costs nothing as only the order of the
+atoms is used. An infinite side has one cell, and with only infinite sides every atom is in
+the same cell, so the atoms keep their order.
+For a TriclinicBoundary the sides are those of the brick of `aligned_coord`.
+=#
+function hilbert_grid(boundary, bits)
+    sides = box_sides(boundary)
+    max_side = maximum(s -> isfinite(s) ? s : zero(s), sides)
+    finite_sides = map(s -> isfinite(s) && max_side > zero(max_side), sides)
+    return max_side / (1 << bits), finite_sides
+end
+
+# The coordinates are wrapped into the box first, so that coordinates outside it are in the
+#   cell of their image in the box
+@kernel function hilbert_code_kernel!(codes,
+                                            @Const(coords::AbstractVector{SVector{D, C}}),
+                                            boundary,
+                                            sides,
+                                            w,
+                                            finite_sides,
+                                            bits::Integer) where {D, C}
+    i = @index(Global, Linear)
+    @inbounds if i <= length(coords)
+        c = aligned_coord(coords[i], boundary)
+        cell = ntuple(Val(D)) do k
+            hilbert_cell_index(c[k], sides[k], w, finite_sides[k], bits)
+        end
+        codes[i] = hilbert_code(cell, bits, Val(D))
+    end
+end
+
+# The index of the cell of width `w` holding coordinate `x` along a side of length `side`,
+#   from 0 to 2^bits - 1
+@inline function hilbert_cell_index(x, side, w, finite_side::Bool, bits)
+    finite_side || return UInt32(0)
+    x_box = x - side * floor(x / side)
+    top = Int32((1 << bits) - 1)
+    # As with the Morton curve, a coordinate that is not finite throws an error
+    return clamp(floor(Int32, x_box / w), Int32(0), top) % UInt32
+end
+
+#=
+    hilbert_code(cell, bits, Val(D))
+
+The index along the Hilbert curve through the 2^bits cells along each of the `D` axes of
+the cell with indices `cell`, from 0 to 2^(bits * D) - 1. This is the algorithm of
+J. Skilling, "Programming the Hilbert curve", AIP Conference Proceedings 707, 381 (2004),
+for any `D`: the cell indices are turned into the "transposed" Hilbert index, whose bits,
+taken from the highest one down and from axis 1 to `D` at each level, are the bits of the
+index. Consecutive indices are cells that share a face, and each aligned run of 2^(l * D)
+indices is an aligned cube of 2^l cells along each axis.
+=#
+@inline function hilbert_code(cell, bits::Integer, ::Val{D}) where D
+    X = ntuple(k -> UInt32(cell[k]), Val(D))
+    one_u = UInt32(1)
+    m = one_u << (bits - 1)
+    # Undo the excess work of the rotations and reflections, from the top level down
+    q = m
+    while q > one_u
+        p = q - one_u
+        for k in 1:D
+            if (X[k] & q) != zero(UInt32)
+                # Invert the low bits of the first axis
+                X = Base.setindex(X, X[1] ⊻ p, 1)
+            else
+                # Exchange the low bits of the first axis and axis k
+                swap = (X[1] ⊻ X[k]) & p
+                X = Base.setindex(X, X[1] ⊻ swap, 1)
+                X = Base.setindex(X, X[k] ⊻ swap, k)
+            end
+        end
+        q >>= 1
+    end
+    # Gray encode
+    for k in 2:D
+        X = Base.setindex(X, X[k] ⊻ X[k - 1], k)
+    end
+    t = zero(UInt32)
+    q = m
+    while q > one_u
+        if (X[D] & q) != zero(UInt32)
+            t ⊻= q - one_u
+        end
+        q >>= 1
+    end
+    # Not a closure over `t`, which would box it as it is assigned more than once
+    X = xor.(X, t)
+    # Interleave the bits of the transposed index
+    code = zero(UInt32)
+    for b in (bits - 1):-1:0
+        for k in 1:D
+            code = (code << 1) | ((X[k] >> b) & one_u)
+        end
+    end
+    return code % Int32
 end
 
 # See https://en.wikipedia.org/wiki/Z-order_curve for Morton/Z-order indexing,
