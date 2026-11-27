@@ -21,6 +21,8 @@ can move the atoms out of plane by more than the height of the triangle, which S
 not solve.
 A molecule that is too distorted to be settled is left at its unconstrained positions and
 gives a warning, or an error with `strictness=:error`.
+On GPU this is checked without waiting for the device, so it can be reported some steps
+after the step that found it.
 Other constraints in the same system should be given to a separate constraint algorithm,
 such as [`LINCS`](@ref) or [`SHAKE_RATTLE`](@ref), in the `constraints` tuple of the
 [`System`](@ref).
@@ -36,13 +38,59 @@ constructor moves the constraint data to the device of the system.
     [`check_velocity_constraints`](@ref).
 - `gpu_block_size=128`: the number of threads per block to use for GPU calculations.
 """
-struct SETTLE{C, D, V, F}
+struct SETTLE{C, D, V, F, H}
     clusters::C
     dist_tolerance::D
     vel_tolerance::V
     gpu_block_size::Int
-    error_flag::F # Set when a molecule is too distorted to be settled
+    # Set by the position step when a molecule is too distorted to be settled, and where
+    #   the host reads it, see `check_settle_error!`
+    error_flag::F
+    error_flag_host::H
+    error_flag_mapped::Bool
+    n_unread_steps::Base.RefValue{Int}
 end
+
+function SETTLE(clusters, dist_tolerance, vel_tolerance, gpu_block_size::Integer)
+    error_flag, error_flag_host, mapped = settle_error_flag(clusters.k1)
+    return SETTLE(clusters, dist_tolerance, vel_tolerance, Int(gpu_block_size), error_flag,
+                  error_flag_host, mapped, Ref(0))
+end
+
+#=
+The array that the position step sets when a molecule is too distorted to be settled, the
+array that the host reads it from and whether that is the memory the device writes to.
+On GPU that is memory the device writes to directly when the backend gives it, see
+`check_result_arrays`, so that the host can read the flag without waiting for the device.
+=#
+function settle_error_flag(k1s::AbstractGPUArray)
+    error_flag, error_flag_host, event = check_result_arrays(get_backend(k1s), Int32, 1)
+    return error_flag, error_flag_host, !isnothing(event)
+end
+
+function settle_error_flag(k1s)
+    error_flag = zeros(Int32, 1)
+    return error_flag, error_flag, true
+end
+
+#=
+A copy of the fields would give a host array that is a copy of the flag rather than the
+memory the device writes to, so the copy has a new flag.
+=#
+function Base.deepcopy_internal(s::SETTLE, dict::IdDict)
+    haskey(dict, s) && return dict[s]::typeof(s)
+    s_copy = SETTLE(Base.deepcopy_internal(s.clusters, dict), s.dist_tolerance,
+                    s.vel_tolerance, s.gpu_block_size)
+    dict[s] = s_copy
+    return s_copy::typeof(s)
+end
+
+# Default number of threads per block of the SETTLE kernels
+const settle_default_block_size = 128
+
+# The number of steps between reads of the SETTLE error flag on GPU backends where the
+#   host can not read it without waiting for the device, see `check_settle_error!`
+const settle_error_read_interval = 100
 
 # Largest angle in degrees of a triangle given to SETTLE, see the SETTLE docstring
 const settle_max_angle = 150
@@ -97,7 +145,7 @@ function SETTLE(; masses,
     end
 
     clusters = StructArray(AngleClusterData(ac) for ac in angle_constraints)
-    return SETTLE(clusters, dist_tolerance, vel_tolerance, Int(gpu_block_size), zeros(Int32, 1))
+    return SETTLE(clusters, dist_tolerance, vel_tolerance, gpu_block_size)
 end
 
 function Base.show(io::IO, s::SETTLE)
@@ -207,7 +255,7 @@ end
 
 function move_constraints_to_device(s::SETTLE, ::Type{AT}) where {AT <: AbstractGPUArray}
     return SETTLE(replace_storage(AT, s.clusters), s.dist_tolerance, s.vel_tolerance,
-                  s.gpu_block_size, to_device(zeros(Int32, 1), AT))
+                  s.gpu_block_size)
 end
 
 #=
@@ -321,9 +369,25 @@ end
     end
 end
 
+#=
+Report the molecules that a position step found too distorted to be settled.
+When the host reads the memory the device writes the flag to, which is always the case on
+CPU, the flag is read without waiting for the device, so on GPU a molecule is reported once
+the position step that found it has run, which can be a few steps later. Otherwise reading
+the flag waits for the device, so it is only read every `settle_error_read_interval` steps.
+=#
 function check_settle_error!(s::SETTLE, strictness)
-    if !iszero(only(from_device(s.error_flag)))
-        fill!(s.error_flag, zero(Int32))
+    if !s.error_flag_mapped
+        s.n_unread_steps[] += 1
+        s.n_unread_steps[] < settle_error_read_interval && return nothing
+        s.n_unread_steps[] = 0
+        copyto!(s.error_flag_host, s.error_flag)
+    end
+    if !iszero(s.error_flag_host[1])
+        s.error_flag_host[1] = zero(Int32)
+        if !s.error_flag_mapped
+            fill!(s.error_flag, zero(Int32))
+        end
         report_issue("SETTLE found one or more molecules too distorted to be settled, " *
                      "which usually means the simulation is unstable; these molecules " *
                      "were left at their unconstrained positions, so their constraints " *
@@ -345,20 +409,20 @@ function apply_position_constraints!(sys::System{D},
     coords_before = context.needs_virial ? copyto_constraint_scratch!(context.coords_buffer, sys.coords) : nothing
 
     n_clusters = length(ca.clusters)
-    backend = get_backend(r_pre_unconstrained_update)
-    KernelAbstractions.synchronize(backend)
     ms = masses(sys)
     cl = ca.clusters
 
+    # The kernels are ordered on the device, so there is no need to wait for it
     if sys.coords isa AbstractGPUArray
-        kernel! = settle_kernel!(backend, ca.gpu_block_size)
-        kernel!(cl.k1, cl.k2, cl.k3, cl.dist12, cl.dist23, r_pre_unconstrained_update,
-                sys.coords, ms, sys.boundary, ca.error_flag; ndrange=n_clusters)
-        KernelAbstractions.synchronize(backend)
+        backend = get_backend(sys.coords)
+        kernel! = ka_kernel(settle_kernel!, backend, ca.gpu_block_size,
+                            Val(settle_default_block_size))
+        launch_kernel!(kernel!, cl.k1, cl.k2, cl.k3, cl.dist12, cl.dist23,
+                       r_pre_unconstrained_update, sys.coords, ms, sys.boundary,
+                       ca.error_flag; ndrange=n_clusters)
         if context.needs_virial && !isnothing(coords_before)
             accumulate_shake_cluster23_virial_gpu!(r_pre_unconstrained_update, coords_before,
                             sys.coords, ms, sys.boundary, cl, context, backend, ca.gpu_block_size)
-            KernelAbstractions.synchronize(backend)
         end
     else
         apply_clusters_cpu!(settle_cluster!, n_clusters, n_threads, cl.k1, cl.k2, cl.k3,
@@ -383,7 +447,6 @@ function apply_velocity_constraints!(sys::System, ca::SETTLE; context=nothing,
     velocities_before = context.needs_virial ? copyto_constraint_scratch!(context.velocities_buffer, sys.velocities) : nothing
 
     backend = get_backend(sys.velocities)
-    KernelAbstractions.synchronize(backend)
     on_gpu = sys.velocities isa AbstractGPUArray
     ms = masses(sys)
     cl = ca.clusters
@@ -391,14 +454,12 @@ function apply_velocity_constraints!(sys::System, ca::SETTLE; context=nothing,
     rattle_clusters!(on_gpu, rattle3_angle_kernel!, rattle3_angle_cluster!, length(cl), ca,
                      backend, n_threads, cl.k1, cl.k2, cl.k3, sys.coords, sys.velocities, ms,
                      sys.boundary)
-    KernelAbstractions.synchronize(backend)
 
     if context.needs_virial && !isnothing(velocities_before)
         if on_gpu
             accumulate_shake_cluster23_virial_gpu!(sys.coords, velocities_before,
                             sys.velocities, ms, sys.boundary, cl, context, backend,
                             ca.gpu_block_size)
-            KernelAbstractions.synchronize(backend)
         else
             accumulate_shake_cluster_virial!(sys.coords, velocities_before, sys.velocities,
                                              ms, sys.boundary, cl, context)

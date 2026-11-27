@@ -927,8 +927,8 @@ end
                                   n_clusters::Integer, ca, backend, n_threads::Integer,
                                   args::Vararg{Any, N}) where {F, N}
     if on_gpu
-        kernel! = rattle_kernel(backend, ca.gpu_block_size)
-        kernel!(args...; ndrange=n_clusters)
+        kernel! = ka_kernel(rattle_kernel, backend, ca.gpu_block_size, Val(128))
+        launch_kernel!(kernel!, args...; ndrange=n_clusters)
     else
         apply_clusters_cpu!(rattle_cluster_fn, n_clusters, n_threads, args...)
     end

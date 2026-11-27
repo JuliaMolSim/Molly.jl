@@ -1987,6 +1987,31 @@ end
     @test iszero(sys.constraints[1].error_flag[1])
     sys.coords .= coords_distorted
     @test_throws ErrorException Molly.apply_position_constraints!(sys, old; strictness=:error)
+
+    # On GPU the flag is read without waiting for the device, or only every few steps on
+    #   backends where reading it waits, so the molecule is reported by a later call
+    function apply_distorted!(sys, AT; strictness=:warn)
+        old_device = to_device(old, AT)
+        for _ in 1:(Molly.settle_error_read_interval + 1)
+            sys.coords .= to_device(coords_distorted, AT)
+            Molly.apply_position_constraints!(sys, old_device; strictness=strictness)
+            KernelAbstractions.synchronize(get_backend(sys.coords))
+        end
+        return sys
+    end
+
+    for AT in array_list[2:end]
+        settle = SETTLE(masses=masses_val, angle_constraints=acs)
+        sys = settle_system(settle, unconstrained, vels, masses_val, boundary, AT)
+        @test_logs (:warn, r"too distorted") apply_distorted!(sys, AT)
+        @test from_device(sys.coords)[1:3] == coords_distorted[1:3]
+        @test_throws ErrorException apply_distorted!(sys, AT; strictness=:error)
+        # A copy of the system has its own flag
+        sys_copy = deepcopy(sys)
+        @test sys_copy.constraints[1].error_flag !== sys.constraints[1].error_flag
+        @test_logs (:warn, r"too distorted") apply_distorted!(sys_copy, AT)
+        @test_logs apply_distorted!(System(sys; array_type=AT), AT; strictness=:nowarn)
+    end
 end
 
 @testset "SETTLE setup" begin
