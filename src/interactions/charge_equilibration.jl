@@ -197,7 +197,7 @@ function ElectronegativityEqualizationMethod(
         ndrange=n_atoms
     )
 
-    χ_norm = norm(mχ)
+    χ_norm = sqrt(sum(abs2, mχ))
     squared_tolerance = (QT(tolerance) * χ_norm)^2
 
     state = EEMState(
