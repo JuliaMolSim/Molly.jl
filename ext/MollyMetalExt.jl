@@ -20,7 +20,6 @@ This extension only holds what is specific to Metal:
 module MollyMetalExt
 
 using Molly
-using Molly: SVector
 using Metal
 using Metal: @device_override, simd_shuffle_and_fill_up
 
@@ -43,9 +42,8 @@ Molly.supports_kernel_atomics(::MetalBackend) = true
 
 #=
 The tiled pairwise kernels are compiled with fast math for `Float32`, as on CUDA, which
-made the force kernel about 15% faster on an M3 Pro and changes the forces by about the
-rounding error of `Float32`. `MetalBackend` has no compiler settings, so fast math is a
-compiler option.
+changes the forces by about the rounding error of `Float32`. `MetalBackend` has no compiler
+settings, so fast math is a compiler option.
 =#
 Molly.tile_kernel_config(backend::MetalBackend, ::Type{Float32}, maxregs) =
     (backend, (; fastmath=true))
@@ -72,8 +70,7 @@ end
 The forces on the j atoms of a tile are passed between the lanes of a SIMD-group by
 rotating them, see `Molly.tile_rotate`. `simd_shuffle_and_fill_up` with the values
 themselves as the filling rotates them, and is much faster on Apple GPUs than
-`simd_shuffle` from a lane that differs between the lanes: the shuffles took about 40% of
-the time of the force kernel before.
+`simd_shuffle` from a lane that differs between the lanes.
 =#
 @device_override @inline function Molly.tile_rotate(val::SVector{D, Float32}, m, lane,
                                                     ::Val{32}) where D
@@ -87,8 +84,7 @@ end
 Every iteration of the loop over the pairs of a full tile is evaluated rather than only
 those in which a lane of the SIMD-group has a pair within the cutoff, see
 `Molly.tile_evaluates_pairs`. The iterations are those that have a pair within the cutoff
-of the tile list, so few of them have no pair to evaluate, and the vote and branch made the
-force kernel about 15% slower on Apple GPUs.
+of the tile list, so few of them have no pair to evaluate.
 =#
 @device_override @inline Molly.tile_evaluates_pairs(condition::Bool, ::Val{32}) = true
 
