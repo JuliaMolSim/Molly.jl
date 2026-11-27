@@ -671,7 +671,7 @@ end
         sys_mod = inject_gradients(sys, merge(params, changed))
         sys_rebuilt = build(inject_gradients(ref, merge(params_ref, changed)))
         @test ustrip(pe(sys_mod)) ≈ ustrip(pe(sys_rebuilt)) rtol=1e-12
-        @test ustrip.(fs(sys_mod)) ≈ ustrip.(fs(sys_rebuilt)) rtol=1e-12
+        @test ustrip_vec.(fs(sys_mod)) ≈ ustrip_vec.(fs(sys_rebuilt)) rtol=1e-12
         @test pe(sys_mod) != pe(sys)
     end
 
